@@ -545,11 +545,20 @@ public final class SSHTransport: TerminalTransport {
     /// on a host-side program.
     public func locate(_ command: String) async -> String? {
         let probe = "command -v \(command.shellQuoted)"
-        // A login shell first: `command -v` only sees the daemon's PATH, which
-        // on a login-configured host is a fraction of the user's — Homebrew,
-        // /usr/local/bin and whatever an rc file adds are all missing. `-l` and
-        // the `-` in `$0` are what make the shell read those files.
-        for candidate in ["sh -lc \(probe.shellQuoted)", probe] {
+        // Search the usual install directories explicitly before falling back
+        // to a login shell. A login shell sources the user's rc files, which is
+        // both slow and fragile — a single `ssh-add` or `nvm` line can stall it
+        // past the timeout or print a banner over the answer — and it is only
+        // being asked to do what this PATH already does. Prepending rather than
+        // replacing matters: it keeps the user's own PATH as the tail, so a
+        // tool they installed somewhere unusual is still found.
+        let path = (
+            ["$HOME/.local/bin", "$HOME/bin", "/home/linuxbrew/.linuxbrew/bin",
+             "/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin", "/bin"]
+            + ["$PATH"]
+        ).joined(separator: ":")
+        let fast = "PATH=\(path.shellQuoted) \(probe)"
+        for candidate in [fast, "sh -lc \(probe.shellQuoted)", probe] {
             guard let output = await run(candidate, timeout: 15) else { continue }
             for line in output.text.split(separator: "\n") {
                 let text = line.trimmingCharacters(in: .whitespaces)
