@@ -193,10 +193,10 @@ struct TerminalScreen: View {
         if let client = connection.client {
             SessionPickerView(client: client) { action in
                 switch action {
-                case .attach(let name):
-                    coordinator.terminal?.attachSession(name)
-                case .window(_, let index):
-                    coordinator.terminal?.selectWindow(index: index)
+                case .attach(let mux, let name):
+                    coordinator.terminal?.attachSession(mux: mux, name: name)
+                case .window(let mux, let session, let index):
+                    coordinator.terminal?.selectWindow(mux: mux, session: session, index: index)
                 }
             }
         }

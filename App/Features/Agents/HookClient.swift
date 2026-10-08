@@ -241,12 +241,14 @@ struct SessionBoard: Codable {
     }
 
     struct Session: Codable, Identifiable {
+        /// Which multiplexer owns the session: "tmux" or "zellij".
+        var mux: String
         var name: String
         var windows: Int
         var attached: Bool
         var createdAt: String?
         var windowList: [Window]
-        var id: String { name }
+        var id: String { "\(mux):\(name)" }
     }
 
     var available: Bool

@@ -175,23 +175,35 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         write(Data(text.utf8))
     }
 
-    /// Switches to a tmux session whether or not we are already inside a tmux
-    /// client: `switch-client` wins when nested, `attach` runs otherwise.
-    func attachSession(_ name: String) {
+    /// Switches to a session on whichever multiplexer owns it. tmux prefers
+    /// `switch-client` when we are already inside a client and `attach`
+    /// otherwise; zellij re-attaches by name.
+    func attachSession(mux: String, name: String) {
         let quoted = "'" + name.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        write(Data("tmux switch-client -t \(quoted) 2>/dev/null || tmux attach -t \(quoted)\n".utf8))
+        switch mux {
+        case "zellij":
+            write(Data("zellij attach \(quoted)\n".utf8))
+        default:
+            write(Data("tmux switch-client -t \(quoted) 2>/dev/null || tmux attach -t \(quoted)\n".utf8))
+        }
     }
 
-    /// Jumps to a window in the attached tmux client by sending the prefix key,
-    /// so the command is interpreted by tmux rather than typed into a pane that
-    /// may be busy running an agent. Window indexes past 9 go through tmux's
-    /// command prompt.
-    func selectWindow(index: Int) {
-        write(Data([0x02])) // Ctrl-b
-        if (0...9).contains(index) {
-            write(Data(String(index).utf8))
-        } else {
-            write(Data(":select-window -t \(index)\n".utf8))
+    /// Jumps to a window/tab in the attached client. tmux jumps by sending the
+    /// prefix key — so the command is interpreted by tmux rather than typed
+    /// into a pane that may be busy running an agent — falling back to the
+    /// command prompt past index 9. zellij has no prefix port; it gets a
+    /// `go-to-tab` action instead.
+    func selectWindow(mux: String, session: String, index: Int) {
+        switch mux {
+        case "zellij":
+            write(Data("zellij -s \(session) action go-to-tab \(index + 1)\n".utf8))
+        default:
+            write(Data([0x02])) // Ctrl-b
+            if (0...9).contains(index) {
+                write(Data(String(index).utf8))
+            } else {
+                write(Data(":select-window -t \(index)\n".utf8))
+            }
         }
     }
 

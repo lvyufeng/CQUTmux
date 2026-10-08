@@ -9,17 +9,19 @@ import SwiftUI
 /// view is given a `send` closure that types into the current session.
 struct SessionPickerView: View {
     let client: HookClient
-    /// Sends a tmux invocation (an attach or a window jump) to the terminal.
-    let send: (TmuxAction) -> Void
+    /// Sends an attach or a window jump to the terminal.
+    let send: (MuxAction) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var board: SessionBoard?
     @State private var error: String?
     @State private var loading = true
 
-    enum TmuxAction {
-        case attach(String)
-        case window(String, Int)
+    /// A multiplexer command, tagged with its mux so the terminal knows which
+    /// client to drive.
+    enum MuxAction {
+        case attach(mux: String, name: String)
+        case window(mux: String, session: String, index: Int)
     }
 
     var body: some View {
@@ -50,14 +52,14 @@ struct SessionPickerView: View {
                         ForEach(sessions) { session in
                             Section {
                                 Button {
-                                    send(.attach(session.name))
+                                    send(.attach(mux: session.mux, name: session.name))
                                     dismiss()
                                 } label: {
                                     Label("Attach", systemImage: "rectangle.connected.to.line.below")
                                 }
                                 ForEach(session.windowList) { window in
                                     Button {
-                                        send(.window(session.name, window.index))
+                                        send(.window(mux: session.mux, session: session.name, index: window.index))
                                         dismiss()
                                     } label: {
                                         HStack {
@@ -81,6 +83,9 @@ struct SessionPickerView: View {
                             } header: {
                                 HStack {
                                     Text(session.name)
+                                    Text(session.mux)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
                                     Spacer()
                                     if session.attached {
                                         Text("attached")

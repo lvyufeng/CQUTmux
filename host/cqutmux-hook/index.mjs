@@ -243,6 +243,7 @@ async function tmuxSessions() {
     }
 
     sessions.push({
+      mux: 'tmux',
       name,
       windows: Number(windows) || 0,
       attached: Number(attached) > 0,
@@ -262,6 +263,68 @@ async function tmuxSessions() {
     })
   }
   return { available: true, sessions }
+}
+
+// Enumerates zellij sessions. zellij's `list-sessions` marks the current one
+// with "(current)" and may append "[Created …]"; tabs are only queryable from
+// outside on newer builds, so a failed tab query just leaves the window list
+// empty rather than dropping the session.
+async function zellijSessions() {
+  let stdout
+  try {
+    ;({ stdout } = await run('zellij', ['list-sessions', '--no-formatting']))
+  } catch (error) {
+    const message = String(error.stderr || error.message || '')
+    if (/no active sessions|no sessions/i.test(message)) return { available: true, sessions: [] }
+    return { available: false, error: message.trim() || 'zellij not available', sessions: [] }
+  }
+
+  const sessions = []
+  for (const raw of stdout.split('\n').filter(Boolean)) {
+    const line = raw.trim()
+    if (!line) continue
+    const name = line.split(/\s+/)[0]
+    if (!name) continue
+
+    let windowList = []
+    try {
+      const { stdout: tabs } = await run('zellij', ['-s', name, 'action', 'list-tabs', '--json'])
+      windowList = JSON.parse(tabs).map(tab => ({
+        index: Number(tab.tab_id) || 0,
+        name: tab.name || `tab ${tab.tab_id}`,
+        active: Boolean(tab.active),
+        panes: Array.isArray(tab.panes) ? tab.panes.length : 1,
+      }))
+    } catch {
+      // Older zellij builds can't list tabs out of session; leave it empty.
+    }
+
+    sessions.push({
+      mux: 'zellij',
+      name,
+      windows: windowList.length,
+      attached: /current/i.test(line),
+      createdAt: null,
+      windowList,
+    })
+  }
+  return { available: true, sessions }
+}
+
+// The unified board the app reads: sessions from every multiplexer we can
+// find, each tagged with its `mux`. `available` is false only when none of
+// them are installed.
+async function multiplexers() {
+  const results = await Promise.all([tmuxSessions(), zellijSessions()])
+  const sessions = results.flatMap(r => r.sessions)
+  if (sessions.length) return { available: true, sessions }
+  // No sessions anywhere: report unavailable only if no mux is installed.
+  const installed = results.some(r => r.available)
+  return {
+    available: installed,
+    error: installed ? undefined : results.map(r => r.error).filter(Boolean).join('; '),
+    sessions: [],
+  }
 }
 
 const server = createServer(async (req, res) => {
@@ -313,7 +376,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/sessions') {
-    return json(res, 200, await tmuxSessions())
+    return json(res, 200, await multiplexers())
   }
 
   if (req.method === 'GET' && url.pathname === '/events') {
