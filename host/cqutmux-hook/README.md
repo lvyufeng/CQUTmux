@@ -32,6 +32,7 @@ require `Authorization: Bearer <secret>` on every request.
 | `GET` | `/files?path=<dir>` | list a directory under `--root` |
 | `GET` | `/file?path=<file>` | read a text file under `--root` |
 | `GET` | `/diff?path=<dir>` | `git diff` + `git status` for a repo |
+| `GET` | `/log?path=<dir>&limit=<n>` | recent commits (hash, author, subject, refs) |
 | `GET` | `/usage` | 5h / 7d burn windows per agent |
 | `GET` | `/sessions` | tmux and zellij sessions, windows/tabs and pane counts |
 | `POST` | `/upload` | write a raw body (a pasted image) under `.cqutmux/paste/` |

@@ -201,6 +201,12 @@ final class HookClient {
         return try JSONDecoder().decode(DiffResult.self, from: payload.body)
     }
 
+    func gitLog(path: String, limit: Int = 40) async throws -> LogResult {
+        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        let payload = try await request("GET", "/log?path=\(encoded)&limit=\(limit)")
+        return try JSONDecoder().decode(LogResult.self, from: payload.body)
+    }
+
     func usage() async throws -> UsageBoard {
         let payload = try await request("GET", "/usage")
         return try JSONDecoder().decode(UsageBoard.self, from: payload.body)
@@ -302,4 +308,20 @@ struct DiffResult: Codable {
     var isRepo: Bool
     var files: [File]
     var diff: String
+}
+
+struct LogResult: Codable {
+    struct Commit: Codable, Identifiable {
+        var hash: String
+        var short: String
+        var author: String
+        var date: String
+        var subject: String
+        var refs: String
+        var id: String { hash }
+
+        var dateValue: Date? { ISO8601DateFormatter().date(from: date) }
+    }
+    var isRepo: Bool
+    var commits: [Commit]
 }

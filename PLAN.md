@@ -151,9 +151,15 @@ CQUTmux/
 | P0 骨架 | ✅ 已合并 | commit `0311e7e` |
 | P1 SSH 终端 | ✅ 已合并并**实测** | 见 commit `d4f663c` / `ab9245a`。公钥认证连真实 sshd、SwiftTerm 渲染活 shell 已验证 |
 | P2 Mosh / ET | ⛔ 受阻 | 需要交叉编译 C/C++（mosh、ET）+ protobuf/OpenSSL，本机无工具链 |
-| P3 Agent 层 | 🚧 进行中 | 宿主端 `cqutmux-hook`（Node.js）→ iOS Inbox |
-| P4 通知/语音 | 待启动 | |
-| P5 收尾 | 待启动 | |
+| P3 Agent 层 | ✅ 已合并并**实测** | 宿主 `cqutmux-hook` ↔ 隧道内 Inbox / Code / Diff / Usages，均经模拟器实测 |
+| P4 通知/语音 | ✅ 已合并并**实测** | 端侧听写、Live Activity / 灵动岛、本地通知、webhook 告警、图片标注上传、tmux 会话选择器 |
+| P5 收尾 | 🚧 进行中 | 已完成：iPad 侧栏、zellij 支持、OSC 52 远端剪贴板。剩余：herdr、Tailscale、模拟器/浏览器预览 |
+
+**环境事实**：本机工具链仅 Swift 6.4 / Xcode 27 / Node 22。无 brew、无 Go/Rust、无 C 编译工具链。
+这直接决定了 daemon 选 Node、且 P2 排在 P3 之后。
+
+**未验证项（诚实记录）**：本地通知的**投递**无法在模拟器验证（`simctl` 不能授予通知权限，
+仅能确认授权弹窗出现、代码路径执行）；P4/P5 的 UI 均在模拟器以 shim 数据实测，尚未上真机。
 
 **环境事实**：本机工具链仅 Swift 6.4 / Xcode 27 / Node 22。无 brew、无 Go/Rust、无 C 编译工具链。
 这直接决定了 daemon 选 Node、且 P2 排在 P3 之后。

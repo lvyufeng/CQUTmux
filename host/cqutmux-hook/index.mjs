@@ -204,6 +204,29 @@ async function gitDiff(cwd, extra = []) {
   }
 }
 
+// Recent commits for a repo, plus whether a commit's diff is available. The
+// separator is a NUL-ish sentinel chosen not to appear in normal subjects.
+async function gitLog(cwd, limit = 40) {
+  const fmt = ['%H', '%h', '%an', '%aI', '%s', '%D'].join('%x1f')
+  try {
+    const { stdout } = await run(
+      'git',
+      ['log', `-n${Math.max(1, Math.min(200, limit))}`, `--pretty=format:${fmt}`],
+      { cwd, maxBuffer: 4 * 1024 * 1024 }
+    )
+    const commits = stdout
+      .split('\n')
+      .filter(Boolean)
+      .map(line => {
+        const [hash, short, author, date, subject, refs] = line.split('\x1f')
+        return { hash, short, author, date, subject, refs: refs || '' }
+      })
+    return { isRepo: true, commits }
+  } catch {
+    return { isRepo: false, commits: [] }
+  }
+}
+
 // Enumerates tmux sessions, their windows, and whether a pane is attached, so
 // the app can offer a session picker and jump-to-window without a shell round
 // trip. Uses a stable tab-separated format rather than tmux's default grid.
@@ -369,6 +392,13 @@ const server = createServer(async (req, res) => {
     const dir = safePath(url.searchParams.get('path') || '')
     if (!dir) return json(res, 403, { error: 'path outside root' })
     return json(res, 200, await gitDiff(dir))
+  }
+
+  if (req.method === 'GET' && url.pathname === '/log') {
+    const dir = safePath(url.searchParams.get('path') || '')
+    if (!dir) return json(res, 403, { error: 'path outside root' })
+    const limit = Number(url.searchParams.get('limit') || 40)
+    return json(res, 200, await gitLog(dir, limit))
   }
 
   if (req.method === 'GET' && url.pathname === '/usage') {

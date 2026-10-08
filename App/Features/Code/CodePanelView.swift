@@ -7,14 +7,23 @@ struct CodePanelView: View {
     @Environment(AgentConnection.self) private var connection
     @Environment(HostStore.self) private var store
 
-    @State private var mode: Mode = .changes
+    @State private var mode: Mode = Self.initialMode
     @State private var listing: DirectoryListing?
     @State private var diff: DiffResult?
+    @State private var log: LogResult?
     @State private var error: String?
     @State private var openFile: FileContents?
     @State private var path = "."
 
-    private enum Mode: String, CaseIterable { case files = "Files", changes = "Changes" }
+    private enum Mode: String, CaseIterable { case files = "Files", changes = "Changes", history = "History" }
+
+    private static var initialMode: Mode {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["CQUT_DEV_MODE"] == "history" { return .history }
+        if ProcessInfo.processInfo.environment["CQUT_DEV_MODE"] == "files" { return .files }
+        #endif
+        return .changes
+    }
 
     var body: some View {
         Group {
@@ -55,6 +64,7 @@ struct CodePanelView: View {
                 switch mode {
                 case .files: filesList(client)
                 case .changes: changesList
+                case .history: historyList
                 }
             }
         }
@@ -134,6 +144,54 @@ struct CodePanelView: View {
         }
     }
 
+    @ViewBuilder
+    private var historyList: some View {
+        if let log {
+            if !log.isRepo {
+                ContentUnavailableView {
+                    Label("Not a git repository", systemImage: "arrow.triangle.branch")
+                } description: {
+                    Text("This directory isn't under version control.")
+                }
+            } else if log.commits.isEmpty {
+                ContentUnavailableView {
+                    Label("No commits", systemImage: "clock.arrow.circlepath")
+                }
+            } else {
+                List(log.commits) { commit in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(commit.subject)
+                            .font(.subheadline)
+                            .lineLimit(2)
+                        HStack(spacing: 6) {
+                            Text(commit.short)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(Theme.accent)
+                            Text(commit.author).font(.caption2).foregroundStyle(.secondary)
+                            Text(relative(commit.dateValue)).font(.caption2).foregroundStyle(.secondary)
+                        }
+                        if !commit.refs.isEmpty {
+                            Text(commit.refs.replacingOccurrences(of: "HEAD -> ", with: ""))
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        } else {
+            ProgressView().padding()
+        }
+    }
+
+    private func relative(_ date: Date?) -> String {
+        guard let date else { return "" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
     private func load(_ client: HookClient) async {
         // The tunnel takes a moment to come up; loading immediately would fire
         // request() before the forwarded socket exists.
@@ -153,6 +211,7 @@ struct CodePanelView: View {
     private func loadNow(_ client: HookClient) async {
         await loadFiles(client)
         await loadDiff(client)
+        await loadLog(client)
     }
 
     private func loadFiles(_ client: HookClient) async {
@@ -166,6 +225,10 @@ struct CodePanelView: View {
 
     private func loadDiff(_ client: HookClient) async {
         diff = try? await client.gitDiff(path: path)
+    }
+
+    private func loadLog(_ client: HookClient) async {
+        log = try? await client.gitLog(path: path)
     }
 }
 
