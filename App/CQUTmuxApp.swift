@@ -5,6 +5,7 @@ struct CQUTmuxApp: App {
     @State private var hostStore = HostStore()
     @State private var connection = AgentConnection()
     @State private var themes = ThemeStore()
+    @State private var fonts = TerminalFontStore()
 
     var body: some Scene {
         WindowGroup {
@@ -12,6 +13,7 @@ struct CQUTmuxApp: App {
                 .environment(hostStore)
                 .environment(connection)
                 .environment(themes)
+                .environment(fonts)
                 .task {
                     #if DEBUG
                     DebugSeed.apply(to: hostStore)

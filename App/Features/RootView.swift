@@ -103,7 +103,7 @@ struct RootView: View {
         case "inbox": return .inbox
         case "code": return .code
         case "usages": return .usages
-        case "theme", "settings": return .settings
+        case "theme", "font", "settings": return .settings
         default: break
         }
         #endif

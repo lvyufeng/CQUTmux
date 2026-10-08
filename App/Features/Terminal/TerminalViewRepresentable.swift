@@ -19,10 +19,17 @@ struct TerminalScreen: View {
     @State private var annotating: PendingImage?
     @State private var pastedNotice: String?
     @Environment(ThemeStore.self) private var themes
+    @Environment(TerminalFontStore.self) private var fonts
     @Environment(AgentConnection.self) private var connection
 
     var body: some View {
-        TerminalViewRepresentable(host: host, credential: credential, coordinator: coordinator, theme: themes.current)
+        TerminalViewRepresentable(
+                host: host,
+                credential: credential,
+                coordinator: coordinator,
+                theme: themes.current,
+                fonts: fonts
+            )
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationTitle(host.displayName)
             .navigationBarTitleDisplayMode(.inline)
@@ -269,6 +276,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
     let credential: SSHCredential
     let coordinator: TerminalCoordinator
     let theme: TerminalTheme
+    let fonts: TerminalFontStore
 
     func makeUIView(context: Context) -> CQUTTerminalView {
         let configuration = TransportConfiguration(
@@ -290,9 +298,15 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
             frame: .zero,
             configuration: configuration,
             startupCommand: host.sessionCommand.isEmpty ? nil : host.sessionCommand,
-            theme: theme
+            theme: theme,
+            font: fonts.uiFont()
         )
         view.onStatus = { status in coordinator.status = status }
+        // A pinch resizes the terminal and becomes the saved preference, so the
+        // next session opens at the size the user settled on.
+        view.onFontSizeChange = { size in
+            fonts.size = Double(size)
+        }
         coordinator.terminal = view
         DispatchQueue.main.async { view.connect() }
         return view

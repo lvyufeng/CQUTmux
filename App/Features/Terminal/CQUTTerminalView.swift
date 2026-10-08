@@ -20,6 +20,9 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
     }
 
     var onStatus: ((Status) -> Void)?
+    /// Called when a pinch or a hardware change settles on a new size, so the
+    /// user's font preference follows the gesture instead of being lost.
+    var onFontSizeChange: ((CGFloat) -> Void)?
 
     private let transport: TerminalTransport
     private let configuration: TransportConfiguration
@@ -48,6 +51,7 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         configuration: TransportConfiguration,
         startupCommand: String?,
         theme: TerminalTheme = TerminalTheme.named(nil),
+        font: UIFont = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular),
         transport: TerminalTransport = SSHTransport()
     ) {
         self.configuration = configuration
@@ -57,7 +61,7 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         super.init(frame: frame)
 
         terminalDelegate = self
-        font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        self.font = font
         baseFontSize = font.pointSize
         theme.apply(to: self)
         installGestures()
@@ -108,12 +112,19 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
     }
 
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-        guard gesture.state == .changed else {
-            if gesture.state == .ended { baseFontSize = font.pointSize }
-            return
+        switch gesture.state {
+        case .changed:
+            let size = min(
+                max(CGFloat(TerminalFontStore.sizeRange.lowerBound), baseFontSize * gesture.scale),
+                CGFloat(TerminalFontStore.sizeRange.upperBound)
+            )
+            font = font.withSize(size)
+        case .ended, .cancelled, .failed:
+            baseFontSize = font.pointSize
+            onFontSizeChange?(font.pointSize)
+        default:
+            break
         }
-        let size = max(7, min(28, baseFontSize * gesture.scale))
-        font = UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {

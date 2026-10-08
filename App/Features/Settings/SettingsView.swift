@@ -6,6 +6,9 @@ struct SettingsView: View {
         if ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] == "theme" {
             return AnyView(ThemeSettingsView())
         }
+        if ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] == "font" {
+            return AnyView(FontSettingsView())
+        }
         #endif
         return AnyView(list)
     }
@@ -21,6 +24,11 @@ struct SettingsView: View {
                     ThemeSettingsView()
                 } label: {
                     Label("Theme", systemImage: "paintpalette")
+                }
+                NavigationLink {
+                    FontSettingsView()
+                } label: {
+                    Label("Font", systemImage: "textformat.size")
                 }
             }
             Section("About") {
