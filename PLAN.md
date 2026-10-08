@@ -71,7 +71,7 @@
 | SSH | **libssh2**（vendored 静态库 + module map） | 完整 PTY/交互式 shell/direct-tcpip，Blink/Termius 同路线 |
 | Mosh | `mosh-client` 编为 iOS 静态库（参考 `rjyo/mosh-android`） | 无 Swift 实现，只能移植 |
 | ET | Eternal Terminal 客户端编为静态库 | 同上；P2 再评估 |
-| 宿主机 daemon | **Go**（`host/cqutmux-hook`） | 单静态二进制，跨平台交叉编译容易，与原版分发形态一致 |
+| 宿主机 daemon | **Node.js**（`host/cqutmux-hook`） | 本机无 Go/Rust/C 工具链，Node 22 已就绪，单文件免编译 |
 | 密钥存储 | iOS Keychain + `LocalAuthentication` | 对齐"Face ID for Keys" |
 | 语音 | v1 `SFSpeechRecognizer`(on-device) → v2 whisper.cpp | 先快后精 |
 | 项目生成 | **XcodeGen**（`project.yml` 为源） | 免手改 pbxproj，适合 agent 迭代 |
@@ -143,6 +143,20 @@ CQUTmux/
 
 ### Phase 5 — 收尾对齐
 - herdr 支持、手势映射、iPad 分栏、Tailscale、OSC 52 剪贴板、模拟器/浏览器预览完善。
+
+## 4b. 执行状态（2026-10-09）
+
+| 阶段 | 状态 | 说明 |
+|---|---|---|
+| P0 骨架 | ✅ 已合并 | commit `0311e7e` |
+| P1 SSH 终端 | ✅ 已合并并**实测** | 见 commit `d4f663c` / `ab9245a`。公钥认证连真实 sshd、SwiftTerm 渲染活 shell 已验证 |
+| P2 Mosh / ET | ⛔ 受阻 | 需要交叉编译 C/C++（mosh、ET）+ protobuf/OpenSSL，本机无工具链 |
+| P3 Agent 层 | 🚧 进行中 | 宿主端 `cqutmux-hook`（Node.js）→ iOS Inbox |
+| P4 通知/语音 | 待启动 | |
+| P5 收尾 | 待启动 | |
+
+**环境事实**：本机工具链仅 Swift 6.4 / Xcode 27 / Node 22。无 brew、无 Go/Rust、无 C 编译工具链。
+这直接决定了 daemon 选 Node、且 P2 排在 P3 之后。
 
 ## 5. 主要风险
 

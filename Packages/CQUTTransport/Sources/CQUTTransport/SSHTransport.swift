@@ -181,6 +181,7 @@ public final class SSHTransport: TerminalTransport {
     private var group: EventLoopGroup?
     private var connectionChannel: Channel?
     private var sessionChannel: Channel?
+    private var sshHandler: NIOSSHHandler?
     private var reportedTerminal = false
     private let stateQueue = DispatchQueue(label: "app.cqutmux.transport.ssh")
 
@@ -263,6 +264,7 @@ public final class SSHTransport: TerminalTransport {
             case .failure(let error):
                 self.emit(.failed("\(error)"))
             case .success(let sshHandler):
+                self.stateQueue.sync { self.sshHandler = sshHandler }
                 let promise = channel.eventLoop.makePromise(of: Channel.self)
                 sshHandler.createChannel(promise, channelType: .session) { [weak self] childChannel, channelType in
                     guard let self, channelType == .session else {
@@ -322,6 +324,46 @@ public final class SSHTransport: TerminalTransport {
                 promise: nil
             )
         }
+    }
+
+    /// Opens a `direct-tcpip` channel through the SSH connection to `host:port`
+/// as seen from the server. Used to reach the host's loopback gateway
+/// (`127.0.0.1:24543`) without exposing it to the network.
+    public func forward(
+        remoteHost: String,
+        remotePort: Int,
+        onData: @escaping @Sendable (Data) -> Void,
+        onClose: @escaping @Sendable () -> Void
+    ) -> ForwardedSocket? {
+        guard let handler = stateQueue.sync(execute: { sshHandler }),
+              let channel = stateQueue.sync(execute: { connectionChannel })
+        else { return nil }
+
+        let socket = ForwardedSocket(channel: channel, onData: onData, onClose: onClose)
+        channel.eventLoop.execute {
+            let type = SSHChannelType.directTCPIP(
+                .init(
+                    targetHost: remoteHost,
+                    targetPort: remotePort,
+                    originatorAddress: try! SocketAddress(ipAddress: "127.0.0.1", port: 0)
+                )
+            )
+            let promise = channel.eventLoop.makePromise(of: Channel.self)
+            handler.createChannel(promise, channelType: type) { child, _ in
+                child.eventLoop.makeCompletedFuture {
+                    try child.pipeline.syncOperations.addHandler(
+                        ForwardedChannelHandler(onData: onData, onClose: onClose)
+                    )
+                }
+            }
+            promise.futureResult.whenComplete { result in
+                switch result {
+                case .success(let child): socket.attach(child)
+                case .failure: socket.fail()
+                }
+            }
+        }
+        return socket
     }
 
     public func disconnect() {
