@@ -113,12 +113,24 @@ final class HookClient {
         continuation?.resume(returning: HTTPPayload(status: status, body: body))
     }
 
-    private func request(_ method: String, _ path: String, body: Data? = nil, timeout: TimeInterval = 30) async throws -> HTTPPayload {
+    private func request(
+        _ method: String,
+        _ path: String,
+        body: Data? = nil,
+        headers: [String: String] = [:],
+        timeout: TimeInterval = 30
+    ) async throws -> HTTPPayload {
         await gate.acquire()
         defer { gate.release() }
         guard socket != nil else { throw URLError(.notConnectedToInternet) }
         var head = "\(method) \(path) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n"
-        if let body { head += "content-type: application/json\r\ncontent-length: \(body.count)\r\n" }
+        for (name, value) in headers { head += "\(name): \(value)\r\n" }
+        // Binary uploads carry their own type; everything else is JSON.
+        if let body {
+            head += headers.keys.contains(where: { $0.lowercased() == "content-type" })
+                ? "content-length: \(body.count)\r\n"
+                : "content-type: application/json\r\ncontent-length: \(body.count)\r\n"
+        }
         head += "\r\n"
         var raw = Data(head.utf8)
         if let body { raw.append(body) }
@@ -200,6 +212,23 @@ final class HookClient {
         let payload = try await request("GET", "/sessions")
         return try JSONDecoder().decode(SessionBoard.self, from: payload.body)
     }
+
+    // MARK: - Uploads
+
+    /// Uploads a pasted image to the host and returns the path it was written
+    /// to, which the caller types into the agent's prompt.
+    func uploadImage(_ data: Data, filename: String, contentType: String = "image/png") async throws -> UploadResult {
+        let payload = try await request(
+            "POST", "/upload", body: data,
+            headers: ["x-filename": filename, "content-type": contentType]
+        )
+        return try JSONDecoder().decode(UploadResult.self, from: payload.body)
+    }
+}
+
+struct UploadResult: Codable {
+    var path: String
+    var bytes: Int
 }
 
 struct SessionBoard: Codable {

@@ -24,6 +24,12 @@ require `Authorization: Bearer <secret>` on every request.
 | `GET` | `/events?since=<id>&wait=1` | events after `<id>`; `wait=1` long-polls up to 25s |
 | `POST` | `/events` | append an event |
 | `POST` | `/approve/<id>` | resolve a pending approval |
+| `GET` | `/files?path=<dir>` | list a directory under `--root` |
+| `GET` | `/file?path=<file>` | read a text file under `--root` |
+| `GET` | `/diff?path=<dir>` | `git diff` + `git status` for a repo |
+| `GET` | `/usage` | 5h / 7d burn windows per agent |
+| `GET` | `/sessions` | tmux sessions, windows and pane counts |
+| `POST` | `/upload` | write a raw body (a pasted image) under `.cqutmux/paste/` |
 
 Event body:
 
@@ -33,6 +39,11 @@ Event body:
 ```
 
 `kind` is `approval` (needs a decision) or `notice` (informational).
+
+`POST /upload` takes the file as the raw request body (not JSON or multipart)
+and the name in an `X-Filename` header; the reply is
+`{ "path": "/home/you/.cqutmux/paste/…" }`, which the app types into the
+agent's prompt:
 
 ## Wiring an agent
 

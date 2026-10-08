@@ -1,5 +1,12 @@
 import SwiftUI
+import UIKit
 import CQUTTransport
+
+/// `sheet(item:)` needs an `Identifiable`; `UIImage` isn't one.
+struct PendingImage: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
 
 /// Bridges `CQUTTerminalView` into SwiftUI and hosts the keyboard accessory bar.
 struct TerminalScreen: View {
@@ -9,6 +16,8 @@ struct TerminalScreen: View {
     @State private var coordinator = TerminalCoordinator()
     @State private var dictation = VoiceDictation()
     @State private var showSessions = false
+    @State private var annotating: PendingImage?
+    @State private var pastedNotice: String?
     @Environment(ThemeStore.self) private var themes
     @Environment(AgentConnection.self) private var connection
 
@@ -28,6 +37,8 @@ struct TerminalScreen: View {
                 }
             }
             .sheet(isPresented: $showSessions) { sessionPicker }
+            .sheet(item: $annotating) { pending in annotator(pending.image) }
+            .overlay(alignment: .top) { pasteNotice }
             .safeAreaInset(edge: .bottom, spacing: 0) { accessoryBar }
             .onAppear {
                 // Partial transcripts stream straight to the shell; a final
@@ -44,6 +55,14 @@ struct TerminalScreen: View {
                 if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "sessions" {
                     showSessions = true
                 }
+                if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "annotate" {
+                    // Wait a beat so the gateway tunnel is up; otherwise the
+                    // sheet renders its connecting placeholder.
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        annotating = PendingImage(image: Self.debugFixture())
+                    }
+                }
                 #endif
             }
     }
@@ -59,6 +78,7 @@ struct TerminalScreen: View {
                 icon("arrow.left", CtrlKey.leftArrow)
                 icon("arrow.right", CtrlKey.rightArrow)
                 icon("doc.on.doc", CtrlKey.clipboard)
+                pasteImageButton
                 sessionsButton
                 dictationButton
             }
@@ -76,6 +96,82 @@ struct TerminalScreen: View {
                     .offset(y: -22)
                     .transition(.opacity)
             }
+        }
+    }
+
+    /// Image paste needs the gateway to carry the bytes to the host, so the
+    /// button only appears when a host is connected.
+    @ViewBuilder
+    private var pasteImageButton: some View {
+        if connection.client != nil {
+            Button(action: pasteImage) {
+                Image(systemName: "photo.badge.plus").frame(width: 40, height: 32)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.roundedRectangle(radius: 6))
+        }
+    }
+
+    private func pasteImage() {
+        guard let image = UIPasteboard.general.image else {
+            pastedNotice = "No image on the clipboard"
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                pastedNotice = nil
+            }
+            return
+        }
+        annotating = PendingImage(image: image)
+    }
+
+    @ViewBuilder
+    private func annotator(_ image: UIImage) -> some View {
+        // The sheet can open before the tunnel finishes coming up; show a
+        // placeholder rather than an empty sheet in that window.
+        if let client = connection.client {
+            ImageAnnotatorView(image: image, client: client) { path in
+                // Drop the uploaded path into the prompt; the user finishes
+                // the message and submits it themselves.
+                coordinator.terminal?.typeText(path + " ")
+                pastedNotice = "Sent to \(path)"
+                Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    pastedNotice = nil
+                }
+            }
+        } else {
+            NavigationStack { ProgressView("Connecting…") }
+        }
+    }
+
+    @ViewBuilder
+    private var pasteNotice: some View {
+        if let pastedNotice {
+            Text(pastedNotice)
+                .font(.caption)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.thinMaterial, in: Capsule())
+                .padding(.top, 6)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    /// A stand-in screenshot so a UI run can exercise the annotator without
+    /// staging a real clipboard image. Debug builds only.
+    private static func debugFixture() -> UIImage {
+        let size = CGSize(width: 640, height: 400)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { context in
+            UIColor(white: 0.12, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            let text = "246  func connect() {\n247      status = .connecting\n248      transport.connect(...)\n249  }"
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.monospacedSystemFont(ofSize: 22, weight: .regular),
+                .foregroundColor: UIColor(red: 0.6, green: 1, blue: 0.7, alpha: 1),
+            ]
+            (text as NSString).draw(at: CGPoint(x: 24, y: 40), withAttributes: attributes)
         }
     }
 

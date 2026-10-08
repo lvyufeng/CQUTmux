@@ -17,7 +17,7 @@ import { createServer } from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { execFile } from 'node:child_process'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, stat, mkdir, writeFile } from 'node:fs/promises'
 import { resolve, relative, isAbsolute, join } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -63,14 +63,22 @@ function authorized(req) {
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-function readBody(req) {
+// Bodies are collected as raw bytes so binary uploads (pasted images) survive
+// intact; callers decode to text when they expect JSON.
+function readBody(req, limitBytes = 12 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
-    let body = ''
+    const chunks = []
+    let size = 0
     req.on('data', chunk => {
-      body += chunk
-      if (body.length > 1 << 20) reject(new Error('body too large'))
+      size += chunk.length
+      if (size > limitBytes) {
+        reject(new Error('body too large'))
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
     })
-    req.on('end', () => resolve(body))
+    req.on('end', () => resolve(Buffer.concat(chunks)))
     req.on('error', reject)
   })
 }
@@ -305,7 +313,7 @@ const server = createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/events') {
     let parsed
     try {
-      parsed = JSON.parse(await readBody(req))
+      parsed = JSON.parse((await readBody(req)).toString('utf8'))
     } catch {
       return json(res, 400, { error: 'invalid JSON' })
     }
@@ -332,13 +340,44 @@ const server = createServer(async (req, res) => {
     let decision = 'allow'
     try {
       const body = await readBody(req)
-      if (body) decision = JSON.parse(body).decision || decision
+      if (body.length) decision = JSON.parse(body.toString('utf8')).decision || decision
     } catch { /* default to allow */ }
     target.decision = decision
     target.resolvedAt = new Date().toISOString()
     if (target.kind === 'approval') pendingApprovals = Math.max(0, pendingApprovals - 1)
     emit({ source: 'app', kind: 'notice', title: `approval ${decision}`, data: { for: id } })
     return json(res, 200, target)
+  }
+
+  // Pasted images arrive as a raw body (not JSON) so bytes survive untouched.
+  // They land under <root>/.cqutmux/paste/ and the response carries the
+  // absolute path so the app can type it into the agent's prompt.
+  if (req.method === 'POST' && url.pathname === '/upload') {
+    let body
+    try {
+      body = await readBody(req)
+    } catch (error) {
+      return json(res, 413, { error: String(error.message || error) })
+    }
+    if (!body.length) return json(res, 400, { error: 'empty body' })
+
+    const rawName = String(req.headers['x-filename'] || 'paste.png')
+    // Keep only the basename and a conservative character set; an attacker
+    // must not be able to steer the write outside the paste directory.
+    const base = rawName.split(/[\\/]/).pop().replace(/[^A-Za-z0-9._-]/g, '_').slice(-80) || 'paste.png'
+    const dir = join(args.root, '.cqutmux', 'paste')
+    const name = `${Date.now()}-${randomUUID().slice(0, 8)}-${base}`
+
+    try {
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, name), body)
+    } catch (error) {
+      return json(res, 500, { error: String(error.message || error) })
+    }
+
+    const path = join(dir, name)
+    process.stderr.write(`[hook] upload ${body.length} bytes -> ${path}\n`)
+    return json(res, 201, { path, bytes: body.length })
   }
 
   json(res, 404, { error: 'not found' })

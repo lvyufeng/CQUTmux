@@ -167,6 +167,14 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         write(Data((trimmed + "\n").utf8))
     }
 
+    /// Types text into the session without a trailing newline, so the user can
+    /// finish (or edit) the line before submitting. Used after an image paste
+    /// to drop the uploaded path into the agent's prompt.
+    func typeText(_ text: String) {
+        guard !text.isEmpty else { return }
+        write(Data(text.utf8))
+    }
+
     /// Switches to a tmux session whether or not we are already inside a tmux
     /// client: `switch-client` wins when nested, `attach` runs otherwise.
     func attachSession(_ name: String) {
