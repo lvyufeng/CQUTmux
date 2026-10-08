@@ -18,6 +18,8 @@ struct TerminalScreen: View {
     @State private var showSessions = false
     @State private var annotating: PendingImage?
     @State private var pastedNotice: String?
+    @State private var shortcuts = ShortcutStore()
+    @State private var showShortcuts = false
     @Environment(ThemeStore.self) private var themes
     @Environment(TerminalFontStore.self) private var fonts
     @Environment(AgentConnection.self) private var connection
@@ -44,6 +46,9 @@ struct TerminalScreen: View {
                 }
             }
             .sheet(isPresented: $showSessions) { sessionPicker }
+            .sheet(isPresented: $showShortcuts) {
+                NavigationStack { ShortcutEditorView(store: shortcuts) }
+            }
             .sheet(item: $annotating) { pending in annotator(pending.image) }
             .overlay(alignment: .top) { pasteNotice }
             .safeAreaInset(edge: .bottom, spacing: 0) { accessoryBar }
@@ -61,6 +66,16 @@ struct TerminalScreen: View {
                 #if DEBUG
                 if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "sessions" {
                     showSessions = true
+                }
+                // Custom keys have to be composable from the outside to be
+                // testable: pressing a button on the bar is not something a
+                // simulator command can do, so a run declares the binding it
+                // wants and the bar builds it the same way a tap would.
+                if let spec = ProcessInfo.processInfo.environment["CQUT_DEV_SHORTCUT"], !spec.isEmpty {
+                    shortcuts.add(spec)
+                }
+                if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "shortcuts" {
+                    showShortcuts = true
                 }
                 if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "annotate" {
                     // Wait a beat so the gateway tunnel is up; otherwise the
@@ -88,6 +103,7 @@ struct TerminalScreen: View {
                 pasteImageButton
                 sessionsButton
                 dictationButton
+                customShortcutKeys
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -103,6 +119,31 @@ struct TerminalScreen: View {
                     .offset(y: -22)
                     .transition(.opacity)
             }
+        }
+    }
+
+    /// The user's own bindings, after the built-ins so the bar reads
+    /// left-to-right from the keys everyone gets to the ones they chose.
+    ///
+    /// A shortcut that no longer parses still shows — it is the user's key, and
+    /// hiding it would look like the app had lost it — but it is tinted so the
+    /// reason it does nothing is visible.
+    @ViewBuilder
+    private var customShortcutKeys: some View {
+        ForEach(shortcuts.shortcuts) { shortcut in
+            Button {
+                guard let bytes = shortcut.bytes else { return }
+                coordinator.terminal?.sendRaw(Data(bytes))
+            } label: {
+                Text(shortcut.label)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .frame(minWidth: 40, minHeight: 32)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.roundedRectangle(radius: 6))
+            .tint(shortcut.problem == nil ? nil : .orange)
+            .accessibilityHint(shortcut.problem ?? shortcut.text)
         }
     }
 
@@ -328,6 +369,13 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         // — through the same `send` the on-screen keyboard calls.
         if let phrase = ProcessInfo.processInfo.environment["CQUT_DEV_TYPE"] {
             DebugSeed.typeWhenConnected(view: view, phrase: phrase)
+        }
+        // Same idea for a custom shortcut: the bar cannot be tapped from a
+        // script, so the binding is pressed for it and the bytes travel the
+        // path a real tap would.
+        if let spec = ProcessInfo.processInfo.environment["CQUT_DEV_SHORTCUT"],
+           let parsed = try? ShortcutGrammar.parse(spec) {
+            DebugSeed.pressShortcutWhenConnected(view: view, bytes: parsed.bytes)
         }
         #endif
         return view

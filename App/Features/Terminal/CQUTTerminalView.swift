@@ -358,6 +358,14 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         }
     }
 
+    /// Writes bytes the app composed itself rather than bytes the user typed —
+    /// a custom shortcut, whose whole point is that the app already knows the
+    /// exact sequence the terminal should receive.
+    func sendRaw(_ data: Data) {
+        guard !data.isEmpty else { return }
+        write(data)
+    }
+
     private func write(_ data: Data) {
         transport.send(data)
     }

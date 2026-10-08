@@ -73,5 +73,26 @@ enum DebugSeed {
             view.injectForTesting(phrase + "; echo TYPED_$((20+4))_OK\n")
         }
     }
+
+    /// Presses a custom shortcut once the session is live, so its bytes go
+    /// through `sendRaw` exactly as a tap on the accessory bar would.
+    ///
+    /// The binding under test is expected to end in a command the host runs;
+    /// like the typed test above, the check is that the host's own expansion
+    /// comes back, not that the terminal echoed what it was handed.
+    static func pressShortcutWhenConnected(
+        view: CQUTTerminalView, bytes: [UInt8], attempt: Int = 0
+    ) {
+        guard attempt < 60 else { return }
+        guard view.isLiveForTesting else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                pressShortcutWhenConnected(view: view, bytes: bytes, attempt: attempt + 1)
+            }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            view.sendRaw(Data(bytes))
+        }
+    }
 }
 #endif
