@@ -62,6 +62,26 @@
 | 安全 | SSH key 存 Keychain + Face ID 保护 | P1 |
 | 其他 | 远程剪贴板 OSC 52、Tailscale、iPad 分栏 | P5 |
 
+### 1b. 逐项复核（2026-10-09，对照 getmoshi.app 全部 42 个文档页）
+
+复核时把 Moshi 的功能清单逐条对照代码，**已实测确认存在**（此前 PLAN 未记载）：
+OSC 52 远程剪贴板（注入 `\033]52;c;<b64>\007` 后宿主剪贴板确实被改写，经 SwiftTerm 的 `oscClipboard` → 我们已有的 `clipboardCopy`）、
+tmux 会话选择器（`SessionPickerView`）、
+Diff / 文件浏览 / 浏览器预览 / 模拟器预览（`CodePanelView` + `PreviewView` + `SimulatorPreviewView`）、
+Live Activity 与灵动岛（`ActivityManager` + `AgentActivityAttributes`）、
+图片粘贴与标注上传（`ImageAnnotatorView`）、
+主题与字体持久化、iPad 侧栏、CJK 输入。
+
+**本轮新增**：自定义快捷键（`ShortcutGrammar` + 编辑器 + 附件栏按键，26 项语法用例 + 端到端实测）、
+herdr 宿主侧对接、APNs 两端代码、主机探测不再 source rc。
+
+**仍未做**：端侧听写只接了 Apple Speech（无 whisper/parakeet 本地模型）；
+无快捷指令绑定到手势/滑动（Moshi 的 tap/双击/三击/swipe 可绑定）；
+无 deep link（`moshi://tmux?session=` 之类）；
+无最近目录、无原生 Windows、无 macOS 菜单栏 / Moshi Desktop（属另一产品）；
+herdr 的 **App 侧**会话选择器与 Jump To 树未接（仅宿主 API 已通）；
+Tailscale 不需集成（Moshi 文档亦确认：它工作在系统层，用 100.x 地址直连即可）。
+
 ## 2. 技术选型
 
 | 层 | 选型 | 理由 |
@@ -179,7 +199,7 @@ CJK 输入依赖 SwiftTerm 的
 | SSH agent forwarding | swift-nio-ssh 无 agent 通道——**已核到线级**：`SSHMessages.ChannelRequestMessage.RequestType` 只有 env/exec/exit-status/exit-signal/pty-req/shell/subsystem/window-change/xon-xoff/signal，没有 `auth-agent-req@openssh.com`，而 `ChannelRequestMessage` 是 internal，没有公开 API 能发出该请求。且 iOS 上也没有可转发的 agent socket | 打开开关时表单明确提示不可用 |
 | herdr | **此前"无公开协议"的判断是错的**：herdr 是开源项目（`herdrdev/herdr`，Apache-2.0，Rust），有公开 CLI 与 socket API。**宿主侧已对接并实测**：`host/cqutmux-hook/herdr.mjs` 经 `herdr api snapshot` / `pane send-text` / `pane read`（走 SSH exec，无需转发——socket 是 Unix socket，`direct-tcpip` 到不了）暴露 `GET /herdr`、`GET /herdr/pane/:id`、`POST /herdr/approve/:id`。**实测**：对真实 herdr 0.9.3 服务器，`GET /herdr` 返回 workspace/agent 与其 `blocked` 状态；`POST /herdr/approve/w1:p2` 把应答键入目标 pane 并执行。**App 侧 UI 尚未接入**（无 herdr 会话选择器 / Jump To） |
 | 远程推送（APNs） | **两端代码已写全并已跑通到系统边界**：App 侧 `PushCoordinator`/`AppDelegate`（令牌注册、`CQUT_APPROVAL` 分类的锁屏 Allow/Deny、前后台推送回调）→ `POST /push/register` → 宿主 `push.mjs`（HTTP/2 + ES256 provider JWT，签名经 openssl 生成的测试密钥**验签通过**、64 字节裸 r‖s 编码正确）。**卡在签名**：模拟器日志 `Push registration with a nil environment`——无 `aps-environment` entitlement，而该 entitlement 必须有付费开发者账号的 provisioning profile。本地通知 + webhook 告警已覆盖同类场景 |
-| Tailscale 网络探测 | 需集成 Tailscale SDK | 未做；直连与隧道不受影响 |
+| Tailscale 网络探测 | **不需要**：Moshi 自己的文档写明它不做内置集成（"no built-in Tailscale host picker"，VPN 在系统层透明工作），用 `100.x.y.z` / MagicDNS 名当普通 SSH 目标即可 | 与 Moshi 一致；直连与隧道不受影响 |
 
 ## 5. 主要风险
 
