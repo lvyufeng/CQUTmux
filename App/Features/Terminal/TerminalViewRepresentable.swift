@@ -7,6 +7,7 @@ struct TerminalScreen: View {
     let credential: SSHCredential
 
     @State private var coordinator = TerminalCoordinator()
+    @State private var dictation = VoiceDictation()
 
     var body: some View {
         TerminalViewRepresentable(host: host, credential: credential, coordinator: coordinator)
@@ -24,6 +25,18 @@ struct TerminalScreen: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { accessoryBar }
+            .onAppear {
+                // Partial transcripts stream straight to the shell; a final
+                // one gets a newline so the agent receives the command.
+                dictation.onUpdate = { update in
+                    switch update {
+                    case .partial(let text): coordinator.setDictationPreview(text)
+                    case .final(let text):
+                        coordinator.setDictationPreview("")
+                        coordinator.terminal?.sendDictatedLine(text)
+                    }
+                }
+            }
     }
 
     private var accessoryBar: some View {
@@ -37,11 +50,36 @@ struct TerminalScreen: View {
                 icon("arrow.left", CtrlKey.leftArrow)
                 icon("arrow.right", CtrlKey.rightArrow)
                 icon("doc.on.doc", CtrlKey.clipboard)
+                dictationButton
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
         }
         .background(.bar)
+        .overlay(alignment: .top) {
+            if !coordinator.dictationPreview.isEmpty {
+                Text(coordinator.dictationPreview)
+                    .font(.caption)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.thinMaterial, in: Capsule())
+                    .offset(y: -22)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    private var dictationButton: some View {
+        Button {
+            dictation.toggle()
+        } label: {
+            Image(systemName: dictation.isListening ? "waveform" : "mic")
+                .symbolEffect(.variableColor, isActive: dictation.isListening)
+                .frame(width: 40, height: 32)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 6))
+        .tint(dictation.isListening ? Theme.accent : nil)
     }
 
     private func key(_ label: String, _ key: CtrlKey) -> some View {
@@ -72,7 +110,11 @@ enum CtrlKey {
 @Observable
 final class TerminalCoordinator {
     var status: CQUTTerminalView.Status = .idle
+    /// Live dictation text, shown above the accessory bar while listening.
+    var dictationPreview = ""
     @ObservationIgnored weak var terminal: CQUTTerminalView?
+
+    func setDictationPreview(_ text: String) { dictationPreview = text }
 
     func press(_ key: CtrlKey) {
         guard let terminal else { return }

@@ -108,6 +108,13 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         write(Data(text.utf8))
     }
 
+    /// Sends a dictated phrase followed by Return, so the shell runs it.
+    func sendDictatedLine(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        write(Data((trimmed + "\n").utf8))
+    }
+
     private func write(_ data: Data) {
         transport.send(data)
     }
