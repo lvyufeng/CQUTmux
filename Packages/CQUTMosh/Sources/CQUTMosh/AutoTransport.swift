@@ -1,32 +1,47 @@
 import Foundation
 import CQUTTransport
 
-/// Tries `primary` (mosh) and falls back to `fallback` (SSH) when the primary
-/// cannot be used at all.
+/// Tries `primary` and falls back to `fallback` when the primary cannot be
+/// used at all.
 ///
-/// The interesting case is mosh-server missing from the host. That is not a
-/// network failure and retrying it will not help, so the session has to
-/// continue some other way — which is what Moshi's "Auto" does, and why the
-/// first failure is the only one that switches.
+/// Both halves are pluggable, but the pairing this exists for is mosh then ET:
+/// Moshi's own order. The interesting case is mosh-server missing from the host
+/// — not a network failure, and one that retrying will not fix — so the session
+/// has to continue some other way. ET then covers the other half of that: it
+/// needs only TCP and an etterminal, so it works on the networks where mosh's
+/// UDP never arrives.
 ///
-/// Failures *after* the session is up are deliberately not caught: once mosh
-/// is talking, a drop is a drop, and mosh is better at recovering from it than
-/// a restart-as-SSH would be. Only a failure before the first frame means the
-/// transport never worked.
+/// The names in the messages are taken from the transports themselves rather
+/// than hardcoded, because a hardcoded "falling back to SSH" was wrong the
+/// moment ET was inserted ahead of SSH, and a message that misreports which
+/// transport is carrying the session is worse than no message.
+///
+/// Failures *after* the session is up are deliberately not caught: once the
+/// primary is talking, a drop is a drop, and both mosh and ET recover from one
+/// better than a restart-as-something-else would. Only a failure before the
+/// first frame means the transport never worked.
 public final class AutoTransport: TerminalTransport, @unchecked Sendable {
     public var onEvent: (@Sendable (TransportEvent) -> Void)? {
         get { lock.withLock { _onEvent } }
         set { lock.withLock { _onEvent = newValue } }
     }
 
-    /// After a switch the fallback is SSH, which needs the caller's backoff;
-    /// before one, mosh recovers by itself.
+    /// After a switch the fallback decides for itself; before one, so does the
+    /// primary. Both mosh and ET recover on their own, and SSH says it does
+    /// not, so this is a property of whichever is live rather than of the
+    /// wrapper.
     public var handlesReconnect: Bool { lock.withLock { switched } ? fallback.handlesReconnect : primary.handlesReconnect }
 
     private var _onEvent: (@Sendable (TransportEvent) -> Void)?
     private let primary: TerminalTransport
     private let fallback: TerminalTransport
     private let lock = NSLock()
+
+    /// What to call each side in the message the user sees. A `TerminalTransport`
+    /// has no name of its own — adding one to the protocol for a log line would
+    /// be a poor trade — so the factory that chose them passes them in.
+    private let primaryName: String
+    private let fallbackName: String
 
     private var active: TerminalTransport?
     /// Set once the fallback has taken over, so a late failure from the primary
@@ -35,9 +50,16 @@ public final class AutoTransport: TerminalTransport, @unchecked Sendable {
     private var configuration: TransportConfiguration?
     private var size: (cols: Int, rows: Int) = (80, 24)
 
-    public init(primary: TerminalTransport, fallback: TerminalTransport) {
+    public init(
+        primary: TerminalTransport,
+        fallback: TerminalTransport,
+        primaryName: String = "mosh",
+        fallbackName: String = "SSH"
+    ) {
         self.primary = primary
         self.fallback = fallback
+        self.primaryName = primaryName
+        self.fallbackName = fallbackName
     }
 
     public func connect(_ configuration: TransportConfiguration, cols: Int, rows: Int) {
@@ -82,7 +104,7 @@ public final class AutoTransport: TerminalTransport, @unchecked Sendable {
 
         switch event {
         case .failed(let message) where source === primary:
-            handler?(.output(Data("\r\n\u{1b}[33m[mosh unavailable — falling back to SSH: \(message)]\u{1b}[0m\r\n".utf8)))
+            handler?(.output(Data("\r\n\u{1b}[33m[\(primaryName) unavailable — falling back to \(fallbackName): \(message)]\u{1b}[0m\r\n".utf8)))
             switchToFallback()
         case .connected:
             lock.withLock { active = source }

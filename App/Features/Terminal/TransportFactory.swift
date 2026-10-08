@@ -37,7 +37,9 @@ enum TransportFactory {
             // first two; its own fallback is what makes the third.
             return .success(AutoTransport(
                 primary: mosh(configuration: configuration, host: host),
-                fallback: et(configuration: configuration, host: host)
+                fallback: et(configuration: configuration, host: host),
+                primaryName: "mosh",
+                fallbackName: "ET"
             ))
         }
     }
