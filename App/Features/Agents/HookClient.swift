@@ -64,6 +64,12 @@ final class HookClient {
         state = .idle
     }
 
+    /// The live SSH transport, so a preview bridge can open extra tunnels
+    /// through the same session. Only valid while `state == .connected`.
+    func forwardTransport() -> SSHTransport? {
+        state == .connected ? transport : nil
+    }
+
     private func openTunnel() {
         var carry = Data()
         socket = transport.forward(
@@ -224,6 +230,13 @@ final class HookClient {
         return try JSONDecoder().decode(SessionBoard.self, from: payload.body)
     }
 
+    // MARK: - Dev-server ports
+
+    func ports() async throws -> PortBoard {
+        let payload = try await request("GET", "/ports")
+        return try JSONDecoder().decode(PortBoard.self, from: payload.body)
+    }
+
     // MARK: - Uploads
 
     /// Uploads a pasted image to the host and returns the path it was written
@@ -240,6 +253,12 @@ final class HookClient {
 struct UploadResult: Codable {
     var path: String
     var bytes: Int
+}
+
+struct PortBoard: Codable {
+    var available: Bool
+    var error: String?
+    var ports: [Int]
 }
 
 struct SessionBoard: Codable {

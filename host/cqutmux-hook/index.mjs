@@ -16,7 +16,7 @@
 import { createServer } from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { readdir, readFile, stat, mkdir, writeFile } from 'node:fs/promises'
 import { resolve, relative, isAbsolute, join } from 'node:path'
 import { homedir } from 'node:os'
@@ -227,6 +227,45 @@ async function gitLog(cwd, limit = 40) {
   }
 }
 
+// Lists the local TCP ports a dev server is likely to be on, so the app can
+// offer a preview target without the user guessing. We look at listening
+// sockets only, and filter to a curated set of common dev ports to keep the
+// list short and avoid exposing unrelated services.
+const DEV_PORT_HINTS = new Set([
+  3000, 3001, 4200, 5000, 5173, 5174, 8000, 8001, 8080, 8081, 8443, 9000,
+])
+
+async function listeningPorts() {
+  let stdout
+  try {
+    // lsof covers macOS and most BSDs; ss covers Linux.
+    ;({ stdout } = await run('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN']))
+  } catch (lsofError) {
+    try {
+      ;({ stdout } = await run('ss', ['-ltn']))
+    } catch (ssError) {
+      return { available: false, error: 'neither lsof nor ss is available', ports: [] }
+    }
+    const ports = new Set()
+    for (const line of stdout.split('\n').slice(1)) {
+      const match = line.match(/:(\d+)\s/)
+      if (match) ports.add(Number(match[1]))
+    }
+    return { available: true, ports: [...ports].sort((a, b) => a - b) }
+  }
+
+  const ports = new Set()
+  for (const line of stdout.split('\n').slice(1)) {
+    const match = line.match(/:(\d+)\s+\(LISTEN\)/)
+    if (match) ports.add(Number(match[1]))
+  }
+  const all = [...ports].sort((a, b) => a - b)
+  // Dev-looking ports first, then anything else, so the common case is on top.
+  const hinted = all.filter(p => DEV_PORT_HINTS.has(p))
+  const rest = all.filter(p => !DEV_PORT_HINTS.has(p))
+  return { available: true, ports: [...new Set([...hinted, ...rest])] }
+}
+
 // Enumerates tmux sessions, their windows, and whether a pane is attached, so
 // the app can offer a session picker and jump-to-window without a shell round
 // trip. Uses a stable tab-separated format rather than tmux's default grid.
@@ -407,6 +446,10 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/sessions') {
     return json(res, 200, await multiplexers())
+  }
+
+  if (req.method === 'GET' && url.pathname === '/ports') {
+    return json(res, 200, await listeningPorts())
   }
 
   if (req.method === 'GET' && url.pathname === '/events') {

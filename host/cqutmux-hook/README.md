@@ -35,6 +35,7 @@ require `Authorization: Bearer <secret>` on every request.
 | `GET` | `/log?path=<dir>&limit=<n>` | recent commits (hash, author, subject, refs) |
 | `GET` | `/usage` | 5h / 7d burn windows per agent |
 | `GET` | `/sessions` | tmux and zellij sessions, windows/tabs and pane counts |
+| `GET` | `/ports` | listening TCP ports, dev-looking ones first |
 | `POST` | `/upload` | write a raw body (a pasted image) under `.cqutmux/paste/` |
 
 Event body:

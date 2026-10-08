@@ -67,6 +67,11 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: CQUTmux
+        # The preview loads http://127.0.0.1:<bridged port>, which ATS blocks by
+        # default. It is loopback-only and the bytes are carried inside the SSH
+        # session, so allowing local networking here exposes nothing.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft

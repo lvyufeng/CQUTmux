@@ -15,6 +15,9 @@ struct CQUTmuxApp: App {
                 .task {
                     #if DEBUG
                     DebugSeed.apply(to: hostStore)
+                    // UI runs can skip the permission prompt, which otherwise
+                    // covers every screenshot taken in the first seconds.
+                    if ProcessInfo.processInfo.environment["CQUT_DEV_NO_NOTIFS"] == "1" { return }
                     #endif
                     _ = await ApprovalNotifier.requestAuthorization()
                 }

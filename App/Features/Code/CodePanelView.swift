@@ -14,6 +14,7 @@ struct CodePanelView: View {
     @State private var error: String?
     @State private var openFile: FileContents?
     @State private var path = "."
+    @State private var showPreview = false
 
     private enum Mode: String, CaseIterable { case files = "Files", changes = "Changes", history = "History" }
 
@@ -23,6 +24,14 @@ struct CodePanelView: View {
         if ProcessInfo.processInfo.environment["CQUT_DEV_MODE"] == "files" { return .files }
         #endif
         return .changes
+    }
+
+    private static var previewInitiallyOpen: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "preview"
+        #else
+        return false
+        #endif
     }
 
     var body: some View {
@@ -43,6 +52,22 @@ struct CodePanelView: View {
         }
         .navigationTitle("Code")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if connection.client != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showPreview = true
+                    } label: {
+                        Label("Preview", systemImage: "safari")
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showPreview) {
+            if let client = connection.client {
+                PreviewView(client: client)
+            }
+        }
     }
 
     @ViewBuilder
@@ -68,7 +93,12 @@ struct CodePanelView: View {
                 }
             }
         }
-        .task { await load(client) }
+        .task {
+            await load(client)
+            #if DEBUG
+            if Self.previewInitiallyOpen { showPreview = true }
+            #endif
+        }
         .sheet(item: $openFile) { (file: FileContents) in
             NavigationStack {
                 FileView(file: file)
