@@ -47,7 +47,7 @@
 | 终端 | VT/xterm 仿真、滚动、选中、链接可点 | P1 |
 | 终端 | 自定义键盘附件栏 + 硬件键盘 ⌘K/⌘O/⌘1-9 | P1 |
 | 终端 | 手势：swipe 切窗口、pinch 缩放、双击 Tab | P3 |
-| 终端 | 主题 / 字体 / 图标、CJK 输入 | P4 |
+| 终端 | 主题 / 字体 / 图标、CJK 输入 | P4 ✅ 主题+字体+图标 |
 | 会话 | 会话持久化、切后台恢复、断线重连 | P1–P2 |
 | 多路复用 | tmux 集成、会话选择器、jump-to window | P2 |
 | 多路复用 | zellij / herdr 支持 | P5 |
@@ -154,6 +154,7 @@ CQUTmux/
 | P3 Agent 层 | ✅ 已合并并**实测** | 宿主 `cqutmux-hook` ↔ 隧道内 Inbox / Code / Diff / Usages，均经模拟器实测 |
 | P4 通知/语音 | ✅ 已合并并**实测** | 端侧听写、Live Activity / 灵动岛、本地通知、webhook 告警、图片标注上传、tmux 会话选择器 |
 | P5 收尾 | ✅ 主体完成 | iPad 侧栏、zellij、OSC 52 剪贴板、git 历史、网关 token、断线自动重连（修复会话静默失联的真实 bug）、浏览器预览、模拟器预览均已合并并在模拟器实测 |
+| P5c 字体 / 图标 | ✅ 已合并并**实测** | 终端字体（family / 字号 / 行距 + 实时预览）持久化，pinch 手势回写偏好；App 与 Watch 图标（`scripts/make-icon.py` 可复现）。补上 P4 里"字体"和图标两处空缺 |
 | P5b Jump host | ✅ 已合并并**实测** | 在跳跃主机上开 `direct-tcpip` 到目标的 22 端口，把目标 SSH 连接跑在该通道内（`ByteBufferToSSHDataHandler` / `SSHDataToByteBufferHandler` 做 `ByteBuffer`↔`SSHChannelData` 互转）。实测：两条本机 sshd (`:2222` 为跳板，`:2233` 为目标)，`lsof` 确认应用只连 `:2222`、`:2222`→`:2233` 由 sshd 转发；杀掉跳板会话后 UI 报 `jump host … Connection refused` 并自动重连成功；不带跳板的直连路径回归通过 |
 | P6 Apple Watch | 🟡 构建通过、已嵌入 | `CQUTmuxWatch` watchOS target：待审批列表 + 批准/拒绝，经 `WCSession` 与手机同步，决定回落到手机上的 `HookClient.resolve`。**未运行**——本机只装了 iOS 模拟器 runtime，无 watchOS runtime（SDK 在，runtime 不在），无法启动表盘验证 |
 
