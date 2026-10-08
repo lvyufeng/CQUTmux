@@ -52,7 +52,19 @@ let nextId = 1
 let pendingApprovals = 0
 
 function emit(event) {
-  const record = { id: nextId++, at: new Date().toISOString(), ...event }
+  // Backfill title/body here rather than at each call site. POST /events does
+  // it for the events agents send us, but the notices this file emits for
+  // itself (an approval being resolved, say) skipped it, so the wire carried
+  // two shapes for one record type. Clients should tolerate a missing field —
+  // ours now does — but a gateway that emits a different shape depending on
+  // which line called it is a bug in the gateway.
+  const record = {
+    title: '',
+    body: '',
+    id: nextId++,
+    at: new Date().toISOString(),
+    ...event,
+  }
   events.push(record)
   if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS)
   // Long-polling clients waiting for something new.
