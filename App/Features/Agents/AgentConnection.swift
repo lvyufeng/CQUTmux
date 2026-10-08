@@ -30,7 +30,9 @@ final class AgentConnection {
         let configuration = TransportConfiguration(
             host: host.hostname, port: host.port, username: host.username, credential: credential
         )
-        let client = HookClient(configuration: configuration)
+        let token = KeychainStore.load(account: host.gatewayTokenAccount)
+            .flatMap { String(data: $0, encoding: .utf8) }
+        let client = HookClient(configuration: configuration, remotePort: host.gatewayPort, token: token)
         self.client = client
         client.start()
     }

@@ -22,6 +22,14 @@ enum DebugSeed {
             KeychainStore.save(seed, account: host.keySeedAccount)
         }
 
+        if let token = env["CQUT_DEV_GATEWAY_TOKEN"], let data = token.data(using: .utf8) {
+            KeychainStore.save(data, account: host.gatewayTokenAccount)
+        }
+
+        if let port = env["CQUT_DEV_GATEWAY_PORT"], let value = Int(port) {
+            host.gatewayPort = value
+        }
+
         if !store.hosts.contains(where: { $0.hostname == host.hostname && $0.port == host.port }) {
             store.upsert(host)
         }

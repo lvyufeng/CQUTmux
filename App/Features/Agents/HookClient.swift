@@ -19,13 +19,17 @@ final class HookClient {
     private let transport = SSHTransport()
     private let configuration: TransportConfiguration
     private let remotePort: Int
+    /// Bearer token for a host gateway started with `--token`; nil when the
+    /// gateway is unauthenticated.
+    private let token: String?
     private var socket: ForwardedSocket?
     private var lastId = 0
     private var polling = false
 
-    init(configuration: TransportConfiguration, remotePort: Int = 24543) {
+    init(configuration: TransportConfiguration, remotePort: Int = 24543, token: String? = nil) {
         self.configuration = configuration
         self.remotePort = remotePort
+        self.token = token
     }
 
     var pendingCount: Int { events.filter(\.isPending).count }
@@ -124,6 +128,7 @@ final class HookClient {
         defer { gate.release() }
         guard socket != nil else { throw URLError(.notConnectedToInternet) }
         var head = "\(method) \(path) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n"
+        if let token { head += "authorization: Bearer \(token)\r\n" }
         for (name, value) in headers { head += "\(name): \(value)\r\n" }
         // Binary uploads carry their own type; everything else is JSON.
         if let body {

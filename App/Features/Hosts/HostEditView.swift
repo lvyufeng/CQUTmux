@@ -6,6 +6,14 @@ struct HostEditView: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    /// Held in a local @State rather than the struct so the plaintext never
+    /// travels with the persisted Host.
+    @State private var gatewayToken = ""
+
+    private var saveDisabled: Bool {
+        host.hostname.isEmpty
+    }
+
     var body: some View {
         Form {
             Section("Host") {
@@ -91,19 +99,41 @@ struct HostEditView: View {
                     .autocorrectionDisabled()
                     .font(.system(.body, design: .monospaced))
             }
+
+            Section {
+                TextField("24543", value: $host.gatewayPort, format: .number)
+                    .keyboardType(.numberPad)
+                SecureField("Token (if the gateway sets one)", text: $gatewayToken)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } header: {
+                Text("Agent Gateway")
+            } footer: {
+                Text("The gap between this port on the host and nothing on the network: the gateway listens on loopback and the app reaches it through the SSH channel. Set a token to match cqutmux-hook --token.")
+                    .font(.caption)
+            }
         }
         .navigationTitle(host.name.isEmpty ? "New Host" : host.name)
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            gatewayToken = KeychainStore.load(account: host.gatewayTokenAccount)
+                .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
+                    if gatewayToken.isEmpty {
+                        KeychainStore.delete(account: host.gatewayTokenAccount)
+                    } else if let data = gatewayToken.data(using: .utf8) {
+                        _ = KeychainStore.save(data, account: host.gatewayTokenAccount)
+                    }
                     onSave(host)
                     dismiss()
                 }
-                .disabled(host.hostname.isEmpty)
+                .disabled(saveDisabled)
             }
         }
     }

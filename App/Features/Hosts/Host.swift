@@ -47,10 +47,19 @@ struct Host: Identifiable, Codable, Hashable {
     var moshPortRange: String? = nil
     var etPort: Int? = nil                 // defaults to 2022
     var forwardAgent: Bool = false
+    /// Bearer token required by `cqutmux-hook --token`, if the host sets one.
+    /// Stored in the Keychain, not here.
+    var gatewayTokenIdentifier: String? = nil
+
+    /// Port the host gateway listens on. Matches the daemon's default.
+    var gatewayPort: Int = 24543
 
     /// Command tmux/multiplexer bootstrap runs on connect.
     var sessionCommand: String = "tmux new -A -s cqutmux"
 
     var displayName: String { name.isEmpty ? hostname : name }
     var target: String { username.isEmpty ? hostname : "\(username)@\(hostname)" }
+
+    /// Keychain account holding this host's gateway bearer token.
+    var gatewayTokenAccount: String { "host.\(id.uuidString).gatewayToken" }
 }
