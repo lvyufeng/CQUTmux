@@ -61,15 +61,13 @@ struct HostEditView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
 
-                    // The SSH transport dials the target directly; a jump host
-                    // would need a second hop through a direct-tcpip channel
-                    // that isn't built yet. Say so rather than accepting the
-                    // value and silently connecting straight to the target.
+                    // The hop authenticates with the same key or password saved
+                    // for the target, so say that rather than letting a
+                    // mismatch look like a broken jump host.
                     if host.jumpHost?.isEmpty == false {
-                        Label("Not available yet — the app will connect directly, ignoring this.",
-                              systemImage: "exclamationmark.triangle")
+                        Text("Connects to the target through this host, using the same credentials.")
                             .font(.caption)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(.secondary)
                     }
                 }
 

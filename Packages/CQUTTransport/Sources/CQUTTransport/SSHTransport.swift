@@ -232,31 +232,22 @@ public final class SSHTransport: TerminalTransport {
             self.closing = false
         }
 
+        if let jump = configuration.jumpHost {
+            connectViaJumpHost(jump, configuration: configuration, cols: cols, rows: rows)
+        } else {
+            connectDirect(configuration: configuration, cols: cols, rows: rows)
+        }
+    }
+
+    /// The common case: a socket straight to the target.
+    private func connectDirect(configuration: TransportConfiguration, cols: Int, rows: Int) {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         stateQueue.sync { self.group = group }
 
         let bootstrap = ClientBootstrap(group: group)
             .channelInitializer { [weak self] channel in
                 channel.eventLoop.makeCompletedFuture {
-                    let sshHandler = NIOSSHHandler(
-                        role: .client(
-                            .init(
-                                userAuthDelegate: CredentialAuthDelegate(
-                                    username: configuration.username,
-                                    credential: configuration.credential
-                                ),
-                                serverAuthDelegate: AcceptAllHostKeysDelegate()
-                            )
-                        ),
-                        allocator: channel.allocator,
-                        inboundChildChannelInitializer: nil
-                    )
-                    try channel.pipeline.syncOperations.addHandler(sshHandler)
-                    try channel.pipeline.syncOperations.addHandler(
-                        ErrorHandler { [weak self] error in
-                            self?.emit(.failed("\(error)"))
-                        }
-                    )
+                    try self?.installSSH(on: channel, configuration: configuration)
                 }
             }
             .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
@@ -274,21 +265,147 @@ public final class SSHTransport: TerminalTransport {
                 self.emit(.failed("\(error)"))
                 self.shutdownGroup()
             case .success(let channel):
-                self.stateQueue.sync { self.connectionChannel = channel }
-                channel.closeFuture.whenComplete { [weak self] _ in
-                    guard let self else { return }
-                    // A close we did not ask for ends the session however far
-                    // it got. Without this the socket can die quietly and the
-                    // UI keeps claiming "connected". `closing` is a one-way
-                    // latch set by disconnect(), so a user-initiated teardown
-                    // stays silent.
-                    if !self.stateQueue.sync(execute: { self.closing }) {
-                        self.emit(.failed("connection closed"))
-                    }
+                self.adopt(connectionChannel: channel) {
+                    self.openSession(on: channel, configuration: configuration, cols: cols, rows: rows)
                 }
-                self.openSession(on: channel, configuration: configuration, cols: cols, rows: rows)
             }
         }
+    }
+
+    /// Two hops: SSH to the jump host, then a `direct-tcpip` channel out of it
+    /// to the target, and the target's SSH connection runs inside that.
+    ///
+    /// The group's single event loop is deliberate — every channel here shares
+    /// it, so the target's `NIOSSHHandler` and the jump's pipeline that feeds
+    /// it are never touched from two threads.
+    private func connectViaJumpHost(_ jump: JumpHost, configuration: TransportConfiguration, cols: Int, rows: Int) {
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        stateQueue.sync { self.group = group }
+
+        let jumpAuth = CredentialAuthDelegate(username: jump.username, credential: jump.credential)
+        let targetAuth = CredentialAuthDelegate(
+            username: configuration.username,
+            credential: configuration.credential
+        )
+
+        let bootstrap = ClientBootstrap(group: group)
+            .channelInitializer { channel in
+                channel.eventLoop.makeCompletedFuture {
+                    let handler = NIOSSHHandler(
+                        role: .client(
+                            .init(userAuthDelegate: jumpAuth, serverAuthDelegate: AcceptAllHostKeysDelegate())
+                        ),
+                        allocator: channel.allocator,
+                        inboundChildChannelInitializer: nil
+                    )
+                    try channel.pipeline.syncOperations.addHandler(handler)
+                }
+            }
+            .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .channelOption(ChannelOptions.socket(SocketOptionLevel(IPPROTO_TCP), TCP_NODELAY), value: 1)
+            .channelOption(ChannelOptions.allowRemoteHalfClosure, value: false)
+
+        bootstrap.connect(host: jump.host, port: jump.port).whenComplete { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.emit(.failed("jump host \(jump.host): \(error)"))
+                self.shutdownGroup()
+
+            case .success(let jumpChannel):
+                jumpChannel.pipeline.handler(type: NIOSSHHandler.self).whenComplete { [weak self] handlerResult in
+                    guard let self else { return }
+                    switch handlerResult {
+                    case .failure(let error):
+                        self.emit(.failed("jump host \(jump.host): \(error)"))
+                        self.shutdownGroup()
+
+                    case .success(let jumpHandler):
+                        let promise = jumpChannel.eventLoop.makePromise(of: Channel.self)
+                        jumpHandler.createChannel(promise, channelType: .directTCPIP(
+                            .init(
+                                targetHost: configuration.host,
+                                targetPort: configuration.port,
+                                originatorAddress: (try? SocketAddress(ipAddress: "127.0.0.1", port: 0))
+                                    ?? (try! SocketAddress(ipAddress: "127.0.0.1", port: 0))
+                            )
+                        )) { child, _ in
+                            child.eventLoop.makeCompletedFuture {
+                                let sync = child.pipeline.syncOperations
+                                // Order matters: the unwrapper must be innermost
+                                // so it sees `ByteBuffer` on its way out, before
+                                // the channel packs it into `SSHChannelData`.
+                                try sync.addHandler(SSHDataToByteBufferHandler())
+                                try sync.addHandler(ByteBufferToSSHDataHandler())
+                                try self.installSSH(on: child, configuration: configuration, auth: targetAuth)
+                            }
+                        }
+
+                        promise.futureResult.whenComplete { [weak self] channelResult in
+                            guard let self else { return }
+                            switch channelResult {
+                            case .failure(let error):
+                                self.emit(.failed("jump host could not reach \(configuration.host):\(configuration.port) — \(error)"))
+                                self.shutdownGroup()
+                            case .success(let targetChannel):
+                                // Adopt the *jump* channel: it is the one that
+                                // stops when the network goes, and the target
+                                // channel's liveness is tied to the forward.
+                                self.adopt(connectionChannel: jumpChannel, opening: targetChannel) {
+                                    self.openSession(on: targetChannel, configuration: configuration, cols: cols, rows: rows)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Adds the client-side SSH stack to a channel. Used for both the direct
+    /// socket and the forwarded channel a jump host hands us.
+    private func installSSH(
+        on channel: Channel,
+        configuration: TransportConfiguration,
+        auth: CredentialAuthDelegate? = nil
+    ) throws {
+        let delegate = auth ?? CredentialAuthDelegate(
+            username: configuration.username,
+            credential: configuration.credential
+        )
+        let sshHandler = NIOSSHHandler(
+            role: .client(.init(userAuthDelegate: delegate, serverAuthDelegate: AcceptAllHostKeysDelegate())),
+            allocator: channel.allocator,
+            inboundChildChannelInitializer: nil
+        )
+        let sync = channel.pipeline.syncOperations
+        try sync.addHandler(sshHandler)
+        try sync.addHandler(ErrorHandler { [weak self] error in self?.emit(.failed("\(error)")) })
+    }
+
+    /// Records the channel whose death ends the session and starts `opening`
+    /// once the identity is ours. Split out so both connect paths report a
+    /// drop the same way.
+    private func adopt(
+        connectionChannel channel: Channel,
+        opening target: Channel? = nil,
+        _ start: @escaping () -> Void
+    ) {
+        stateQueue.sync { self.connectionChannel = channel }
+        channel.closeFuture.whenComplete { [weak self] _ in
+            guard let self else { return }
+            // A close we did not ask for ends the session however far it got.
+            // Without this the socket can die quietly and the UI keeps claiming
+            // "connected". `closing` is a one-way latch set by disconnect(), so
+            // a user-initiated teardown stays silent.
+            if !self.stateQueue.sync(execute: { self.closing }) {
+                self.emit(.failed("connection closed"))
+            }
+            // Tear the forwarded side down too, or the jump host keeps the
+            // `direct-tcpip` channel open for a target nobody is talking to.
+            target?.close(promise: nil)
+        }
+        start()
     }
 
     private func openSession(

@@ -275,7 +275,16 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
             host: host.hostname,
             port: host.port,
             username: host.username,
-            credential: credential
+            credential: credential,
+            // The jump host authenticates with the same credential the user
+            // saved for the target; the form takes `user@host:port` but has no
+            // separate secret, and a single account hop-through is the usual
+            // shape. Parsing handles the bare-IPv6 case without eating it.
+            jumpHost: JumpHost.parse(
+                host.jumpHost,
+                fallbackUser: host.username,
+                credential: credential
+            )
         )
         let view = CQUTTerminalView(
             frame: .zero,

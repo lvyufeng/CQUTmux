@@ -40,7 +40,7 @@
 
 | 模块 | 功能 | 阶段 |
 |---|---|---|
-| 连接 | SSH（密码 / 私钥 / jump host / agent forwarding） | P1 |
+| 连接 | SSH（密码 / 私钥 / jump host / agent forwarding） | P1 / P5b |
 | 连接 | Mosh（UDP，抗漫游） | P2 |
 | 连接 | ET / Eternal Terminal（TCP 2022） | P2 |
 | 连接 | Auto 传输协商（mosh→ET→SSH） | P2 |
@@ -154,6 +154,7 @@ CQUTmux/
 | P3 Agent 层 | ✅ 已合并并**实测** | 宿主 `cqutmux-hook` ↔ 隧道内 Inbox / Code / Diff / Usages，均经模拟器实测 |
 | P4 通知/语音 | ✅ 已合并并**实测** | 端侧听写、Live Activity / 灵动岛、本地通知、webhook 告警、图片标注上传、tmux 会话选择器 |
 | P5 收尾 | ✅ 主体完成 | iPad 侧栏、zellij、OSC 52 剪贴板、git 历史、网关 token、断线自动重连（修复会话静默失联的真实 bug）、浏览器预览、模拟器预览均已合并并在模拟器实测 |
+| P5b Jump host | ✅ 已合并并**实测** | 在跳跃主机上开 `direct-tcpip` 到目标的 22 端口，把目标 SSH 连接跑在该通道内（`ByteBufferToSSHDataHandler` / `SSHDataToByteBufferHandler` 做 `ByteBuffer`↔`SSHChannelData` 互转）。实测：两条本机 sshd (`:2222` 为跳板，`:2233` 为目标)，`lsof` 确认应用只连 `:2222`、`:2222`→`:2233` 由 sshd 转发；杀掉跳板会话后 UI 报 `jump host … Connection refused` 并自动重连成功；不带跳板的直连路径回归通过 |
 | P6 Apple Watch | 🟡 构建通过、已嵌入 | `CQUTmuxWatch` watchOS target：待审批列表 + 批准/拒绝，经 `WCSession` 与手机同步，决定回落到手机上的 `HookClient.resolve`。**未运行**——本机只装了 iOS 模拟器 runtime，无 watchOS runtime（SDK 在，runtime 不在），无法启动表盘验证 |
 
 **环境事实**：本机工具链仅 Swift 6.4 / Xcode 27 / Node 22。无 brew、无 Go/Rust、无 C 编译工具链。
@@ -167,7 +168,6 @@ CQUTmux/
 | 项 | 原因 | 现状 |
 |---|---|---|
 | Mosh / ET / Auto 协商 | 需交叉编译 C/C++（mosh、ET）+ protobuf/OpenSSL，本机无工具链 | 选到 mosh/et 时表单明确提示将回退 SSH |
-| Jump host | SSH 传输目前直连目标；跳跃需要在其上再开一条 `direct-tcpip` 到目标的 22 端口 | 填了 jump host 时表单明确提示会被忽略 |
 | SSH agent forwarding | swift-nio-ssh 无 agent 通道，且 iOS 上也没有可转发的 ssh-agent socket | 打开开关时表单明确提示不可用 |
 | herdr | 作者自研多路复用器，无公开协议；无法在不知协议的情况下对接 | 支持 tmux / zellij 作为等价能力 |
 | 远程推送（APNs） | 需开发者账号 + 推送证书，本环境无法配置 | 本地通知 + webhook 告警已覆盖同类场景 |

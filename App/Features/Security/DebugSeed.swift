@@ -18,6 +18,10 @@ enum DebugSeed {
         host.transport = .ssh
         host.sessionCommand = ""
 
+        if let jump = env["CQUT_DEV_JUMP"], !jump.isEmpty {
+            host.jumpHost = jump
+        }
+
         if let seedB64 = env["CQUT_DEV_KEY_SEED"], let seed = Data(base64Encoded: seedB64) {
             KeychainStore.save(seed, account: host.keySeedAccount)
         }
