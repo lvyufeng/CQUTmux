@@ -1,13 +1,15 @@
 import CQUTTransport
 import CQUTMosh
+import CQUTET
 
 /// Chooses the transport a host actually connects with.
 ///
-/// The form offers four kinds, but only some are implemented: SSH is the
-/// byte-pipe client, and Mosh is the state-sync client that rides on an SSH
-/// session to start `mosh-server`. ET is not implemented, and `auto` means
-/// "the best available", which today is mosh (what the user asked for, when the
-/// host runs it) falling back to SSH.
+/// All four kinds are now real. SSH is the byte pipe; Mosh is the state-sync
+/// client that rides on an SSH session to start `mosh-server`; ET does the same
+/// for `etterminal` over TCP, for networks that block mosh's UDP. `auto` is
+/// Moshi's own order — mosh, then ET, then SSH — which matters because the three
+/// fail for different reasons: mosh needs UDP and a mosh-server, ET needs TCP
+/// and an etterminal, SSH needs only sshd.
 enum TransportFactory {
     /// Builds the transport for `kind`, or reports why it cannot be built.
     ///
@@ -28,19 +30,29 @@ enum TransportFactory {
             return .success(mosh(configuration: configuration, host: host))
 
         case .et:
-            // Eternal Terminal is a different protocol on its own TCP port; it
-            // is not built here, and silently running SSH instead would give the
-            // user a session that quietly ignores what they picked.
-            return .failure(TransportUnavailable(reason: "ET is not available in this build."))
+            return .success(et(configuration: configuration, host: host))
 
         case .auto:
-            // Moshi's order is mosh, then ET, then SSH. Without ET, that is
-            // mosh with an SSH fallback.
+            // Moshi's order is mosh, then ET, then SSH. AutoTransport takes the
+            // first two; its own fallback is what makes the third.
             return .success(AutoTransport(
                 primary: mosh(configuration: configuration, host: host),
-                fallback: SSHTransport()
+                fallback: et(configuration: configuration, host: host)
             ))
         }
+    }
+
+    /// ET is mosh's complement rather than its alternative: same shape of
+    /// bootstrap over SSH, different protocol underneath, and it works on the
+    /// networks where mosh's UDP is blocked.
+    private static func et(
+        configuration: TransportConfiguration,
+        host: Host
+    ) -> ETTransport {
+        let launcher = SSHETLauncher(configuration: configuration)
+        let transport = ETTransport()
+        transport.launcher = launcher
+        return transport
     }
 
     private static func mosh(

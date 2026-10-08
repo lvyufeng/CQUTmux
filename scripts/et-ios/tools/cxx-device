@@ -1,0 +1,2 @@
+#!/bin/sh
+exec xcrun --sdk iphoneos clang++ -target arm64-apple-ios18.0 -std=c++17 "$@"
