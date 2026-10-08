@@ -25,6 +25,7 @@ import { readdir, readFile, stat, mkdir, writeFile, rm } from 'node:fs/promises'
 import { resolve, relative, isAbsolute, join } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { createPushService } from './push.mjs'
+import { herdrStatus, herdrSnapshot, herdrApprove, herdrRead } from './herdr.mjs'
 
 const run = promisify(execFile)
 
@@ -43,6 +44,7 @@ function parseArgs(argv) {
     pushTeamId: process.env.CQUTMUX_PUSH_TEAM_ID || '',
     pushTopic: process.env.CQUTMUX_PUSH_TOPIC || '',
     pushSandbox: false,
+    herdrPath: process.env.CQUTMUX_HERDR || '',
   }
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port') args.port = Number(argv[++i])
@@ -54,6 +56,7 @@ function parseArgs(argv) {
     else if (argv[i] === '--push-team-id') args.pushTeamId = argv[++i]
     else if (argv[i] === '--push-topic') args.pushTopic = argv[++i]
     else if (argv[i] === '--push-sandbox') args.pushSandbox = true
+    else if (argv[i] === '--herdr') args.herdrPath = argv[++i]
   }
   return args
 }
@@ -594,6 +597,35 @@ const server = createServer(async (req, res) => {
     process.stderr.write(`[hook] #${record.id} ${record.source} ${record.kind} ${record.title}\n`)
     if (kind === 'approval') postWebhook(record)
     return json(res, 201, record)
+  }
+
+  if (req.method === 'GET' && url.pathname === '/herdr') {
+    const status = await herdrStatus(args)
+    // The snapshot is only worth computing when there is a server to ask; on a
+    // host without herdr this stays a cheap "not installed" answer.
+    if (!status.installed) return json(res, 200, { ...status, agents: [], workspaces: [] })
+    return json(res, 200, { ...status, ...(await herdrSnapshot(args)) })
+  }
+
+  // Answers an approval by typing into the pane the agent is running in. This
+  // is the herdr counterpart of POST /approve/:id: same decision, delivered
+  // through the multiplexer instead of the gateway's own record.
+  const herdrApproveRoute = url.pathname.match(/^\/herdr\/approve\/([^/]+)$/)
+  if (req.method === 'POST' && herdrApproveRoute) {
+    const paneId = decodeURIComponent(herdrApproveRoute[1])
+    let allow = true
+    try {
+      const body = await readBody(req)
+      if (body.length) allow = (JSON.parse(body.toString('utf8')).decision || 'allow') !== 'deny'
+    } catch { /* default to allow, matching POST /approve/:id */ }
+    const result = await herdrApprove(args, paneId, allow)
+    return json(res, result.ok ? 200 : 502, result)
+  }
+
+  const herdrPaneRoute = url.pathname.match(/^\/herdr\/pane\/([^/]+)$/)
+  if (req.method === 'GET' && herdrPaneRoute) {
+    const result = await herdrRead(args, decodeURIComponent(herdrPaneRoute[1]))
+    return json(res, result.ok ? 200 : 502, result)
   }
 
   if (req.method === 'POST' && url.pathname === '/push/register') {
