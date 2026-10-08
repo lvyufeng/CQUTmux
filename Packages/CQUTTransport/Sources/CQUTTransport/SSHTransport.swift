@@ -125,7 +125,12 @@ private final class ShellChannelHandler: ChannelInboundHandler {
     }
 
     func handlerAdded(context: ChannelHandlerContext) {
-        context.channel.setOption(ChannelOptions.allowRemoteHalfClosure, value: true)
+        // Deliberately NOT allowing remote half-closure. With it on, a server
+        // that closes its side (sshd killed, network dropped) leaves our
+        // channel open and no event fires, so the session sat in CLOSE_WAIT
+        // reporting "connected" forever. Leaving it off means the remote EOF
+        // closes the channel and closeFuture fires.
+        context.channel.setOption(ChannelOptions.allowRemoteHalfClosure, value: false)
             .whenFailure { [emit] error in emit(.failed("\(error)")) }
     }
 
@@ -161,12 +166,35 @@ private final class ShellChannelHandler: ChannelInboundHandler {
         emit(.output(Data(bytes)))
     }
 
+    /// Last-resort detection of a dead session: whichever way the channel
+    /// goes away, the terminal hears about it rather than showing a stale
+    /// "connected".
+    func channelInactive(context: ChannelHandlerContext) {
+        emit(.closed(nil))
+        context.fireChannelInactive()
+    }
+
     func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
         switch event {
         case let status as SSHChannelRequestEvent.ExitStatus:
             emit(.closed(status.exitStatus))
         case let signal as SSHChannelRequestEvent.ExitSignal:
             emit(.failed("session closed: \(signal.signalName)"))
+        case ChannelEvent.inputClosed:
+            // The remote sent EOF. With half-closure enabled NIO reports it as
+            // this event and deliberately leaves the channel open, so
+            // closeFuture never completes — which is why a severed session used
+            // to sit there claiming to be connected. Report it and tear the
+            // channel down ourselves.
+            emit(.closed(nil))
+            context.close(promise: nil)
+            // The remote sent EOF. With half-closure enabled NIO reports it as
+            // this event and deliberately leaves the channel open, so
+            // closeFuture never completes — which is why a severed session used
+            // to sit there claiming to be connected. Report it and tear the
+            // channel down ourselves.
+            emit(.closed(nil))
+            context.close(promise: nil)
         default:
             context.fireUserInboundEventTriggered(event)
         }
@@ -183,6 +211,9 @@ public final class SSHTransport: TerminalTransport {
     private var sessionChannel: Channel?
     private var sshHandler: NIOSSHHandler?
     private var reportedTerminal = false
+    /// Set once disconnect() is called, so the resulting channel close is not
+    /// reported as an unexpected drop.
+    private var closing = false
     private let stateQueue = DispatchQueue(label: "app.cqutmux.transport.ssh")
 
     public init() {}
@@ -199,6 +230,15 @@ public final class SSHTransport: TerminalTransport {
     }
 
     public func connect(_ configuration: TransportConfiguration, cols: Int, rows: Int) {
+        // Clear the "already reported" latch for this attempt. Without this a
+        // later unexpected drop would find the flag still set from the
+        // previous .connected and stay silent, leaving the UI stuck on
+        // "connected" with a dead socket.
+        stateQueue.sync {
+            self.reportedTerminal = false
+            self.closing = false
+        }
+
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         stateQueue.sync { self.group = group }
 
@@ -228,7 +268,11 @@ public final class SSHTransport: TerminalTransport {
             }
             .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
             .channelOption(ChannelOptions.socket(SocketOptionLevel(IPPROTO_TCP), TCP_NODELAY), value: 1)
-            .channelOption(ChannelOptions.allowRemoteHalfClosure, value: true)
+            // Keep the TCP connection full-duplex: if the server closes, NIO
+            // must close our side and fire closeFuture. With half-closure on,
+            // a lost server left the socket in CLOSE_WAIT and the session
+            // reported "connected" indefinitely.
+            .channelOption(ChannelOptions.allowRemoteHalfClosure, value: false)
 
         bootstrap.connect(host: configuration.host, port: configuration.port).whenComplete { [weak self] result in
             guard let self else { return }
@@ -240,11 +284,13 @@ public final class SSHTransport: TerminalTransport {
                 self.stateQueue.sync { self.connectionChannel = channel }
                 channel.closeFuture.whenComplete { [weak self] _ in
                     guard let self else { return }
-                    // A transport that drops before the shell opens (refused
-                    // handshake, TCP reset) must not go silent. Skip it when a
-                    // terminal event was already reported for this attempt.
-                    if !self.stateQueue.sync(execute: { self.reportedTerminal }) {
-                        self.emit(.failed("connection closed before the session opened"))
+                    // A close we did not ask for ends the session however far
+                    // it got. Without this the socket can die quietly and the
+                    // UI keeps claiming "connected". `closing` is a one-way
+                    // latch set by disconnect(), so a user-initiated teardown
+                    // stays silent.
+                    if !self.stateQueue.sync(execute: { self.closing }) {
+                        self.emit(.failed("connection closed"))
                     }
                 }
                 self.openSession(on: channel, configuration: configuration, cols: cols, rows: rows)
@@ -367,6 +413,7 @@ public final class SSHTransport: TerminalTransport {
     }
 
     public func disconnect() {
+        stateQueue.sync { self.closing = true }
         let session = stateQueue.sync { () -> Channel? in
             let s = sessionChannel
             sessionChannel = nil
