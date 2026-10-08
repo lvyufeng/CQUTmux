@@ -1,0 +1,27 @@
+# Downloaded tooling (scripts/bootstrap.sh regenerates it)
+.tools/
+
+# macOS
+.DS_Store
+xcuserdata/
+*.xcuserstate
+
+# Xcode / XcodeGen
+build/
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+!*.xcodeproj/project.xcworkspace
+
+# SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+
+# Vendored build output
+vendor/build/
+host/cqutmux-hook/cqutmux-hook
+
+# Secrets / local
+.env
+*.local
