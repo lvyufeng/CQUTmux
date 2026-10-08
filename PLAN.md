@@ -42,8 +42,8 @@
 |---|---|---|
 | 连接 | SSH（密码 / 私钥 / jump host / agent forwarding） | P1 / P5b |
 | 连接 | Mosh（UDP，抗漫游） | P2 |
-| 连接 | ET / Eternal Terminal（TCP 2022） | P2 |
-| 连接 | Auto 传输协商（mosh→ET→SSH） | P2 |
+| 连接 | ET / Eternal Terminal（TCP 2022） | P2 ✅ 实测 |
+| 连接 | Auto 传输协商（mosh→ET→SSH） | P2 ✅ 实测 |
 | 终端 | VT/xterm 仿真、滚动、选中、链接可点 | P1 |
 | 终端 | 自定义键盘附件栏 + 硬件键盘 ⌘K/⌘O/⌘1-9 | P1 |
 | 终端 | 手势：swipe 切窗口、pinch 缩放、双击 Tab | P3 |
@@ -70,7 +70,7 @@
 | 终端仿真 | **SwiftTerm**（MIT，SPM） | 成熟 VT/xterm 解析 + `TerminalView`，省 2 个月 |
 | SSH | **libssh2**（vendored 静态库 + module map） | 完整 PTY/交互式 shell/direct-tcpip，Blink/Termius 同路线 |
 | Mosh | `mosh-client` 编为 iOS 静态库（参考 `rjyo/mosh-android`） | 无 Swift 实现，只能移植 |
-| ET | Eternal Terminal 客户端编为静态库 | 同上；P2 再评估 |
+| ET | Eternal Terminal 客户端编为静态库 | 已实现：`scripts/et-ios/` 编出 `libetcore.a`（含自写 C 驱动器），App 侧 `CQUTET` 包接 `TerminalTransport` |
 | 宿主机 daemon | **Node.js**（`host/cqutmux-hook`） | 本机无 Go/Rust/C 工具链，Node 22 已就绪，单文件免编译 |
 | 密钥存储 | iOS Keychain + `LocalAuthentication` | 对齐"Face ID for Keys" |
 | 语音 | v1 `SFSpeechRecognizer`(on-device) → v2 whisper.cpp | 先快后精 |
@@ -151,7 +151,7 @@ CQUTmux/
 | P0 骨架 | ✅ 已合并 | commit `0311e7e` |
 | P1 SSH 终端 | ✅ 已合并并**实测** | 见 commit `d4f663c` / `ab9245a`。公钥认证连真实 sshd、SwiftTerm 渲染活 shell 已验证 |
 | P2 Mosh | ✅ 已合并并**实测** | **之前标"受阻"是错的**：clang 一直在（Apple clang 21），缺的只是构建工具（pip 可装）。以 `--with-crypto-library=apple-common-crypto` 交叉编译 mosh 客户端全部库 + protobuf-lite，用自写驱动替代 `stmclient.cc` 的 `main()`，再以 `MoshTransport` 接到 `TerminalTransport`。**实测**：C 层 `scripts/mosh-ios/test.sh` 与 App 层 `scripts/mosh-ios/app-test.sh` 均跑通与真实 `mosh-server` 的双向会话——键入的命令在宿主 shell 执行并把结果回显到 iOS 终端。**踩到的真坑**：`Network::timestamp()` 返回的是 mosh 自己的缓存 `frozen_timestamp()`，而该缓存**只由 mosh 自己的 `Select::select()` 刷新**；自写 run loop 不刷新它，时钟就冻住，`tick()` 永远认为没到发送时刻——会话看起来正常（服务端输出照常到达），但**所有按键都被扣住不发**。修法：驱动器在 `mosh_tick` 里调 `freeze_timestamp()`。此 bug 在只有输出方向的旧测试里完全暴露不出来 |
-| P2b ET / Auto | 🟡 Auto 已可用；ET 依赖已打通、驱动器未做 | Auto 按 Moshi 的顺序实现为 mosh→SSH（跳过未实现的 ET）：宿主没有 `mosh-server` 时自动改用 SSH。ET 本身：已确认它**不是**编译问题而是形态问题（客户端绑死本地 `forkpty`，iOS 无 fork/exec），需要一层自己的驱动器；其最难跨编译的依赖 libsodium 已用 `scripts/et-ios/libsodium.sh` 在 iOS 上编通。选 ET 时表单明示"不可用"且**不会**静默回退成 SSH |
+| P2b ET / Auto | ✅ 已合并并在模拟器**实测** | ET 客户端核心全量编到 iOS，写了自己的驱动器（`scripts/et-ios/driver/`），并**实测**：C 层 `test.sh` 与 App 层 `app-test.sh` 均与真实 `etserver` 跑通——握手、输出解码、键入命令被远端 shell 执行（`ET_APP_33_OK` / `TYPED_24_OK`）、resize 存活，`lsof` 可见 App 与 :2022 的 ESTABLISHED 连接。**Auto 现为 mosh→ET→SSH**，Moshi 的原始顺序。**纠错**：此前判定 ET"绑死 forkpty 因而形态不匹配"是**错的**，`Console.hpp` 本就是给非 pty 前端用的显式接口（ET 自己的 `test/FakeConsole.hpp` 就是这么用的），`forkpty` 在**远端**那一侧。踩到的坑都记在 `scripts/et-ios/README.md` |
 | P3 Agent 层 | ✅ 已合并并**实测** | 宿主 `cqutmux-hook` ↔ 隧道内 Inbox / Code / Diff / Usages，均经模拟器实测 |
 | P4 通知/语音 | ✅ 已合并并**实测** | 端侧听写、Live Activity / 灵动岛、本地通知、webhook 告警、图片标注上传、tmux 会话选择器 |
 | P5 收尾 | ✅ 主体完成 | iPad 侧栏、zellij、OSC 52 剪贴板、git 历史、网关 token、断线自动重连（修复会话静默失联的真实 bug）、浏览器预览、模拟器预览均已合并并在模拟器实测 |
@@ -174,7 +174,6 @@ Apple Watch 无 runtime，只验证到"编译 + 嵌入 + 配对字段正确"；C
 
 | 项 | 原因 | 现状 |
 |---|---|---|
-| ET | **不是"编不出来"，是接入形态不匹配**：ET 客户端的设计是"在本地 pty 里跑一个 shell，把 pty 与远端配对"，`PseudoUserTerminalUnix.hpp` 直接用 `forkpty`；iOS 既不能 fork 也不能 exec。所以不能像 mosh 那样直接编译接入，必须先写一层等价于 `stmclient.cc` 替代品的驱动器（把本地 pty 换成 App 内的终端视图），工作量与 mosh 驱动同级。依赖里真正难跨编译的是 libsodium（autoconf + 靠**运行**探测决定启用哪些原语），**已解决**：`scripts/et-ios/libsodium.sh` 在 iOS 模拟器上编出含 secretbox 的 `libsodium.a`（13 个符号，非空壳），zlib/libc++ 系统自带 | 选 ET 时表单明示不可用，**不静默回退** |
 | SSH agent forwarding | swift-nio-ssh 无 agent 通道，且 iOS 上也没有可转发的 ssh-agent socket | 打开开关时表单明确提示不可用 |
 | herdr | 作者自研多路复用器，无公开协议；无法在不知协议的情况下对接 | 支持 tmux / zellij 作为等价能力 |
 | 远程推送（APNs） | 需开发者账号 + 推送证书，本环境无法配置 | 本地通知 + webhook 告警已覆盖同类场景 |
@@ -182,7 +181,7 @@ Apple Watch 无 runtime，只验证到"编译 + 嵌入 + 配对字段正确"；C
 
 ## 5. 主要风险
 
-1. **Mosh/ET 的 iOS 交叉编译**（protobuf/OpenSSL 依赖链）——P2 最大不确定项，必要时先只做 SSH，mosh 用 ET 替代。
+1. ~~**Mosh/ET 的 iOS 交叉编译**（protobuf/OpenSSL 依赖链）~~ —— **已排除**。两者均已编通并实测；ET 的 libsodium 用 `scripts/et-ios/libsodium.sh`，host 侧 `etserver` 用 `host-tools.sh` 从源码构建（ET 不发布 macOS 产物）。
 2. **SwiftTerm 与 tmux 全屏/鼠标模式的兼容性**——需要真机回归。
 3. **App 进入后台被挂起**，SSH 连接会断——需依赖 tmux 侧持久化 + 前台快速重连（Moshi 正是这么做的）。
 4. **本地网关的安全性**：回环端口仅经 SSH 通道访问，不暴露公网；需 token 校验。
