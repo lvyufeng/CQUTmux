@@ -1,55 +1,46 @@
 import SwiftUI
 
-/// Top-level shell. Mirrors Moshi's structure: a terminal-first surface,
-/// an agent inbox, a usage board, and settings.
+/// Top-level shell. On a phone it is a tab bar; on a regular-width screen
+/// (iPad) the same surfaces become a sidebar, so the terminal keeps the large
+/// half of the display the way Moshi does. Both share one selection model.
 struct RootView: View {
     @Environment(HostStore.self) private var store
     @Environment(AgentConnection.self) private var connection
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
-    enum Tab: Hashable { case terminal, inbox, code, usages, settings }
+    enum Tab: String, CaseIterable, Hashable {
+        case terminal, inbox, code, usages, settings
 
-    @State private var selection: Tab = {
-        #if DEBUG
-        switch ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] {
-        case "inbox": return .inbox
-        case "code": return .code
-        case "usages": return .usages
-        case "theme", "settings": return .settings
-        default: break
+        var title: String {
+            switch self {
+            case .terminal: "Terminal"
+            case .inbox: "Inbox"
+            case .code: "Code"
+            case .usages: "Usages"
+            case .settings: "Settings"
+            }
         }
-        #endif
-        return .terminal
-    }()
+
+        var symbol: String {
+            switch self {
+            case .terminal: "terminal"
+            case .inbox: "tray.full"
+            case .code: "chevron.left.forwardslash.chevron.right"
+            case .usages: "gauge.with.dots.needle.50percent"
+            case .settings: "gearshape"
+            }
+        }
+    }
+
+    @State private var selection: Tab = Self.initialTab
 
     var body: some View {
-        TabView(selection: $selection) {
-            HostsView()
-                .tabItem { Label("Terminal", systemImage: "terminal") }
-                .tag(Tab.terminal)
-
-            NavigationStack {
-                InboxView()
+        Group {
+            if sizeClass == .regular {
+                sidebar
+            } else {
+                tabs
             }
-            .tabItem { Label("Inbox", systemImage: "tray.full") }
-            .tag(Tab.inbox)
-
-            NavigationStack {
-                CodePanelView()
-            }
-            .tabItem { Label("Code", systemImage: "chevron.left.forwardslash.chevron.right") }
-            .tag(Tab.code)
-
-            NavigationStack {
-                UsagesView()
-            }
-            .tabItem { Label("Usages", systemImage: "gauge.with.dots.needle.50percent") }
-            .tag(Tab.usages)
-
-            NavigationStack {
-                SettingsView()
-            }
-            .tabItem { Label("Settings", systemImage: "gearshape") }
-            .tag(Tab.settings)
         }
         .tint(Theme.accent)
         .task {
@@ -60,6 +51,63 @@ struct RootView: View {
             }
             #endif
         }
+    }
+
+    private var tabs: some View {
+        TabView(selection: $selection) {
+            ForEach(Tab.allCases, id: \.self) { tab in
+                destination(tab)
+                    .tabItem { Label(tab.title, systemImage: tab.symbol) }
+                    .tag(tab)
+            }
+        }
+    }
+
+    private var sidebar: some View {
+        NavigationSplitView {
+            List {
+                ForEach(Tab.allCases, id: \.self) { tab in
+                    Button {
+                        selection = tab
+                    } label: {
+                        Label(tab.title, systemImage: tab.symbol)
+                            .foregroundStyle(selection == tab ? Theme.accent : .primary)
+                    }
+                }
+            }
+            .navigationTitle("CQUTmux")
+        } detail: {
+            destination(selection)
+        }
+    }
+
+    @ViewBuilder
+    private func destination(_ tab: Tab) -> some View {
+        switch tab {
+        case .terminal:
+            HostsView()
+        case .inbox:
+            NavigationStack { InboxView() }
+        case .code:
+            NavigationStack { CodePanelView() }
+        case .usages:
+            NavigationStack { UsagesView() }
+        case .settings:
+            NavigationStack { SettingsView() }
+        }
+    }
+
+    private static var initialTab: Tab {
+        #if DEBUG
+        switch ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] {
+        case "inbox": return .inbox
+        case "code": return .code
+        case "usages": return .usages
+        case "theme", "settings": return .settings
+        default: break
+        }
+        #endif
+        return .terminal
     }
 }
 
