@@ -2,6 +2,15 @@ import SwiftUI
 
 struct SettingsView: View {
     var body: some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] == "theme" {
+            return AnyView(ThemeSettingsView())
+        }
+        #endif
+        return AnyView(list)
+    }
+
+    private var list: some View {
         List {
             Section("Security") {
                 Label("SSH keys in Keychain", systemImage: "key.fill")
@@ -9,11 +18,7 @@ struct SettingsView: View {
             }
             Section("Appearance") {
                 NavigationLink {
-                    PlaceholderView(
-                        title: "Theme",
-                        systemImage: "paintpalette",
-                        message: "Dracula, Nord, Solarized, Gruvbox, Catppuccin and more."
-                    )
+                    ThemeSettingsView()
                 } label: {
                     Label("Theme", systemImage: "paintpalette")
                 }

@@ -72,7 +72,8 @@ private struct HostRow: View {
                 .foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(host.displayName).font(.body.weight(.medium))
-                Text("\(host.target):\(host.port) · \(host.transport.label)")
+                // String(port) avoids SwiftUI's locale grouping ("2,222").
+                Text(verbatim: "\(host.target):\(String(host.port)) · \(host.transport.label)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

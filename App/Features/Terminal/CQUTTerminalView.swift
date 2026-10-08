@@ -19,6 +19,7 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
     private let transport: TerminalTransport
     private let configuration: TransportConfiguration
     private let startupCommand: String?
+    private let theme: TerminalTheme
     private var didRunStartup = false
     private var status: Status = .idle {
         didSet { if status != oldValue { onStatus?(status) } }
@@ -28,17 +29,18 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         frame: CGRect,
         configuration: TransportConfiguration,
         startupCommand: String?,
+        theme: TerminalTheme = TerminalTheme.named(nil),
         transport: TerminalTransport = SSHTransport()
     ) {
         self.configuration = configuration
         self.startupCommand = startupCommand
+        self.theme = theme
         self.transport = transport
         super.init(frame: frame)
 
         terminalDelegate = self
         font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        nativeForegroundColor = UIColor(white: 0.85, alpha: 1)
-        nativeBackgroundColor = UIColor(red: 0.06, green: 0.08, blue: 0.07, alpha: 1)
+        theme.apply(to: self)
 
         transport.onEvent = { [weak self] event in
             self?.handle(event)

@@ -8,9 +8,10 @@ struct TerminalScreen: View {
 
     @State private var coordinator = TerminalCoordinator()
     @State private var dictation = VoiceDictation()
+    @Environment(ThemeStore.self) private var themes
 
     var body: some View {
-        TerminalViewRepresentable(host: host, credential: credential, coordinator: coordinator)
+        TerminalViewRepresentable(host: host, credential: credential, coordinator: coordinator, theme: themes.current)
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationTitle(host.displayName)
             .navigationBarTitleDisplayMode(.inline)
@@ -135,6 +136,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
     let host: Host
     let credential: SSHCredential
     let coordinator: TerminalCoordinator
+    let theme: TerminalTheme
 
     func makeUIView(context: Context) -> CQUTTerminalView {
         let configuration = TransportConfiguration(
@@ -146,7 +148,8 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         let view = CQUTTerminalView(
             frame: .zero,
             configuration: configuration,
-            startupCommand: host.sessionCommand.isEmpty ? nil : host.sessionCommand
+            startupCommand: host.sessionCommand.isEmpty ? nil : host.sessionCommand,
+            theme: theme
         )
         view.onStatus = { status in coordinator.status = status }
         coordinator.terminal = view

@@ -13,6 +13,7 @@ struct RootView: View {
         switch ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] {
         case "inbox": return .inbox
         case "code": return .code
+        case "theme", "settings": return .settings
         default: break
         }
         #endif
