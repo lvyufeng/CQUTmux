@@ -11,7 +11,8 @@
 #
 # Server-side translation units are excluded on purpose: we are a client.
 #
-# Usage: scripts/mosh-ios/build.sh <mosh-source-dir> <out-dir>
+# Usage: scripts/mosh-ios/build.sh <mosh-source-dir> <out-dir> [protoc-dir]
+# Env:   PLATFORM=simulator (default) | device
 set -euo pipefail
 
 MOSH_SRC="${1:?usage: build.sh <mosh-source-dir> <out-dir> [protoc-dir]}"
@@ -21,8 +22,18 @@ PROTOC_DIR="${3:-$(dirname "$MOSH_SRC")/protoc/bin}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$PROTOC_DIR:$PATH"
 
-SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-TARGET="arm64-apple-ios18.0-simulator"
+# Which SDK to build against. Both are needed — the app has to link for the
+# simulator to be testable and for a device to be runnable or shipped — so this
+# is a choice rather than a constant. An environment variable because the
+# positional arguments are already spoken for.
+PLATFORM="${PLATFORM:-simulator}"
+case "$PLATFORM" in
+  simulator) SDK_NAME=iphonesimulator; TARGET="arm64-apple-ios18.0-simulator" ;;
+  device)    SDK_NAME=iphoneos;        TARGET="arm64-apple-ios18.0" ;;
+  *) echo "unknown platform '$PLATFORM' (expected simulator or device)" >&2; exit 2 ;;
+esac
+
+SDK="$(xcrun --sdk "$SDK_NAME" --show-sdk-path)"
 PROTOBUF_INC="${PROTOBUF_INC:-$(dirname "$MOSH_SRC")/protobuf-21.12/src}"
 
 # protobuf's generated .pb.cc files (produced by protoc, which autoconf would
@@ -102,13 +113,13 @@ i=0
 for src in "${SOURCES[@]}"; do
   obj="$OUT/obj/$(echo "${src#$MOSH_SRC/}" | tr '/' '_').o"
   echo "    $(basename "$src")"
-  xcrun --sdk iphonesimulator clang++ "${CXXFLAGS[@]}" -c "$src" -o "$obj" || exit 1
+  xcrun --sdk "$SDK_NAME" clang++ "${CXXFLAGS[@]}" -c "$src" -o "$obj" || exit 1
   i=$((i + 1))
 done
 for src in $CSOURCES; do
   obj="$OUT/obj/$(basename "$src").o"
   echo "    $(basename "$src")"
-  xcrun --sdk iphonesimulator clang "${CFLAGS[@]}" -c "$src" -o "$obj" || exit 1
+  xcrun --sdk "$SDK_NAME" clang "${CFLAGS[@]}" -c "$src" -o "$obj" || exit 1
 done
 
 echo "==> compiling the CQUTMosh driver"
@@ -116,18 +127,18 @@ echo "==> compiling the CQUTMosh driver"
 # rather than as a SwiftPM target — SwiftPM has no way to see this tree.
 DRIVER="$HERE/driver/mosh_driver.cc"
 if [ -f "$DRIVER" ]; then
-  xcrun --sdk iphonesimulator clang++ "${CXXFLAGS[@]}" \
+  xcrun --sdk "$SDK_NAME" clang++ "${CXXFLAGS[@]}" \
     -c "$DRIVER" -o "$OUT/obj/cqutmosh_driver.o"
 fi
 
 echo "==> archiving"
-xcrun --sdk iphonesimulator libtool -static -o "$OUT/lib/libmoshclient.a" "$OUT"/obj/*.o
+xcrun --sdk "$SDK_NAME" libtool -static -o "$OUT/lib/libmoshclient.a" "$OUT"/obj/*.o
 
 echo "==> done: $OUT/lib/libmoshclient.a"
 # Count defined C++ symbols as a sanity check that the archive is not empty.
 # `|| true` because grep -c exits 1 on a zero count, which set -e would take
 # as a build failure — the opposite of what a zero here means.
-count=$(xcrun --sdk iphonesimulator nm -g "$OUT/lib/libmoshclient.a" 2>/dev/null \
+count=$(xcrun --sdk "$SDK_NAME" nm -g "$OUT/lib/libmoshclient.a" 2>/dev/null \
   | grep -cE ' T __ZN' || true)
 echo "    defined C++ symbols: $count"
 [ "$count" -gt 0 ] || { echo "archive is empty"; exit 1; }

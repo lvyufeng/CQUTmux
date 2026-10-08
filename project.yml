@@ -100,7 +100,11 @@ targets:
         # is what its generated protocol code needs. They are linked by path
         # rather than declared as SwiftPM targets because compiling them needs
         # mosh's own source tree, which only that script has.
-        OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/Vendor/moshclient -lmoshclient -lprotobuf-lite"
+        #
+        # $(PLATFORM_NAME) picks the device or simulator build. They cannot be
+        # combined into one archive: lipo refuses to merge two arm64 slices,
+        # even though one is Mach-O platform 2 and the other 7.
+        OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/Vendor/moshclient/$(PLATFORM_NAME) -lmoshclient -lprotobuf-lite"
         CODE_SIGN_ENTITLEMENTS: App/CQUTmux.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
