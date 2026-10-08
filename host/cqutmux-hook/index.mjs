@@ -167,6 +167,66 @@ async function gitDiff(cwd, extra = []) {
   }
 }
 
+// Enumerates tmux sessions, their windows, and whether a pane is attached, so
+// the app can offer a session picker and jump-to-window without a shell round
+// trip. Uses a stable tab-separated format rather than tmux's default grid.
+async function tmuxSessions() {
+  const fmt = [
+    '#{session_name}',
+    '#{session_windows}',
+    '#{session_attached}',
+    '#{session_created}',
+  ].join('\t')
+  let stdout
+  try {
+    ;({ stdout } = await run('tmux', ['list-sessions', '-F', fmt]))
+  } catch (error) {
+    // tmux exits non-zero when no server is running; that is not an error here.
+    const message = String(error.stderr || error.message || '')
+    if (/no server running|no sessions/i.test(message)) return { available: true, sessions: [] }
+    return { available: false, error: message.trim() || 'tmux not available', sessions: [] }
+  }
+
+  const sessions = []
+  for (const line of stdout.split('\n').filter(Boolean)) {
+    const [name, windows, attached, created] = line.split('\t')
+    if (!name) continue
+
+    const winFmt = [
+      '#{window_index}',
+      '#{window_name}',
+      '#{window_active}',
+      '#{window_panes}',
+    ].join('\t')
+    let winOut = ''
+    try {
+      ;({ stdout: winOut } = await run('tmux', ['list-windows', '-t', name, '-F', winFmt]))
+    } catch {
+      // Session may have vanished between the two calls; report what we have.
+    }
+
+    sessions.push({
+      name,
+      windows: Number(windows) || 0,
+      attached: Number(attached) > 0,
+      createdAt: Number(created) ? new Date(Number(created) * 1000).toISOString() : null,
+      windowList: winOut
+        .split('\n')
+        .filter(Boolean)
+        .map(row => {
+          const [index, windowName, active, panes] = row.split('\t')
+          return {
+            index: Number(index),
+            name: windowName,
+            active: Number(active) > 0,
+            panes: Number(panes) || 1,
+          }
+        }),
+    })
+  }
+  return { available: true, sessions }
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
 
@@ -213,6 +273,10 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/usage') {
     return json(res, 200, usageSnapshot())
+  }
+
+  if (req.method === 'GET' && url.pathname === '/sessions') {
+    return json(res, 200, await tmuxSessions())
   }
 
   if (req.method === 'GET' && url.pathname === '/events') {

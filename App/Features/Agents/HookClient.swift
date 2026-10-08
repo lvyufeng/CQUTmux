@@ -193,6 +193,36 @@ final class HookClient {
         let payload = try await request("GET", "/usage")
         return try JSONDecoder().decode(UsageBoard.self, from: payload.body)
     }
+
+    // MARK: - tmux sessions
+
+    func sessions() async throws -> SessionBoard {
+        let payload = try await request("GET", "/sessions")
+        return try JSONDecoder().decode(SessionBoard.self, from: payload.body)
+    }
+}
+
+struct SessionBoard: Codable {
+    struct Window: Codable, Identifiable {
+        var index: Int
+        var name: String
+        var active: Bool
+        var panes: Int
+        var id: Int { index }
+    }
+
+    struct Session: Codable, Identifiable {
+        var name: String
+        var windows: Int
+        var attached: Bool
+        var createdAt: String?
+        var windowList: [Window]
+        var id: String { name }
+    }
+
+    var available: Bool
+    var error: String?
+    var sessions: [Session]
 }
 
 struct UsageBoard: Codable {

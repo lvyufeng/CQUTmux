@@ -8,7 +8,9 @@ struct TerminalScreen: View {
 
     @State private var coordinator = TerminalCoordinator()
     @State private var dictation = VoiceDictation()
+    @State private var showSessions = false
     @Environment(ThemeStore.self) private var themes
+    @Environment(AgentConnection.self) private var connection
 
     var body: some View {
         TerminalViewRepresentable(host: host, credential: credential, coordinator: coordinator, theme: themes.current)
@@ -25,6 +27,7 @@ struct TerminalScreen: View {
                     }
                 }
             }
+            .sheet(isPresented: $showSessions) { sessionPicker }
             .safeAreaInset(edge: .bottom, spacing: 0) { accessoryBar }
             .onAppear {
                 // Partial transcripts stream straight to the shell; a final
@@ -37,6 +40,11 @@ struct TerminalScreen: View {
                         coordinator.terminal?.sendDictatedLine(text)
                     }
                 }
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "sessions" {
+                    showSessions = true
+                }
+                #endif
             }
     }
 
@@ -51,6 +59,7 @@ struct TerminalScreen: View {
                 icon("arrow.left", CtrlKey.leftArrow)
                 icon("arrow.right", CtrlKey.rightArrow)
                 icon("doc.on.doc", CtrlKey.clipboard)
+                sessionsButton
                 dictationButton
             }
             .padding(.horizontal, 10)
@@ -66,6 +75,33 @@ struct TerminalScreen: View {
                     .background(.thinMaterial, in: Capsule())
                     .offset(y: -22)
                     .transition(.opacity)
+            }
+        }
+    }
+
+    /// tmux sessions live behind the host gateway, so the picker needs the
+    /// shared agent connection. It is hidden when no host is connected.
+    @ViewBuilder
+    private var sessionsButton: some View {
+        if connection.client != nil {
+            Button { showSessions = true } label: {
+                Image(systemName: "rectangle.stack").frame(width: 40, height: 32)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.roundedRectangle(radius: 6))
+        }
+    }
+
+    @ViewBuilder
+    private var sessionPicker: some View {
+        if let client = connection.client {
+            SessionPickerView(client: client) { action in
+                switch action {
+                case .attach(let name):
+                    coordinator.terminal?.attachSession(name)
+                case .window(_, let index):
+                    coordinator.terminal?.selectWindow(index: index)
+                }
             }
         }
     }

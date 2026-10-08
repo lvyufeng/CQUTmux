@@ -167,6 +167,26 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         write(Data((trimmed + "\n").utf8))
     }
 
+    /// Switches to a tmux session whether or not we are already inside a tmux
+    /// client: `switch-client` wins when nested, `attach` runs otherwise.
+    func attachSession(_ name: String) {
+        let quoted = "'" + name.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        write(Data("tmux switch-client -t \(quoted) 2>/dev/null || tmux attach -t \(quoted)\n".utf8))
+    }
+
+    /// Jumps to a window in the attached tmux client by sending the prefix key,
+    /// so the command is interpreted by tmux rather than typed into a pane that
+    /// may be busy running an agent. Window indexes past 9 go through tmux's
+    /// command prompt.
+    func selectWindow(index: Int) {
+        write(Data([0x02])) // Ctrl-b
+        if (0...9).contains(index) {
+            write(Data(String(index).utf8))
+        } else {
+            write(Data(":select-window -t \(index)\n".utf8))
+        }
+    }
+
     private func write(_ data: Data) {
         transport.send(data)
     }
