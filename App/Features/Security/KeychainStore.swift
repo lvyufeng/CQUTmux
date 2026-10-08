@@ -6,7 +6,8 @@ import Security
 enum KeychainStore {
     private static let service = "app.cqutmux.ios"
 
-    static func save(_ data: Data, account: String) {
+    @discardableResult
+    static func save(_ data: Data, account: String) -> OSStatus {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -18,7 +19,7 @@ enum KeychainStore {
         attributes[kSecValueData as String] = data
         // Keys require biometrics to read; passwords are readable while unlocked.
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        SecItemAdd(attributes as CFDictionary, nil)
+        return SecItemAdd(attributes as CFDictionary, nil)
     }
 
     static func load(account: String) -> Data? {

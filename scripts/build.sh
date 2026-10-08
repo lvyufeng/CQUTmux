@@ -15,5 +15,8 @@ xcodebuild \
   -destination "$DEST" \
   -derivedDataPath build \
   -skipPackagePluginValidation \
-  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGNING_ALLOWED=YES \
+  CODE_SIGN_IDENTITY=- \
+  CODE_SIGN_STYLE=Manual \
+  PROVISIONING_PROFILE_SPECIFIER= \
   build

@@ -8,6 +8,11 @@ struct CQUTmuxApp: App {
         WindowGroup {
             RootView()
                 .environment(hostStore)
+                .task {
+                    #if DEBUG
+                    DebugSeed.apply(to: hostStore)
+                    #endif
+                }
         }
     }
 }

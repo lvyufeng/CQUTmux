@@ -9,11 +9,9 @@ struct RootView: View {
 
     var body: some View {
         TabView(selection: $selection) {
-            NavigationStack {
-                HostsView()
-            }
-            .tabItem { Label("Terminal", systemImage: "terminal") }
-            .tag(Tab.terminal)
+            HostsView()
+                .tabItem { Label("Terminal", systemImage: "terminal") }
+                .tag(Tab.terminal)
 
             NavigationStack {
                 PlaceholderView(

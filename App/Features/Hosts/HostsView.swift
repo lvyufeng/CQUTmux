@@ -3,8 +3,15 @@ import SwiftUI
 struct HostsView: View {
     @Environment(HostStore.self) private var store
     @State private var editing: Host?
+    @State private var path: [Host] = []
 
     var body: some View {
+        NavigationStack(path: $path) {
+            content
+        }
+    }
+
+    private var content: some View {
         List {
             if store.hosts.isEmpty {
                 ContentUnavailableView {
@@ -44,6 +51,14 @@ struct HostsView: View {
             NavigationStack {
                 HostEditView(host: host) { store.upsert($0) }
             }
+        }
+        .task {
+            #if DEBUG
+            if path.isEmpty,
+               let target = store.hosts.first(where: { $0.hostname == ProcessInfo.processInfo.environment["CQUT_DEV_HOST"] }) {
+                path = [target]
+            }
+            #endif
         }
     }
 }

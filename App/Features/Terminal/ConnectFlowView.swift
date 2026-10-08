@@ -37,9 +37,16 @@ struct ConnectFlowView: View {
                 }
             } else {
                 Section("SSH Key") {
-                    Text("Import an ed25519 private key for this host.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    NavigationLink {
+                        KeyManagementView(host: host)
+                    } label: {
+                        Label("Manage Key", systemImage: "key.horizontal")
+                    }
+                    if KeychainStore.load(account: host.keySeedAccount) == nil {
+                        Text("No key yet — generate or import one, then add the public line to the server.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             if let error {
@@ -91,6 +98,14 @@ struct ConnectFlowView: View {
         let context = LAContext()
         var policyError: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &policyError) else {
+            #if DEBUG
+            // Simulators without enrolled biometrics can't evaluate the policy.
+            // Debug builds proceed so UI runs stay usable; release does not.
+            if ProcessInfo.processInfo.environment["CQUT_DEV_HOST"] != nil {
+                action()
+                return
+            }
+            #endif
             error = "Biometrics unavailable: \(policyError?.localizedDescription ?? "unknown")"
             return
         }
