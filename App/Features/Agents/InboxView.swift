@@ -8,6 +8,8 @@ struct InboxView: View {
 
     @State private var segment: Segment = .inbox
     @State private var activity = ActivityManager()
+    @State private var ledger = NotificationLedger()
+    @State private var sawFirstPage = false
 
     private enum Segment: String, CaseIterable { case inbox = "Inbox", usages = "Usages" }
 
@@ -92,7 +94,11 @@ struct InboxView: View {
             }
             .listStyle(.insetGrouped)
             .onChange(of: client.events) { _, events in
-                activity.update(hostName: connection.host?.displayName ?? "Host", events: events)
+                let hostName = connection.host?.displayName ?? "Host"
+                activity.update(hostName: hostName, events: events)
+                let fresh = ledger.fresh(from: events, isFirstLoad: !sawFirstPage)
+                sawFirstPage = true
+                if !fresh.isEmpty { Task { await ApprovalNotifier.notify(fresh, hostName: hostName) } }
             }
         case .usages:
             ContentUnavailableView {

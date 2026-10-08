@@ -16,6 +16,7 @@ struct CQUTmuxApp: App {
                     #if DEBUG
                     DebugSeed.apply(to: hostStore)
                     #endif
+                    _ = await ApprovalNotifier.requestAuthorization()
                 }
         }
     }

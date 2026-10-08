@@ -25,7 +25,7 @@ struct AgentEvent: Identifiable, Codable, Hashable {
         switch source {
         case "claude-code": "Claude Code"
         case "codex": "Codex"
-        case "app": "Moshi"
+        case "app": "CQUTmux"
         default: source.replacingOccurrences(of: "-", with: " ").capitalized
         }
     }
