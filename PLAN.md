@@ -73,15 +73,19 @@ Live Activity 与灵动岛（`ActivityManager` + `AgentActivityAttributes`）、
 主题与字体持久化、iPad 侧栏、CJK 输入。
 
 **本轮新增**：自定义快捷键（`ShortcutGrammar` + 编辑器 + 附件栏按键，26 项语法用例 + 端到端实测）、
-herdr 宿主侧对接、APNs 两端代码、主机探测不再 source rc、
+herdr 宿主侧对接 + **App 侧会话选择器**、APNs 两端代码、主机探测不再 source rc、
 **deep link**（`cqutmux://tmux?session=…&window=…`、`cqutmux://zellij`、`cqutmux://herdr`、`cqutmux://host?host=…`，
 `DeepLink` 解析 + `CFBundleURLTypes` + `onOpenURL` → 切到终端页 → 解析主机 → 导航进会话 → 连上后自动 attach，
 `scripts/deeplink-test.sh` 端到端实测：宿主 shell 确实执行了 attach 命令；非法路由弹「无法打开链接」且不切页）。
+**顺带修掉一个真实缺陷**：`AgentConnection` 只在 `RootView.task` 里连，
+而该 task 与「从磁盘读 HostStore」存在竞态；竞态输了时，**先进 Terminal 页会让会话选择器与图片粘贴按钮整场缺失**
+（Inbox 页自己会连，所以只在 Terminal 页暴露）。改为由需要这条隧道的 Terminal 页自己保证。
 
 **仍未做**：端侧听写只接了 Apple Speech（无 whisper/parakeet 本地模型）；
 无快捷指令绑定到手势/滑动（Moshi 的 tap/双击/三击/swipe 可绑定）；
 无最近目录、无原生 Windows、无 macOS 菜单栏 / Moshi Desktop（属另一产品）；
-herdr 的 **App 侧**会话选择器与 Jump To 树未接（仅宿主 API 已通）；
+herdr 的 **Jump To 树**（按 tab 层级的树状视图）未接——会话选择器已接，
+但显示的是扁平的 session→tab 两级列表，不是 herdr 原生的 workspace→tab→pane 树；
 Tailscale 不需集成（Moshi 文档亦确认：它工作在系统层，用 100.x 地址直连即可）。
 
 ## 2. 技术选型
@@ -199,7 +203,7 @@ CJK 输入依赖 SwiftTerm 的
 | 项 | 原因 | 现状 |
 |---|---|---|
 | SSH agent forwarding | swift-nio-ssh 无 agent 通道——**已核到线级**：`SSHMessages.ChannelRequestMessage.RequestType` 只有 env/exec/exit-status/exit-signal/pty-req/shell/subsystem/window-change/xon-xoff/signal，没有 `auth-agent-req@openssh.com`，而 `ChannelRequestMessage` 是 internal，没有公开 API 能发出该请求。且 iOS 上也没有可转发的 agent socket | 打开开关时表单明确提示不可用 |
-| herdr | **此前"无公开协议"的判断是错的**：herdr 是开源项目（`herdrdev/herdr`，Apache-2.0，Rust），有公开 CLI 与 socket API。**宿主侧已对接并实测**：`host/cqutmux-hook/herdr.mjs` 经 `herdr api snapshot` / `pane send-text` / `pane read`（走 SSH exec，无需转发——socket 是 Unix socket，`direct-tcpip` 到不了）暴露 `GET /herdr`、`GET /herdr/pane/:id`、`POST /herdr/approve/:id`。**实测**：对真实 herdr 0.9.3 服务器，`GET /herdr` 返回 workspace/agent 与其 `blocked` 状态；`POST /herdr/approve/w1:p2` 把应答键入目标 pane 并执行。**App 侧 UI 尚未接入**（无 herdr 会话选择器 / Jump To） |
+| herdr | **此前"无公开协议"的判断是错的**：herdr 是开源项目（`herdrdev/herdr`，Apache-2.0，Rust），有公开 CLI 与 socket API。**宿主侧已对接并实测**：`host/cqutmux-hook/herdr.mjs` 经 `herdr api snapshot` / `pane send-text` / `pane read`（走 SSH exec，无需转发——socket 是 Unix socket，`direct-tcpip` 到不了）暴露 `GET /herdr`、`GET /herdr/pane/:id`、`POST /herdr/approve/:id`。**App 侧已接入并实测**：herdr 的 workspace 折进既有的 `/sessions` 板（`mux: "herdr"`），会话选择器直接渲染，并显示 herdr 自己的 agent 状态；跳转走 `herdr tab focus <tab_id>`。上表已实测：对真实 herdr 0.9.3，选择器列出 `~ herdr blocked attached 2w` 与两个 tab；`herdr tab focus w1:t2` 使 `focused_tab_id` 实际变为 `w1:t2`。**踩到的真坑**：最初从 `agents` 数组反推 tab 列表，导致**没有 agent 的 tab 被静默丢掉**（实测 w1:t2 就消失了）；改为读 snapshot 自己的 `tabs` 数组。另：herdr 按 **tab id** 而非序号寻址 tab，因此窗口选择器从 `Int index` 改成字符串 `selector`（tmux/zellij 传序号字符串，herdr 传 `w1:t2`）。**仍未接**：Jump To 树（workspace→tab→pane 的层级视图） |
 | 远程推送（APNs） | **两端代码已写全并已跑通到系统边界**：App 侧 `PushCoordinator`/`AppDelegate`（令牌注册、`CQUT_APPROVAL` 分类的锁屏 Allow/Deny、前后台推送回调）→ `POST /push/register` → 宿主 `push.mjs`（HTTP/2 + ES256 provider JWT，签名经 openssl 生成的测试密钥**验签通过**、64 字节裸 r‖s 编码正确）。**卡在签名**：模拟器日志 `Push registration with a nil environment`——无 `aps-environment` entitlement，而该 entitlement 必须有付费开发者账号的 provisioning profile。本地通知 + webhook 告警已覆盖同类场景 |
 | Tailscale 网络探测 | **不需要**：Moshi 自己的文档写明它不做内置集成（"no built-in Tailscale host picker"，VPN 在系统层透明工作），用 `100.x.y.z` / MagicDNS 名当普通 SSH 目标即可 | 与 Moshi 一致；直连与隧道不受影响 |
 

@@ -316,21 +316,36 @@ struct SimulatorBoard: Codable {
 
 struct SessionBoard: Codable {
     struct Window: Codable, Identifiable {
-        var index: Int
+        /// What the owning mux takes to reach this window when jumping to it:
+        /// a numeric index for tmux and zellij, a tab id (`w1:t2`) for herdr.
+        /// Kept as a string so neither mux has to be forced into the other's
+        /// addressing scheme.
+        var selector: String
         var name: String
         var active: Bool
         var panes: Int
-        var id: Int { index }
+        var id: String { selector }
+
+        /// What to show for this window. A numeric selector is the index the
+        /// user types after the tmux prefix, so it is worth showing; herdr's
+        /// is an opaque tab id (`w1:t2`) and would only be noise.
+        var label: String {
+            selector.allSatisfy(\.isNumber) ? "\(selector): \(name)" : name
+        }
     }
 
     struct Session: Codable, Identifiable {
-        /// Which multiplexer owns the session: "tmux" or "zellij".
+        /// Which multiplexer owns the session: "tmux", "zellij" or "herdr".
         var mux: String
         var name: String
         var windows: Int
         var attached: Bool
         var createdAt: String?
         var windowList: [Window]
+        /// Herdr's own view of the agent in the workspace — `working`,
+        /// `blocked`, `idle`, `done`. Absent for tmux and zellij, which have
+        /// no such notion.
+        var status: String?
         var id: String { "\(mux):\(name)" }
     }
 

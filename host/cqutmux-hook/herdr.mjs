@@ -112,6 +112,15 @@ export async function herdrSnapshot(args) {
       tabCount: w.tab_count ?? 0,
       status: w.agent_status || 'unknown',
     })),
+    // The tabs are listed separately from the agents on purpose: a tab with no
+    // agent running in it is still a tab the user can jump to, and deriving the
+    // list from the agents would silently drop it.
+    tabs: tabs.map(t => ({
+      id: t.tab_id,
+      label: t.label || t.tab_id,
+      workspace: label.get(t.workspace_id) || t.workspace_id || '',
+      focused: Boolean(t.focused),
+    })),
     agents: agents.map(a => ({
       paneId: a.pane_id,
       agent: a.agent || 'agent',

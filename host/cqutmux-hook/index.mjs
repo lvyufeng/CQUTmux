@@ -392,7 +392,7 @@ async function tmuxSessions() {
         .map(row => {
           const [index, windowName, active, panes] = row.split('\t')
           return {
-            index: Number(index),
+            selector: String(Number(index)),
             name: windowName,
             active: Number(active) > 0,
             panes: Number(panes) || 1,
@@ -428,7 +428,7 @@ async function zellijSessions() {
     try {
       const { stdout: tabs } = await run('zellij', ['-s', name, 'action', 'list-tabs', '--json'])
       windowList = JSON.parse(tabs).map(tab => ({
-        index: Number(tab.tab_id) || 0,
+        selector: String(Number(tab.tab_id) || 0),
         name: tab.name || `tab ${tab.tab_id}`,
         active: Boolean(tab.active),
         panes: Array.isArray(tab.panes) ? tab.panes.length : 1,
@@ -449,11 +449,53 @@ async function zellijSessions() {
   return { available: true, sessions }
 }
 
+// Herdr workspaces in the shape the session picker already renders, so it is
+// one list rather than a second screen with its own ideas about sessions.
+//
+// A herdr "session" here is a named persistent session (`herdr --session <name>`),
+// which is what `herdr session attach` reattaches to. Workspaces are what the
+// snapshot enumerates, so they name the rows and the tabs become the windows a
+// tap can jump to. Herdr's own agent status rides along: a picker that says
+// which workspace is blocked is more use than one that only lists names.
+async function herdrSessions(args) {
+  const snapshot = await herdrSnapshot(args)
+  if (!snapshot.installed) return { available: false, error: snapshot.message, sessions: [] }
+
+  // Which workspace each tab belongs to. Already in the order herdr reported
+    // them, so the numbered label below matches what the user sees in herdr.
+  const tabsByWorkspace = new Map()
+  for (const tab of snapshot.tabs) {
+    if (!tabsByWorkspace.has(tab.workspace)) tabsByWorkspace.set(tab.workspace, [])
+    tabsByWorkspace.get(tab.workspace).push(tab)
+  }
+
+  const sessions = snapshot.workspaces.map(workspace => {
+    const tabs = tabsByWorkspace.get(workspace.label) ?? []
+    return {
+      mux: 'herdr',
+      name: workspace.label,
+      windows: tabs.length || workspace.tabCount,
+      attached: workspace.focused,
+      createdAt: null,
+      status: workspace.status,
+      // Herdr addresses a tab by id, not by position, so the selector is the
+      // id the snapshot gave us even though the label is the position.
+      windowList: tabs.map((tab, position) => ({
+        selector: tab.id,
+        name: tab.label || String(position + 1),
+        active: tab.focused,
+        panes: 1,
+      })),
+    }
+  })
+  return { available: true, sessions }
+}
+
 // The unified board the app reads: sessions from every multiplexer we can
 // find, each tagged with its `mux`. `available` is false only when none of
 // them are installed.
-async function multiplexers() {
-  const results = await Promise.all([tmuxSessions(), zellijSessions()])
+async function multiplexers(args) {
+  const results = await Promise.all([tmuxSessions(), zellijSessions(), herdrSessions(args)])
   const sessions = results.flatMap(r => r.sessions)
   if (sessions.length) return { available: true, sessions }
   // No sessions anywhere: report unavailable only if no mux is installed.
@@ -521,7 +563,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/sessions') {
-    return json(res, 200, await multiplexers())
+    return json(res, 200, await multiplexers(args))
   }
 
   if (req.method === 'GET' && url.pathname === '/ports') {

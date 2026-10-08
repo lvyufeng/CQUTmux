@@ -21,7 +21,7 @@ struct SessionPickerView: View {
     /// client to drive.
     enum MuxAction {
         case attach(mux: String, name: String)
-        case window(mux: String, session: String, index: Int)
+        case window(mux: String, session: String, selector: String)
     }
 
     var body: some View {
@@ -59,11 +59,11 @@ struct SessionPickerView: View {
                                 }
                                 ForEach(session.windowList) { window in
                                     Button {
-                                        send(.window(mux: session.mux, session: session.name, index: window.index))
+                                        send(.window(mux: session.mux, session: session.name, selector: window.selector))
                                         dismiss()
                                     } label: {
                                         HStack {
-                                            Text("\(window.index): \(window.name)")
+                                            Text(window.label)
                                                 .font(.system(.body, design: .monospaced))
                                             Spacer()
                                             if window.panes > 1 {
@@ -86,6 +86,11 @@ struct SessionPickerView: View {
                                     Text(session.mux)
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
+                                    if let status = session.status, status != "unknown" {
+                                        Text(status)
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(status == "blocked" ? .orange : Theme.accent)
+                                    }
                                     Spacer()
                                     if session.attached {
                                         Text("attached")

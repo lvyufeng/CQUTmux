@@ -288,7 +288,7 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
 
     @objc private func hardwareWindow(_ sender: UIKeyCommand) {
         guard let input = sender.input, let index = Int(input) else { return }
-        selectWindow(mux: "tmux", session: "", index: index)
+        selectWindow(mux: "tmux", session: "", selector: String(index))
     }
 
     // MARK: - Key injection (used by the accessory bar)
@@ -328,27 +328,43 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
 
     /// Switches to a session on whichever multiplexer owns it. tmux prefers
     /// `switch-client` when we are already inside a client and `attach`
-    /// otherwise; zellij re-attaches by name.
+    /// otherwise; zellij and herdr both re-attach by name.
     func attachSession(mux: String, name: String) {
         let quoted = "'" + name.replacingOccurrences(of: "'", with: "'\\''") + "'"
         switch mux {
         case "zellij":
             write(Data("zellij attach \(quoted)\n".utf8))
+        case "herdr":
+            // `herdr --session` launches or attaches to the named persistent
+            // session; the bare form would attach to the default one and land
+            // the user in the wrong place.
+            write(Data("herdr --session \(quoted)\n".utf8))
         default:
             write(Data("tmux switch-client -t \(quoted) 2>/dev/null || tmux attach -t \(quoted)\n".utf8))
         }
     }
 
-    /// Jumps to a window/tab in the attached client. tmux jumps by sending the
-    /// prefix key — so the command is interpreted by tmux rather than typed
-    /// into a pane that may be busy running an agent — falling back to the
-    /// command prompt past index 9. zellij has no prefix port; it gets a
-    /// `go-to-tab` action instead.
-    func selectWindow(mux: String, session: String, index: Int) {
+    /// Jumps to a window/tab in the attached client.
+    ///
+    /// `selector` is how the owning mux addresses the window, and it is not a
+    /// number for every mux: tmux and zellij use an index, herdr addresses a
+    /// tab by id (`w1:t2`). The picker passes back whatever it was given, so
+    /// this never has to reconstruct an id from a position.
+    ///
+    /// tmux jumps by sending the prefix key — so the command is interpreted by
+    /// tmux rather than typed into a pane that may be busy running an agent —
+    /// falling back to the command prompt past index 9. zellij has no prefix
+    /// port; it gets a `go-to-tab` action instead.
+    func selectWindow(mux: String, session: String, selector: String) {
         switch mux {
         case "zellij":
+            guard let index = Int(selector) else { return }
             write(Data("zellij -s \(session) action go-to-tab \(index + 1)\n".utf8))
+        case "herdr":
+            guard !selector.isEmpty else { return }
+            write(Data("herdr tab focus \(selector)\n".utf8))
         default:
+            guard let index = Int(selector) else { return }
             write(Data([0x02])) // Ctrl-b
             if (0...9).contains(index) {
                 write(Data(String(index).utf8))

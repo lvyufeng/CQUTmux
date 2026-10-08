@@ -65,17 +65,26 @@ struct TerminalScreen: View {
                 guard status.isLive, let session = link?.session, !didFollowLink else { return }
                 didFollowLink = true
                 coordinator.terminal?.attachSession(mux: session.mux, name: session.name)
-                if let window = session.window, window >= 0 {
-                    // tmux needs a beat to have attached before the prefix
-                    // chord means "this client, this window"; sending it into
-                    // the same write appended to the attach would be read as
-                    // text by the shell the attach is still replacing.
+                if let window = session.window, !window.isEmpty {
+                    // A beat, because the client has to have attached before
+                    // the jump means "this client, this window"; sending it in
+                    // the same write as the attach would be read as text by the
+                    // shell the attach is still replacing.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                         coordinator.terminal?.selectWindow(
-                            mux: session.mux, session: session.name, index: window
+                            mux: session.mux, session: session.name, selector: window
                         )
                     }
                 }
+            }
+            // The session picker and the paste-image button both ride the gateway
+            // tunnel that the Inbox owns. The shell connects it at launch, but
+            // that races the host store being read from disk — and when it
+            // loses, opening the Terminal tab first leaves both buttons
+            // missing for the rest of the session. Asking here makes the tab
+            // that needs the tunnel responsible for it.
+            .task {
+                if connection.client == nil { connection.connect(to: host) }
             }
             .onAppear {
                 // Partial transcripts stream straight to the shell; a final
@@ -268,8 +277,8 @@ struct TerminalScreen: View {
                 switch action {
                 case .attach(let mux, let name):
                     coordinator.terminal?.attachSession(mux: mux, name: name)
-                case .window(let mux, let session, let index):
-                    coordinator.terminal?.selectWindow(mux: mux, session: session, index: index)
+                case .window(let mux, let session, let selector):
+                    coordinator.terminal?.selectWindow(mux: mux, session: session, selector: selector)
                 }
             }
         }

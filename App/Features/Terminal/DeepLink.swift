@@ -17,7 +17,9 @@ import Foundation
 struct DeepLink: Equatable {
     enum Target: Equatable {
         /// Attach to a multiplexer session, optionally landing on a window.
-        case session(mux: String, name: String, window: Int?)
+        /// `window` is a string because not every mux addresses windows by
+        /// number — herdr uses a tab id like `w1:t2`.
+        case session(mux: String, name: String, window: String?)
         case host(String)
     }
 
@@ -66,10 +68,12 @@ struct DeepLink: Equatable {
             guard let name = value("session") ?? value("workspace") else {
                 return .failure(.missingParameter("session"))
             }
-            var window: Int?
-            if let raw = value("window") {
-                guard let number = Int(raw) else { return .failure(.badWindow(raw)) }
-                window = number
+            // tmux and zellij take a number here, and a typo should be caught
+            // rather than typed at the shell; herdr takes an opaque tab id, so
+            // the value is only checked when the mux expects a number.
+            let window = value("window")
+            if route != "herdr", let window, Int(window) == nil {
+                return .failure(.badWindow(window))
             }
             return .success(DeepLink(target: .session(mux: route, name: name, window: window)))
 
@@ -91,7 +95,7 @@ struct DeepLink: Equatable {
     /// here would be a second thing to keep in step with the session picker.
     /// The caller hands these to the same `attachSession` / `selectWindow` the
     /// picker calls, so a link and a tap cannot drift apart.
-    var session: (mux: String, name: String, window: Int?)? {
+    var session: (mux: String, name: String, window: String?)? {
         guard case .session(let mux, let name, let window) = target else { return nil }
         return (mux, name, window)
     }
