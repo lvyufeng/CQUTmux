@@ -52,6 +52,10 @@ enum TransportFactory {
         host: Host
     ) -> ETTransport {
         let launcher = SSHETLauncher(configuration: configuration)
+        // The form collects the port, so honour it: a host running etserver
+        // somewhere other than 2022 would otherwise fail with no explanation,
+        // and a field that silently does nothing is worse than no field.
+        launcher.serverPort = host.etPort ?? 2022
         let transport = ETTransport()
         transport.launcher = launcher
         return transport

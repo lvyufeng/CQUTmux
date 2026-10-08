@@ -56,15 +56,18 @@ struct HostEditView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                // ET needs a program on the host just as mosh does, and it is the one
+                // to reach for when mosh's UDP is blocked: ET is TCP, on the port
+                // below, over a connection the host is already reachable on.
                 if host.transport == .et {
-                    Label("ET is not available in this build — this host will not connect.",
-                          systemImage: "exclamationmark.triangle")
+                    Label("Needs etterminal on the host. TCP, so it works where mosh's UDP is blocked.",
+                          systemImage: "info.circle")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.secondary)
                 }
 
                 if host.transport == .auto {
-                    Label("Tries mosh first, then falls back to SSH if the host has no mosh-server.",
+                    Label("Tries mosh, then ET if the host has no mosh-server, then SSH.",
                           systemImage: "info.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
