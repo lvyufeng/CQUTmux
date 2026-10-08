@@ -43,6 +43,16 @@ struct HostEditView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                // Mosh and ET aren't wired up yet (their C/C++ dependencies
+                // don't cross-compile in this project's toolchain). Say so
+                // rather than letting the host silently behave like plain SSH.
+                if host.transport == .mosh || host.transport == .et {
+                    Label("Not available yet — this host will connect over SSH.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+
                 if host.transport == .ssh || host.transport == .auto {
                     TextField("Jump host (user@host:22)", text: Binding(
                         get: { host.jumpHost ?? "" },
