@@ -213,6 +213,56 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         }
     }
 
+    // MARK: - Hardware keyboard
+
+    /// Shortcuts for a physical keyboard, matching the set Moshi documents.
+    /// SwiftTerm has no hardware-key chrome of its own, so these are declared
+    /// here and dispatched to the same helpers the accessory bar uses.
+    override var keyCommands: [UIKeyCommand]? {
+        var commands: [UIKeyCommand] = [
+            UIKeyCommand(input: "k", modifierFlags: .command, action: #selector(hardwareClear),
+                         discoverabilityTitle: "Clear screen"),
+            UIKeyCommand(input: "o", modifierFlags: .command, action: #selector(hardwareToggleControl),
+                         discoverabilityTitle: "Toggle Ctrl"),
+            UIKeyCommand(input: "r", modifierFlags: .command, action: #selector(hardwareReconnect),
+                         discoverabilityTitle: "Reconnect"),
+            UIKeyCommand(input: "v", modifierFlags: .command, action: #selector(hardwarePaste),
+                         discoverabilityTitle: "Paste"),
+            UIKeyCommand(input: "[", modifierFlags: .command, action: #selector(hardwarePrevWindow),
+                         discoverabilityTitle: "Previous window"),
+            UIKeyCommand(input: "]", modifierFlags: .command, action: #selector(hardwareNextWindow),
+                         discoverabilityTitle: "Next window"),
+        ]
+        // ⌘1…⌘9 jump to a tmux window by index.
+        for index in 1...9 {
+            commands.append(
+                UIKeyCommand(input: String(index), modifierFlags: .command,
+                             action: #selector(hardwareWindow(_:)),
+                             discoverabilityTitle: "Window \(index)")
+            )
+        }
+        return (super.keyCommands ?? []) + commands
+    }
+
+    /// Ctrl-L clears the screen without touching the running program's state.
+    @objc private func hardwareClear() { write(Data([0x0C])) }
+    @objc private func hardwareToggleControl() { toggleControl() }
+    @objc private func hardwareReconnect() { reconnect() }
+    @objc private func hardwarePaste() { pasteFromClipboard() }
+
+    @objc private func hardwarePrevWindow() {
+        write(Data([0x02])); write(Data([0x70])) // Ctrl-b p
+    }
+
+    @objc private func hardwareNextWindow() {
+        write(Data([0x02])); write(Data([0x6E])) // Ctrl-b n
+    }
+
+    @objc private func hardwareWindow(_ sender: UIKeyCommand) {
+        guard let input = sender.input, let index = Int(input) else { return }
+        selectWindow(mux: "tmux", session: "", index: index)
+    }
+
     // MARK: - Key injection (used by the accessory bar)
 
     /// Ctrl is a sticky modifier SwiftTerm already understands: toggling it
