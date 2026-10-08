@@ -13,6 +13,7 @@ struct RootView: View {
         switch ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] {
         case "inbox": return .inbox
         case "code": return .code
+        case "usages": return .usages
         case "theme", "settings": return .settings
         default: break
         }
@@ -39,11 +40,7 @@ struct RootView: View {
             .tag(Tab.code)
 
             NavigationStack {
-                PlaceholderView(
-                    title: "Usages",
-                    systemImage: "gauge.with.dots.needle.50percent",
-                    message: "5h and 7d rate-limit burn pace for every agent."
-                )
+                UsagesView()
             }
             .tabItem { Label("Usages", systemImage: "gauge.with.dots.needle.50percent") }
             .tag(Tab.usages)

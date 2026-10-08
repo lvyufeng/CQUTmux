@@ -188,6 +188,31 @@ final class HookClient {
         let payload = try await request("GET", "/diff?path=\(encoded)")
         return try JSONDecoder().decode(DiffResult.self, from: payload.body)
     }
+
+    func usage() async throws -> UsageBoard {
+        let payload = try await request("GET", "/usage")
+        return try JSONDecoder().decode(UsageBoard.self, from: payload.body)
+    }
+}
+
+struct UsageBoard: Codable {
+    var generatedAt: String?
+    var entries: [UsageEntry]
+}
+
+struct UsageEntry: Codable, Identifiable {
+    var source: String
+    var label: String
+    var pace: String?
+    var windows: [UsageWindow]
+    var id: String { source }
+}
+
+struct UsageWindow: Codable, Identifiable {
+    var label: String
+    var percent: Double
+    var resetIn: String?
+    var id: String { label }
 }
 
 struct DirectoryListing: Codable {

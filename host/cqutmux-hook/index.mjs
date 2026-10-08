@@ -99,6 +99,57 @@ async function listDirectory(dir) {
   return { path: relative(args.root, dir) || '.', entries: items }
 }
 
+// Agent rate-limit windows. Claude Code enforces a 5-hour rolling window and a
+// 7-day window; the burn pace compares elapsed wall-clock against usage.
+const WINDOWS = [
+  { label: '5h', ms: 5 * 60 * 60 * 1000, cap: 200 },
+  { label: '7d', ms: 7 * 24 * 60 * 60 * 1000, cap: 800 },
+]
+
+function humanize(ms) {
+  if (ms <= 0) return 'now'
+  // Round to whole minutes first, so 59.6m carries into the hour instead of
+  // printing "4h 60m".
+  const totalMinutes = Math.round(ms / 60000)
+  const h = Math.floor(totalMinutes / 60)
+  const m = totalMinutes % 60
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+function usageSnapshot() {
+  const now = Date.now()
+  const bySource = new Map()
+  for (const e of events) {
+    if (e.source === 'app') continue
+    const t = Date.parse(e.at)
+    const list = bySource.get(e.source) || []
+    list.push(t)
+    bySource.set(e.source, list)
+  }
+
+  const entries = []
+  for (const [source, times] of bySource) {
+    const windows = WINDOWS.map(w => {
+      const used = times.filter(t => now - t < w.ms).length
+      const percent = Math.min(100, Math.round((used / w.cap) * 1000) / 10)
+      // Reset when the oldest event in the window ages out.
+      const oldest = times.filter(t => now - t < w.ms).sort((a, b) => a - b)[0]
+      return {
+        label: w.label,
+        percent,
+        resetIn: oldest ? humanize(oldest + w.ms - now) : null,
+      }
+    })
+    // Pace: is recent burn faster than the window averages?
+    const recent = times.filter(t => now - t < WINDOWS[0].ms).length
+    const pace = recent > WINDOWS[0].cap * 0.5
+      ? `${source} is burning the 5h window fast`
+      : `${source} usage pace is steady`
+    entries.push({ source, label: source.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), windows, pace })
+  }
+  return { generatedAt: new Date().toISOString(), entries }
+}
+
 async function gitDiff(cwd, extra = []) {
   try {
     const { stdout: diff } = await run('git', ['diff', '--no-color', ...extra], {
@@ -158,6 +209,10 @@ const server = createServer(async (req, res) => {
     const dir = safePath(url.searchParams.get('path') || '')
     if (!dir) return json(res, 403, { error: 'path outside root' })
     return json(res, 200, await gitDiff(dir))
+  }
+
+  if (req.method === 'GET' && url.pathname === '/usage') {
+    return json(res, 200, usageSnapshot())
   }
 
   if (req.method === 'GET' && url.pathname === '/events') {

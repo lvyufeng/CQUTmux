@@ -21,6 +21,8 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
     private let startupCommand: String?
     private let theme: TerminalTheme
     private var didRunStartup = false
+    /// Font size that pinch zoom scales from, captured when a pinch begins.
+    private var baseFontSize: CGFloat = 12
     private var status: Status = .idle {
         didSet { if status != oldValue { onStatus?(status) } }
     }
@@ -40,7 +42,9 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
 
         terminalDelegate = self
         font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        baseFontSize = font.pointSize
         theme.apply(to: self)
+        installGestures()
 
         transport.onEvent = { [weak self] event in
             self?.handle(event)
@@ -50,6 +54,52 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     deinit { transport.disconnect() }
+
+    // MARK: - Gestures
+
+    private lazy var pinch: UIPinchGestureRecognizer = {
+        let gesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
+        return gesture
+    }()
+
+    private func installGestures() {
+        addGestureRecognizer(pinch)
+
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
+        doubleTap.numberOfTapsRequired = 2
+        addGestureRecognizer(doubleTap)
+
+        // A three-finger horizontal swipe switches tmux windows, matching
+        // Moshi's terminal gestures. The window index keys are Ctrl-b then
+        // 0-9; a swipe left/right walks them.
+        for (direction, delta) in [(UISwipeGestureRecognizer.Direction.left, 1), (.right, -1)] {
+            let swipe = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipe(_:)))
+            swipe.direction = direction
+            swipe.numberOfTouchesRequired = 3
+            swipe.accessibilityValue = String(delta)
+            addGestureRecognizer(swipe)
+        }
+    }
+
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        guard gesture.state == .changed else {
+            if gesture.state == .ended { baseFontSize = font.pointSize }
+            return
+        }
+        let size = max(7, min(28, baseFontSize * gesture.scale))
+        font = UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    }
+
+    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        sendTab()
+    }
+
+    @objc private func handleSwipe(_ gesture: UISwipeGestureRecognizer) {
+        guard let delta = Int(gesture.accessibilityValue ?? "0") else { return }
+        // Ctrl-b n / Ctrl-b p — next/previous tmux window.
+        write(Data([0x02]))
+        write(Data(delta > 0 ? [0x6E] : [0x70]))
+    }
 
     // MARK: - Session control
 
