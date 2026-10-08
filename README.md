@@ -19,6 +19,7 @@ See plan: [PLAN.md](PLAN.md).
 | 3 | Host gateway + agent Inbox / Diff / Files / History | ✅ |
 | 4 | Notifications, Live Activity, voice, image paste, tmux picker | ✅ |
 | 5 | zellij, iPad sidebar, browser + simulator preview, gateway token | ✅ |
+| 6 | Apple Watch approvals | 🟡 builds and embeds; not run — no watch simulator runtime is installed |
 
 Each phase was exercised in the simulator against a real sshd on a loopback
 port, with the host gateway live. See [PLAN.md](PLAN.md) for what is verified
@@ -63,6 +64,7 @@ App/                    SwiftUI app (features grouped by domain)
 Packages/CQUTTransport/ local SwiftPM package: the SSH transport
 host/cqutmux-hook/      host-side gateway daemon (Node.js)
 Widgets/                Live Activity / Dynamic Island extension
+Watch/                  watchOS app: approve agent requests from the wrist
 scripts/                bootstrap / build / run
 ```
 

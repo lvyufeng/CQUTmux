@@ -16,6 +16,10 @@ final class HookClient {
     private(set) var events: [AgentEvent] = []
     private(set) var lastError: String?
 
+    /// Fired after every merge, so a mirror (the watch) can be kept current
+    /// without polling the client. Delivered on the main queue.
+    var onEventsChanged: (@Sendable ([AgentEvent]) -> Void)?
+
     private let transport = SSHTransport()
     private let configuration: TransportConfiguration
     private let remotePort: Int
@@ -182,6 +186,8 @@ final class HookClient {
         var byId = Dictionary(uniqueKeysWithValues: events.map { ($0.id, $0) })
         for event in incoming { byId[event.id] = event }
         events = byId.values.sorted { $0.id > $1.id }
+        let snapshot = events
+        DispatchQueue.main.async { [weak self] in self?.onEventsChanged?(snapshot) }
     }
 
     func resolve(_ event: AgentEvent, allow: Bool) {

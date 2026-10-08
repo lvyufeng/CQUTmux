@@ -42,16 +42,45 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.cqutmux.ios.widgets
         TARGETED_DEVICE_FAMILY: "1,2"
 
+  CQUTmuxWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "11.0"
+    sources:
+      - path: Watch
+      - path: App/Shared/WatchPayload.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.cqutmux.ios.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+    info:
+      path: Watch/Info.plist
+      properties:
+        CFBundleDisplayName: CQUTmux
+        WKApplication: true
+        # Not an INFOPLIST_KEY_* setting — that route only covers a whitelist of
+        # keys, and this one isn't on it. Without it the watch never pairs.
+        WKCompanionAppBundleIdentifier: app.cqutmux.ios
+        WKRunsIndependentlyOfCompanionApp: false
+
   CQUTmux:
     type: application
     platform: iOS
     deploymentTarget: "18.0"
     sources:
       - path: App
+      # The watch has its own target; these files would otherwise compile into
+      # the phone app too, where WatchConnectivity is present but the watch UI
+      # is not, and a second @main would break the build.
+      - path: Watch
+        excludes:
+          - "**/*"
     dependencies:
       - package: SwiftTerm
       - package: CQUTTransport
       - target: CQUTmuxWidgets
+        embed: true
+      - target: CQUTmuxWatch
         embed: true
     settings:
       base:
