@@ -24,6 +24,24 @@ packages:
     path: Packages/CQUTTransport
 
 targets:
+  CQUTmuxWidgets:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: Widgets
+      - path: App/Shared
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: CQUTmux
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.cqutmux.ios.widgets
+        TARGETED_DEVICE_FAMILY: "1,2"
+
   CQUTmux:
     type: application
     platform: iOS
@@ -33,6 +51,8 @@ targets:
     dependencies:
       - package: SwiftTerm
       - package: CQUTTransport
+      - target: CQUTmuxWidgets
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.cqutmux.ios

@@ -7,6 +7,7 @@ struct InboxView: View {
     @Environment(AgentConnection.self) private var connection
 
     @State private var segment: Segment = .inbox
+    @State private var activity = ActivityManager()
 
     private enum Segment: String, CaseIterable { case inbox = "Inbox", usages = "Usages" }
 
@@ -90,6 +91,9 @@ struct InboxView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .onChange(of: client.events) { _, events in
+                activity.update(hostName: connection.host?.displayName ?? "Host", events: events)
+            }
         case .usages:
             ContentUnavailableView {
                 Label("Usages", systemImage: "gauge.with.dots.needle.50percent")
