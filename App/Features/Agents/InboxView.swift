@@ -1,13 +1,11 @@
 import SwiftUI
-import CQUTTransport
 
 /// The agent feed. Mirrors Moshi's Inbox: a host picker, pending approvals
 /// with Allow / Deny, and a running log of what agents have been doing.
 struct InboxView: View {
     @Environment(HostStore.self) private var store
+    @Environment(AgentConnection.self) private var connection
 
-    @State private var selectedHost: Host?
-    @State private var client: HookClient?
     @State private var segment: Segment = .inbox
 
     private enum Segment: String, CaseIterable { case inbox = "Inbox", usages = "Usages" }
@@ -20,24 +18,24 @@ struct InboxView: View {
                 } description: {
                     Text("Add a host on the Terminal tab, install cqutmux-hook on it, then pick it here.")
                 }
-            } else if let client {
+            } else if let client = connection.client {
                 feed(client)
             } else {
                 ContentUnavailableView {
                     Label("Pick a host", systemImage: "antenna.radiowaves.left.and.right")
                 } description: {
-                    Text("Choose which machine's agent feed to watch.")
+                    Text(connection.lastError ?? "Choose which machine's agent feed to watch.")
                 } actions: {
-                    hostPicker
+                    hostMenu
                 }
             }
         }
         .navigationTitle("Inbox")
         .task {
             #if DEBUG
-            if client == nil,
+            if connection.client == nil,
                let target = store.hosts.first(where: { $0.hostname == ProcessInfo.processInfo.environment["CQUT_DEV_HOST"] }) {
-                connect(to: target)
+                connection.connect(to: target)
             }
             #endif
         }
@@ -50,9 +48,7 @@ struct InboxView: View {
                 .frame(width: 200)
             }
             ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    hostPicker
-                } label: {
+                Menu { hostMenu } label: {
                     Label("Host", systemImage: "server.rack")
                 }
             }
@@ -60,12 +56,10 @@ struct InboxView: View {
     }
 
     @ViewBuilder
-    private var hostPicker: some View {
+    private var hostMenu: some View {
         ForEach(store.hosts) { host in
-            Button {
-                connect(to: host)
-            } label: {
-                Text("\(host.displayName) — \(host.target)")
+            Button("\(host.displayName) — \(host.target)") {
+                connection.connect(to: host)
             }
         }
     }
@@ -96,7 +90,6 @@ struct InboxView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .refreshable { client.start() }
         case .usages:
             ContentUnavailableView {
                 Label("Usages", systemImage: "gauge.with.dots.needle.50percent")
@@ -104,29 +97,6 @@ struct InboxView: View {
                 Text("Rate-limit burn pace per agent lands here.")
             }
         }
-    }
-
-    private func connect(to host: Host) {
-        client?.stop()
-        selectedHost = host
-        let seed = KeychainStore.load(account: host.keySeedAccount)
-        let credential: SSHCredential
-        if let seed {
-            credential = .ed25519Seed(seed)
-        } else if let password = KeychainStore.load(account: host.passwordAccount),
-                  let text = String(data: password, encoding: .utf8) {
-            credential = .password(text)
-        } else {
-            // Nothing stored yet — the Terminal tab is where credentials are entered.
-            return
-        }
-
-        let configuration = TransportConfiguration(
-            host: host.hostname, port: host.port, username: host.username, credential: credential
-        )
-        let client = HookClient(configuration: configuration)
-        self.client = client
-        client.start()
     }
 }
 
@@ -163,7 +133,8 @@ private struct EventRow: View {
                 }
                 .controlSize(.small)
             } else if let decision = event.decision {
-                Label(decision == "allow" ? "Approved" : "Denied", systemImage: decision == "allow" ? "checkmark.circle" : "xmark.circle")
+                Label(decision == "allow" ? "Approved" : "Denied",
+                      systemImage: decision == "allow" ? "checkmark.circle" : "xmark.circle")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

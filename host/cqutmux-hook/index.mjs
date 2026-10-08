@@ -15,15 +15,24 @@
 
 import { createServer } from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { promisify } from 'node:util'
+import { execFile } from 'node:child_process'
+import { readdir, readFile, stat } from 'node:fs/promises'
+import { resolve, relative, isAbsolute, join } from 'node:path'
+import { homedir } from 'node:os'
+
+const run = promisify(execFile)
 
 const DEFAULT_PORT = 24543
 const MAX_EVENTS = 2000
+const MAX_FILE_BYTES = 512 * 1024
 
 function parseArgs(argv) {
-  const args = { port: DEFAULT_PORT, token: process.env.CQUTMUX_TOKEN || '' }
+  const args = { port: DEFAULT_PORT, token: process.env.CQUTMUX_TOKEN || '', root: homedir() }
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port') args.port = Number(argv[++i])
     else if (argv[i] === '--token') args.token = argv[++i]
+    else if (argv[i] === '--root') args.root = resolve(argv[++i])
   }
   return args
 }
@@ -72,6 +81,41 @@ function json(res, status, payload) {
   res.end(body)
 }
 
+// Resolve a client-supplied path and refuse anything outside the allowed root.
+function safePath(requested) {
+  const candidate = isAbsolute(requested || '') ? requested : join(args.root, requested || '')
+  const resolved = resolve(candidate)
+  const rel = relative(args.root, resolved)
+  if (rel.startsWith('..') || isAbsolute(rel)) return null
+  return resolved
+}
+
+async function listDirectory(dir) {
+  const entries = await readdir(dir, { withFileTypes: true })
+  const items = entries
+    .filter(e => !e.name.startsWith('.'))
+    .map(e => ({ name: e.name, dir: e.isDirectory() }))
+    .sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1))
+  return { path: relative(args.root, dir) || '.', entries: items }
+}
+
+async function gitDiff(cwd, extra = []) {
+  try {
+    const { stdout: diff } = await run('git', ['diff', '--no-color', ...extra], {
+      cwd,
+      maxBuffer: 8 * 1024 * 1024,
+    })
+    const { stdout: status } = await run('git', ['status', '--porcelain'], { cwd })
+    const files = status
+      .split('\n')
+      .filter(Boolean)
+      .map(line => ({ status: line.slice(0, 2).trim(), path: line.slice(3) }))
+    return { isRepo: true, files, diff }
+  } catch {
+    return { isRepo: false, files: [], diff: '' }
+  }
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
 
@@ -84,6 +128,36 @@ const server = createServer(async (req, res) => {
       pendingApprovals,
       uptime: Math.round(process.uptime()),
     })
+  }
+
+  if (req.method === 'GET' && url.pathname === '/files') {
+    const dir = safePath(url.searchParams.get('path') || '')
+    if (!dir) return json(res, 403, { error: 'path outside root' })
+    try {
+      return json(res, 200, { root: args.root, ...(await listDirectory(dir)) })
+    } catch (error) {
+      return json(res, 404, { error: String(error.message || error) })
+    }
+  }
+
+  if (req.method === 'GET' && url.pathname === '/file') {
+    const file = safePath(url.searchParams.get('path'))
+    if (!file) return json(res, 403, { error: 'path outside root' })
+    try {
+      const info = await stat(file)
+      if (!info.isFile()) return json(res, 400, { error: 'not a file' })
+      if (info.size > MAX_FILE_BYTES) return json(res, 413, { error: 'file too large' })
+      const content = await readFile(file, 'utf8')
+      return json(res, 200, { path: relative(args.root, file), size: info.size, content })
+    } catch (error) {
+      return json(res, 404, { error: String(error.message || error) })
+    }
+  }
+
+  if (req.method === 'GET' && url.pathname === '/diff') {
+    const dir = safePath(url.searchParams.get('path') || '')
+    if (!dir) return json(res, 403, { error: 'path outside root' })
+    return json(res, 200, await gitDiff(dir))
   }
 
   if (req.method === 'GET' && url.pathname === '/events') {

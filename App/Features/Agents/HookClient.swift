@@ -81,6 +81,10 @@ final class HookClient {
 
     private var pendingResponse: CheckedContinuation<HTTPPayload, Error>?
     private var carry = Data()
+    /// Only one request may be in flight: a single socket and a single pending
+    /// continuation can't disambiguate interleaved responses. Without this the
+    /// event poll and a file fetch issued together deadlock.
+    private let gate = SerialGate()
 
     private struct HTTPPayload {
         var status: Int
@@ -110,6 +114,8 @@ final class HookClient {
     }
 
     private func request(_ method: String, _ path: String, body: Data? = nil, timeout: TimeInterval = 30) async throws -> HTTPPayload {
+        await gate.acquire()
+        defer { gate.release() }
         guard socket != nil else { throw URLError(.notConnectedToInternet) }
         var head = "\(method) \(path) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n"
         if let body { head += "content-type: application/json\r\ncontent-length: \(body.count)\r\n" }
@@ -132,7 +138,7 @@ final class HookClient {
             guard let self else { return }
             while self.polling {
                 do {
-                    let payload = try await self.request("GET", "/events?since=\(self.lastId)&wait=1")
+                    let payload = try await self.request("GET", "/events?since=\(self.lastId)")
                     let page = try JSONDecoder().decode(AgentEventPage.self, from: payload.body)
                     if !page.events.isEmpty {
                         self.merge(page.events)
@@ -143,6 +149,8 @@ final class HookClient {
                     self.lastError = "\(error)"
                     try? await Task.sleep(for: .seconds(2))
                 }
+                // Pace the short poll so the connection isn't saturated.
+                try? await Task.sleep(for: .milliseconds(700))
             }
         }
     }
@@ -160,4 +168,52 @@ final class HookClient {
             _ = try? await self.request("POST", "/approve/\(event.id)", body: body)
         }
     }
+
+    // MARK: - Files and diffs
+
+    func listFiles(path: String) async throws -> DirectoryListing {
+        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        let payload = try await request("GET", "/files?path=\(encoded)")
+        return try JSONDecoder().decode(DirectoryListing.self, from: payload.body)
+    }
+
+    func readFile(path: String) async throws -> FileContents {
+        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        let payload = try await request("GET", "/file?path=\(encoded)")
+        return try JSONDecoder().decode(FileContents.self, from: payload.body)
+    }
+
+    func gitDiff(path: String) async throws -> DiffResult {
+        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        let payload = try await request("GET", "/diff?path=\(encoded)")
+        return try JSONDecoder().decode(DiffResult.self, from: payload.body)
+    }
+}
+
+struct DirectoryListing: Codable {
+    struct Entry: Codable, Identifiable {
+        var name: String
+        var dir: Bool
+        var id: String { name }
+    }
+    var root: String
+    var path: String
+    var entries: [Entry]
+}
+
+struct FileContents: Codable {
+    var path: String
+    var size: Int
+    var content: String
+}
+
+struct DiffResult: Codable {
+    struct File: Codable, Identifiable {
+        var status: String
+        var path: String
+        var id: String { path }
+    }
+    var isRepo: Bool
+    var files: [File]
+    var diff: String
 }
