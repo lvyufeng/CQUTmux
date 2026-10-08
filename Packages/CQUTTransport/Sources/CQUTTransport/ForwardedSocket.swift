@@ -5,15 +5,20 @@ import NIOSSH
 
 /// A byte pipe over an SSH channel opened with `forward`. Used for the host's
 /// loopback gateway; not a general-purpose socket abstraction.
+///
+/// The child channel arrives asynchronously, so writes issued before it is
+/// attached are buffered here. Writing `SSHChannelData` to the parent
+/// connection channel instead would trap inside NIO (`forceAsIOData`).
 public final class ForwardedSocket: @unchecked Sendable {
     private let onData: @Sendable (Data) -> Void
     private let onClose: @Sendable () -> Void
-    private var channel: Channel?
     private let lock = NSLock()
+    private var channel: Channel?
+    private var pending: [Data] = []
     private var closed = false
+    private var didFail = false
 
-    init(channel: Channel, onData: @escaping @Sendable (Data) -> Void, onClose: @escaping @Sendable () -> Void) {
-        self.channel = channel
+    init(onData: @escaping @Sendable (Data) -> Void, onClose: @escaping @Sendable () -> Void) {
         self.onData = onData
         self.onClose = onClose
     }
@@ -21,18 +26,39 @@ public final class ForwardedSocket: @unchecked Sendable {
     func attach(_ channel: Channel) {
         lock.lock()
         self.channel = channel
+        let queued = pending
+        pending = []
+        let isClosed = closed
         lock.unlock()
+
+        guard !isClosed else {
+            channel.close(promise: nil)
+            return
+        }
+        for data in queued { write(data, to: channel) }
     }
 
     func fail() {
+        lock.lock()
+        if didFail { lock.unlock(); return }
+        didFail = true
+        lock.unlock()
         onClose()
     }
 
     public func send(_ data: Data) {
         lock.lock()
-        let channel = self.channel
+        guard !closed else { lock.unlock(); return }
+        guard let channel else {
+            pending.append(data)
+            lock.unlock()
+            return
+        }
         lock.unlock()
-        guard let channel else { return }
+        write(data, to: channel)
+    }
+
+    private func write(_ data: Data, to channel: Channel) {
         channel.eventLoop.execute {
             var buffer = channel.allocator.buffer(capacity: data.count)
             buffer.writeBytes(data)
@@ -45,6 +71,7 @@ public final class ForwardedSocket: @unchecked Sendable {
         if closed { lock.unlock(); return }
         closed = true
         let channel = self.channel
+        pending = []
         lock.unlock()
         channel?.close(promise: nil)
     }

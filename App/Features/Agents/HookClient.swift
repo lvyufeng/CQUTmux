@@ -1,0 +1,163 @@
+import Foundation
+import Observation
+import CQUTTransport
+
+/// Talks to the host's `cqutmux-hook` gateway through the SSH connection.
+/// The gateway is loopback-only on the host; every request rides the SSH
+/// channel via `direct-tcpip`, so nothing is exposed to the network.
+@Observable
+final class HookClient {
+    enum State: Equatable {
+        case idle, connecting, connected
+        case failed(String)
+    }
+
+    private(set) var state: State = .idle
+    private(set) var events: [AgentEvent] = []
+    private(set) var lastError: String?
+
+    private let transport = SSHTransport()
+    private let configuration: TransportConfiguration
+    private let remotePort: Int
+    private var socket: ForwardedSocket?
+    private var lastId = 0
+    private var polling = false
+
+    init(configuration: TransportConfiguration, remotePort: Int = 24543) {
+        self.configuration = configuration
+        self.remotePort = remotePort
+    }
+
+    var pendingCount: Int { events.filter(\.isPending).count }
+
+    func start() {
+        guard state == .idle else { return }
+        state = .connecting
+
+        transport.onEvent = { [weak self] event in
+            guard let self else { return }
+            switch event {
+            case .connected:
+                self.openTunnel()
+            case .failed(let message):
+                self.state = .failed(message)
+            case .closed:
+                self.state = .idle
+            case .output:
+                break // the shell channel is only here to hold the SSH session
+            }
+        }
+
+        let terminal = (cols: 80, rows: 24)
+        transport.connect(configuration, cols: terminal.cols, rows: terminal.rows)
+    }
+
+    func stop() {
+        polling = false
+        socket?.close()
+        socket = nil
+        transport.disconnect()
+        state = .idle
+    }
+
+    private func openTunnel() {
+        var carry = Data()
+        socket = transport.forward(
+            remoteHost: "127.0.0.1",
+            remotePort: remotePort,
+            onData: { [weak self] chunk in
+                carry.append(chunk)
+                self?.consume(&carry)
+            },
+            onClose: { [weak self] in
+                self?.state = .failed("gateway closed the connection")
+            }
+        )
+        state = .connected
+        pollLoop()
+    }
+
+    // MARK: - Minimal HTTP/1.1 client over the forwarded channel
+
+    private var pendingResponse: CheckedContinuation<HTTPPayload, Error>?
+    private var carry = Data()
+
+    private struct HTTPPayload {
+        var status: Int
+        var body: Data
+    }
+
+    private func consume(_ buffer: inout Data) {
+        guard let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8)) else { return }
+        let headerData = buffer.subdata(in: buffer.startIndex..<headerEnd.lowerBound)
+        let headerText = String(decoding: headerData, as: UTF8.self)
+        let status = Int(headerText.split(separator: " ").dropFirst().first ?? "0") ?? 0
+        let contentLength = headerText
+            .split(separator: "\r\n")
+            .first { $0.lowercased().hasPrefix("content-length:") }
+            .flatMap { Int($0.split(separator: ":")[1].trimmingCharacters(in: .whitespaces)) } ?? 0
+
+        let bodyStart = headerEnd.upperBound
+        let available = buffer.distance(from: bodyStart, to: buffer.endIndex)
+        guard available >= contentLength else { return }
+
+        let body = buffer.subdata(in: bodyStart..<buffer.index(bodyStart, offsetBy: contentLength))
+        buffer.removeSubrange(buffer.startIndex..<buffer.index(bodyStart, offsetBy: contentLength))
+
+        let continuation = pendingResponse
+        pendingResponse = nil
+        continuation?.resume(returning: HTTPPayload(status: status, body: body))
+    }
+
+    private func request(_ method: String, _ path: String, body: Data? = nil, timeout: TimeInterval = 30) async throws -> HTTPPayload {
+        guard socket != nil else { throw URLError(.notConnectedToInternet) }
+        var head = "\(method) \(path) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n"
+        if let body { head += "content-type: application/json\r\ncontent-length: \(body.count)\r\n" }
+        head += "\r\n"
+        var raw = Data(head.utf8)
+        if let body { raw.append(body) }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            pendingResponse = continuation
+            socket?.send(raw)
+        }
+    }
+
+    // MARK: - Polling
+
+    private func pollLoop() {
+        guard !polling else { return }
+        polling = true
+        Task { [weak self] in
+            guard let self else { return }
+            while self.polling {
+                do {
+                    let payload = try await self.request("GET", "/events?since=\(self.lastId)&wait=1")
+                    let page = try JSONDecoder().decode(AgentEventPage.self, from: payload.body)
+                    if !page.events.isEmpty {
+                        self.merge(page.events)
+                    }
+                    self.lastId = page.lastId
+                    self.lastError = nil
+                } catch {
+                    self.lastError = "\(error)"
+                    try? await Task.sleep(for: .seconds(2))
+                }
+            }
+        }
+    }
+
+    private func merge(_ incoming: [AgentEvent]) {
+        var byId = Dictionary(uniqueKeysWithValues: events.map { ($0.id, $0) })
+        for event in incoming { byId[event.id] = event }
+        events = byId.values.sorted { $0.id > $1.id }
+    }
+
+    func resolve(_ event: AgentEvent, allow: Bool) {
+        Task { [weak self] in
+            guard let self else { return }
+            let body = Data("{\"decision\":\"\(allow ? "allow" : "deny")\"}".utf8)
+            _ = try? await self.request("POST", "/approve/\(event.id)", body: body)
+        }
+    }
+}

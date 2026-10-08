@@ -339,7 +339,7 @@ public final class SSHTransport: TerminalTransport {
               let channel = stateQueue.sync(execute: { connectionChannel })
         else { return nil }
 
-        let socket = ForwardedSocket(channel: channel, onData: onData, onClose: onClose)
+        let socket = ForwardedSocket(onData: onData, onClose: onClose)
         channel.eventLoop.execute {
             let type = SSHChannelType.directTCPIP(
                 .init(

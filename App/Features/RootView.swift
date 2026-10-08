@@ -5,7 +5,12 @@ import SwiftUI
 struct RootView: View {
     enum Tab: Hashable { case terminal, inbox, usages, settings }
 
-    @State private var selection: Tab = .terminal
+    @State private var selection: Tab = {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] == "inbox" { return .inbox }
+        #endif
+        return .terminal
+    }()
 
     var body: some View {
         TabView(selection: $selection) {
@@ -14,11 +19,7 @@ struct RootView: View {
                 .tag(Tab.terminal)
 
             NavigationStack {
-                PlaceholderView(
-                    title: "Inbox",
-                    systemImage: "tray.full",
-                    message: "Agent replies, approvals and context land here once the host hook is installed."
-                )
+                InboxView()
             }
             .tabItem { Label("Inbox", systemImage: "tray.full") }
             .tag(Tab.inbox)
