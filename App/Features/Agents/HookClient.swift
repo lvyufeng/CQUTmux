@@ -190,6 +190,27 @@ final class HookClient {
         DispatchQueue.main.async { [weak self] in self?.onEventsChanged?(snapshot) }
     }
 
+    /// Hands the host's gateway this device's APNs token, so the host can push
+    /// an approval the moment it appears instead of waiting for the next poll.
+    /// A failure is not fatal — polling still carries the same events — so it
+    /// is recorded rather than thrown.
+    func registerPushToken(_ token: String) async {
+        let body = Data("{\"token\":\"\(token)\"}".utf8)
+        _ = try? await request("POST", "/push/register", body: body)
+    }
+
+    /// Pulls the next page immediately instead of waiting out the poll
+    /// interval, for when a push has just told us something changed.
+    func refreshNow() {
+        Task { [weak self] in
+            guard let self, let payload = try? await self.request("GET", "/events?since=\(self.lastId)"),
+                  let page = try? JSONDecoder().decode(AgentEventPage.self, from: payload.body)
+            else { return }
+            if !page.events.isEmpty { self.merge(page.events) }
+            self.lastId = page.lastId
+        }
+    }
+
     func resolve(_ event: AgentEvent, allow: Bool) {
         Task { [weak self] in
             guard let self else { return }

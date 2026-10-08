@@ -176,9 +176,9 @@ CJK 输入依赖 SwiftTerm 的
 
 | 项 | 原因 | 现状 |
 |---|---|---|
-| SSH agent forwarding | swift-nio-ssh 无 agent 通道，且 iOS 上也没有可转发的 ssh-agent socket | 打开开关时表单明确提示不可用 |
+| SSH agent forwarding | swift-nio-ssh 无 agent 通道——**已核到线级**：`SSHMessages.ChannelRequestMessage.RequestType` 只有 env/exec/exit-status/exit-signal/pty-req/shell/subsystem/window-change/xon-xoff/signal，没有 `auth-agent-req@openssh.com`，而 `ChannelRequestMessage` 是 internal，没有公开 API 能发出该请求。且 iOS 上也没有可转发的 agent socket | 打开开关时表单明确提示不可用 |
 | herdr | 作者自研多路复用器，无公开协议；无法在不知协议的情况下对接 | 支持 tmux / zellij 作为等价能力 |
-| 远程推送（APNs） | 需开发者账号 + 推送证书，本环境无法配置 | 本地通知 + webhook 告警已覆盖同类场景 |
+| 远程推送（APNs） | **两端代码已写全并已跑通到系统边界**：App 侧 `PushCoordinator`/`AppDelegate`（令牌注册、`CQUT_APPROVAL` 分类的锁屏 Allow/Deny、前后台推送回调）→ `POST /push/register` → 宿主 `push.mjs`（HTTP/2 + ES256 provider JWT，签名经 openssl 生成的测试密钥**验签通过**、64 字节裸 r‖s 编码正确）。**卡在签名**：模拟器日志 `Push registration with a nil environment`——无 `aps-environment` entitlement，而该 entitlement 必须有付费开发者账号的 provisioning profile。本地通知 + webhook 告警已覆盖同类场景 |
 | Tailscale 网络探测 | 需集成 Tailscale SDK | 未做；直连与隧道不受影响 |
 
 ## 5. 主要风险

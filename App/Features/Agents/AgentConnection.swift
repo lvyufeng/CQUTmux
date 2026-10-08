@@ -53,6 +53,27 @@ final class AgentConnection {
             self.watch.publish(Self.snapshot(events))
         }
 
+        // A push token belongs to the *host's* gateway, not to this app, so it
+        // is re-registered on every connect: host A's gateway must not keep
+        // pushing for a session that has moved to host B.
+        PushCoordinator.shared.onToken = { [weak self] token in
+            guard let self, let client = self.client else { return }
+            Task { await client.registerPushToken(token) }
+        }
+        if let token = PushCoordinator.shared.deviceToken, token.isEmpty == false {
+            Task { await client.registerPushToken(token) }
+        }
+        // Answering from a notification has to resolve through the same path
+        // the Inbox and the watch use, or the decision would be local to the
+        // phone and the agent would never hear it.
+        PushCoordinator.shared.onRemoteDecision = { [weak self] id, allow in
+            guard let self, let event = self.client?.events.first(where: { $0.id == id }) else { return }
+            self.client?.resolve(event, allow: allow)
+        }
+        PushCoordinator.shared.onRemoteEvent = { [weak self] _ in
+            self?.client?.refreshNow()
+        }
+
         self.client = client
         client.start()
     }

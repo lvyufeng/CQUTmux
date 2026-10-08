@@ -12,6 +12,10 @@
 //   GET  /events?since=<id>   events newer than <id> (default: last 100)
 //   POST /events              append an event        { source, kind, title, body, data }
 //   POST /approve/:id         resolve a pending approval { decision: "allow"|"deny" }
+//   POST /push/register       remember an APNs device token { token }
+//
+// Remote push is optional and off unless a signing key is configured. See
+// push.mjs for what that needs.
 
 import { createServer } from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
@@ -20,6 +24,7 @@ import { execFile, spawn } from 'node:child_process'
 import { readdir, readFile, stat, mkdir, writeFile, rm } from 'node:fs/promises'
 import { resolve, relative, isAbsolute, join } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
+import { createPushService } from './push.mjs'
 
 const run = promisify(execFile)
 
@@ -33,17 +38,29 @@ function parseArgs(argv) {
     token: process.env.CQUTMUX_TOKEN || '',
     root: homedir(),
     webhook: process.env.CQUTMUX_WEBHOOK || '',
+    pushKey: process.env.CQUTMUX_PUSH_KEY || '',
+    pushKeyId: process.env.CQUTMUX_PUSH_KEY_ID || '',
+    pushTeamId: process.env.CQUTMUX_PUSH_TEAM_ID || '',
+    pushTopic: process.env.CQUTMUX_PUSH_TOPIC || '',
+    pushSandbox: false,
   }
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port') args.port = Number(argv[++i])
     else if (argv[i] === '--token') args.token = argv[++i]
     else if (argv[i] === '--root') args.root = resolve(argv[++i])
     else if (argv[i] === '--webhook') args.webhook = argv[++i]
+    else if (argv[i] === '--push-key') args.pushKey = argv[++i]
+    else if (argv[i] === '--push-key-id') args.pushKeyId = argv[++i]
+    else if (argv[i] === '--push-team-id') args.pushTeamId = argv[++i]
+    else if (argv[i] === '--push-topic') args.pushTopic = argv[++i]
+    else if (argv[i] === '--push-sandbox') args.pushSandbox = true
   }
   return args
 }
 
 const args = parseArgs(process.argv.slice(2))
+
+const push = createPushService(args)
 
 /** @type {Array<object>} */
 const events = []
@@ -69,6 +86,13 @@ function emit(event) {
   if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS)
   // Long-polling clients waiting for something new.
   for (const waiter of waiters) waiter(record)
+  // Fire-and-forget: a push that fails must not stop the event from being
+  // recorded, since the app will still pick it up on its next poll.
+  if (record.kind === 'approval') {
+    push.notify(record).catch(error => {
+      process.stderr.write(`[push] ${error.message || error}\n`)
+    })
+  }
   return record
 }
 
@@ -570,6 +594,17 @@ const server = createServer(async (req, res) => {
     process.stderr.write(`[hook] #${record.id} ${record.source} ${record.kind} ${record.title}\n`)
     if (kind === 'approval') postWebhook(record)
     return json(res, 201, record)
+  }
+
+  if (req.method === 'POST' && url.pathname === '/push/register') {
+    let token = ''
+    try {
+      token = JSON.parse((await readBody(req)).toString('utf8')).token || ''
+    } catch {
+      return json(res, 400, { error: 'invalid JSON' })
+    }
+    const registered = push.register(token)
+    return json(res, 200, { registered, enabled: push.enabled, devices: push.tokens.size })
   }
 
   const approve = url.pathname.match(/^\/approve\/(\d+)$/)
