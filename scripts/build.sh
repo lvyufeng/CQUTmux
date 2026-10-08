@@ -14,5 +14,6 @@ xcodebuild \
   -scheme CQUTmux \
   -destination "$DEST" \
   -derivedDataPath build \
+  -skipPackagePluginValidation \
   CODE_SIGNING_ALLOWED=NO \
   build

@@ -29,8 +29,7 @@ struct HostsView: View {
         }
         .navigationTitle("Terminal")
         .navigationDestination(for: Host.self) { host in
-            // Phase 1 replaces this with the live terminal surface.
-            TerminalPlaceholderView(host: host)
+            ConnectFlowView(host: host)
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
