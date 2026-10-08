@@ -47,7 +47,7 @@
 | 终端 | VT/xterm 仿真、滚动、选中、链接可点 | P1 |
 | 终端 | 自定义键盘附件栏 + 硬件键盘 ⌘K/⌘O/⌘1-9 | P1 |
 | 终端 | 手势：swipe 切窗口、pinch 缩放、双击 Tab | P3 |
-| 终端 | 主题 / 字体 / 图标、CJK 输入 | P4 ✅ 主题+字体+图标 |
+| 终端 | 主题 / 字体 / 图标、CJK 输入 | P4 ✅ 主题+字体+图标+CJK |
 | 会话 | 会话持久化、切后台恢复、断线重连 | P1–P2 |
 | 多路复用 | tmux 集成、会话选择器、jump-to window | P2 |
 | 多路复用 | zellij / herdr 支持 | P5 |
@@ -162,7 +162,10 @@ CQUTmux/
 这直接决定了 daemon 选 Node、且 P2 排在 P3 之后。
 
 **未验证项（诚实记录）**：本地通知的**投递**无法在模拟器验证（`simctl` 不能授予通知权限，
-仅能确认授权弹窗出现、代码路径执行）；P4/P5 的 UI 均在模拟器以 shim 数据实测，尚未上真机。
+仅能确认授权弹窗出现、代码路径执行）；P4/P5 的 UI 均在模拟器以 shim 数据实测，尚未上真机；
+Apple Watch 无 runtime，只验证到"编译 + 嵌入 + 配对字段正确"；CJK 输入依赖 SwiftTerm 的
+`UITextInput` 实现（已确认其实现 `setMarkedText`/`unmarkText`/`_markedTextRange` 全量协议，
+即系统输入法的组合文本路径），但未在真机上用中文键盘实测。
 
 **未对齐项（尚未实现，UI 已明示"Not available yet"）**：
 
