@@ -6,6 +6,9 @@ import CQUTTransport
 /// hands off to the live terminal.
 struct ConnectFlowView: View {
     let host: Host
+    /// A link that opened this screen. Carries the session to attach to once
+    /// the terminal is actually up.
+    var link: DeepLink? = nil
 
     @State private var credential: SSHCredential?
     @State private var password = ""
@@ -14,7 +17,7 @@ struct ConnectFlowView: View {
     var body: some View {
         Group {
             if let credential {
-                TerminalScreen(host: host, credential: credential)
+                TerminalScreen(host: host, credential: credential, link: link)
             } else {
                 prompt
             }

@@ -33,6 +33,14 @@ struct RootView: View {
     }
 
     @State private var selection: Tab = Self.initialTab
+    /// A link that arrived and could not be followed, shown once and cleared.
+    /// Ignoring a bad link is worse than saying so: the user clicked something
+    /// and needs to know whether the app acted on it.
+    @State private var linkProblem: String?
+    /// Handed down to whichever terminal opens next. A link that arrives
+    /// before any session exists has to survive until there is one to send the
+    /// attach command to.
+    @State private var pendingLink: DeepLink?
 
     var body: some View {
         Group {
@@ -43,13 +51,41 @@ struct RootView: View {
             }
         }
         .tint(Theme.accent)
+        .onOpenURL { handle($0) }
+        .alert("Could not open the link", isPresented: .constant(linkProblem != nil)) {
+            Button("OK") { linkProblem = nil }
+        } message: {
+            Text(linkProblem ?? "")
+        }
         .task {
             #if DEBUG
+            // iOS puts a "Open in CQUTmux?" confirmation in front of a custom
+            // scheme launched from outside the app, and nothing in `simctl`
+            // can tap it — there is no Simulator.app in this Xcode and no
+            // input-injection tool. Announcing the URL through the environment
+            // reaches the same `onOpenURL` handler with the same `URL`, so
+            // everything after the OS's own delivery can still be tested.
+            if let raw = ProcessInfo.processInfo.environment["CQUT_DEV_OPEN_URL"],
+               let url = URL(string: raw) {
+                handle(url)
+            }
             if connection.client == nil,
                let target = store.hosts.first(where: { $0.hostname == ProcessInfo.processInfo.environment["CQUT_DEV_HOST"] }) {
                 connection.connect(to: target)
             }
             #endif
+        }
+    }
+
+    /// Opening a link is one action whether it arrives from the system or, in a
+    /// debug run, from the environment.
+    private func handle(_ url: URL) {
+        switch DeepLink.parse(url) {
+        case .success(let link):
+            selection = .terminal
+            pendingLink = link
+        case .failure(let error):
+            linkProblem = error.localizedDescription
         }
     }
 
@@ -85,7 +121,7 @@ struct RootView: View {
     private func destination(_ tab: Tab) -> some View {
         switch tab {
         case .terminal:
-            HostsView()
+            HostsView(pendingLink: pendingLink)
         case .inbox:
             NavigationStack { InboxView() }
         case .code:

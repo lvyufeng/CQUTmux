@@ -73,11 +73,13 @@ Live Activity 与灵动岛（`ActivityManager` + `AgentActivityAttributes`）、
 主题与字体持久化、iPad 侧栏、CJK 输入。
 
 **本轮新增**：自定义快捷键（`ShortcutGrammar` + 编辑器 + 附件栏按键，26 项语法用例 + 端到端实测）、
-herdr 宿主侧对接、APNs 两端代码、主机探测不再 source rc。
+herdr 宿主侧对接、APNs 两端代码、主机探测不再 source rc、
+**deep link**（`cqutmux://tmux?session=…&window=…`、`cqutmux://zellij`、`cqutmux://herdr`、`cqutmux://host?host=…`，
+`DeepLink` 解析 + `CFBundleURLTypes` + `onOpenURL` → 切到终端页 → 解析主机 → 导航进会话 → 连上后自动 attach，
+`scripts/deeplink-test.sh` 端到端实测：宿主 shell 确实执行了 attach 命令；非法路由弹「无法打开链接」且不切页）。
 
 **仍未做**：端侧听写只接了 Apple Speech（无 whisper/parakeet 本地模型）；
 无快捷指令绑定到手势/滑动（Moshi 的 tap/双击/三击/swipe 可绑定）；
-无 deep link（`moshi://tmux?session=` 之类）；
 无最近目录、无原生 Windows、无 macOS 菜单栏 / Moshi Desktop（属另一产品）；
 herdr 的 **App 侧**会话选择器与 Jump To 树未接（仅宿主 API 已通）；
 Tailscale 不需集成（Moshi 文档亦确认：它工作在系统层，用 100.x 地址直连即可）。

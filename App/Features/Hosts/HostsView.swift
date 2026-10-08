@@ -1,6 +1,10 @@
 import SwiftUI
 
 struct HostsView: View {
+    /// A link that named a host or a session. Held by the shell rather than
+    /// here because a link can arrive before this view exists.
+    var pendingLink: DeepLink?
+
     @Environment(HostStore.self) private var store
     @State private var editing: Host?
     @State private var path: [Host] = []
@@ -36,7 +40,27 @@ struct HostsView: View {
         }
         .navigationTitle("Terminal")
         .navigationDestination(for: Host.self) { host in
-            ConnectFlowView(host: host)
+            ConnectFlowView(host: host, link: pendingLink)
+        }
+        // A link opens the terminal on the host it names, or on the only host
+        // there is. A link naming a host that is not saved says so rather than
+        // doing nothing, because "I clicked a link and the app just sat there"
+        // is the failure people blame on the app.
+        .task(id: pendingLink) {
+            guard let link = pendingLink else { return }
+            let named: String?
+            if case .host(let value) = link.target { named = value } else { named = nil }
+            let match: Host?
+            if let named {
+                match = store.hosts.first {
+                    $0.hostname.caseInsensitiveCompare(named) == .orderedSame
+                        || $0.displayName.caseInsensitiveCompare(named) == .orderedSame
+                }
+            } else {
+                match = store.hosts.count == 1 ? store.hosts.first : nil
+            }
+            guard let match else { return }
+            if !path.contains(match) { path.append(match) }
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

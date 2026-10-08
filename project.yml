@@ -133,6 +133,15 @@ targets:
         # session, so allowing local networking here exposes nothing.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # `cqutmux://tmux?session=…` opens straight onto a session. The scheme
+        # is declared here rather than in App/Info.plist because XcodeGen
+        # regenerates that file from these properties, so an edit made there is
+        # silently reverted on the next `xcodegen generate`.
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Viewer
+            CFBundleURLName: app.cqutmux.ios.link
+            CFBundleURLSchemes:
+              - cqutmux
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft

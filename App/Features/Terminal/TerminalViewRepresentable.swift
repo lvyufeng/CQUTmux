@@ -12,6 +12,8 @@ struct PendingImage: Identifiable {
 struct TerminalScreen: View {
     let host: Host
     let credential: SSHCredential
+    /// A session to attach to once the terminal is live, from a link.
+    var link: DeepLink? = nil
 
     @State private var coordinator = TerminalCoordinator()
     @State private var dictation = VoiceDictation()
@@ -20,6 +22,9 @@ struct TerminalScreen: View {
     @State private var pastedNotice: String?
     @State private var shortcuts = ShortcutStore()
     @State private var showShortcuts = false
+    /// Set once the link's attach command has been sent, so a reconnect — which
+    /// also reaches `.connected` — does not attach a second time.
+    @State private var didFollowLink = false
     @Environment(ThemeStore.self) private var themes
     @Environment(TerminalFontStore.self) private var fonts
     @Environment(AgentConnection.self) private var connection
@@ -52,6 +57,26 @@ struct TerminalScreen: View {
             .sheet(item: $annotating) { pending in annotator(pending.image) }
             .overlay(alignment: .top) { pasteNotice }
             .safeAreaInset(edge: .bottom, spacing: 0) { accessoryBar }
+            // A linked session is attached on the same signal the rest of the
+            // UI uses to mean "the shell is up", rather than after a guessed
+            // delay — an attach command sent into a session that is not ready
+            // yet goes nowhere.
+            .onChange(of: coordinator.status) { _, status in
+                guard status.isLive, let session = link?.session, !didFollowLink else { return }
+                didFollowLink = true
+                coordinator.terminal?.attachSession(mux: session.mux, name: session.name)
+                if let window = session.window, window >= 0 {
+                    // tmux needs a beat to have attached before the prefix
+                    // chord means "this client, this window"; sending it into
+                    // the same write appended to the attach would be read as
+                    // text by the shell the attach is still replacing.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                        coordinator.terminal?.selectWindow(
+                            mux: session.mux, session: session.name, index: window
+                        )
+                    }
+                }
+            }
             .onAppear {
                 // Partial transcripts stream straight to the shell; a final
                 // one gets a newline so the agent receives the command.

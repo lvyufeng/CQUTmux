@@ -1,0 +1,98 @@
+import Foundation
+
+/// A link that opens the app on a specific host, session or window.
+///
+/// Moshi's shape is kept, including the `session` spelling for the tmux name,
+/// because these URLs get pasted into terminals, webhooks and chat — a link
+/// that works in one app and not the other is a link people stop trusting:
+///
+///   cqutmux://tmux?session=<name>[&window=<n>]
+///   cqutmux://zellij?session=<name>
+///   cqutmux://herdr?workspace=<id>[&session=<name>]
+///   cqutmux://host?host=<name-or-hostname>
+///
+/// A host is optional and, when absent, resolves to the only saved host — a
+/// link from a notification usually does not need to name the machine, and the
+/// common case here is one host.
+struct DeepLink: Equatable {
+    enum Target: Equatable {
+        /// Attach to a multiplexer session, optionally landing on a window.
+        case session(mux: String, name: String, window: Int?)
+        case host(String)
+    }
+
+    var target: Target
+    /// The scheme's authority, so `cqutmux:tmux?...` and
+    /// `cqutmux://tmux?...` both work. UIKit normalises the former to the
+    /// latter, but a URL built by hand may not.
+    static let scheme = "cqutmux"
+
+    enum ParseError: Error, LocalizedError {
+        case unknownRoute(String)
+        case missingParameter(String)
+        case badWindow(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .unknownRoute(let route):
+                return "“\(route)” is not a link CQUTmux understands."
+            case .missingParameter(let name):
+                return "The link is missing its \(name)."
+            case .badWindow(let value):
+                return "“\(value)” is not a window number."
+            }
+        }
+    }
+
+    static func parse(_ url: URL) -> Result<DeepLink, ParseError> {
+        guard url.scheme?.lowercased() == scheme else {
+            return .failure(.unknownRoute(url.scheme ?? url.absoluteString))
+        }
+
+        // `cqutmux://tmux` puts the route in `host`; `cqutmux:tmux` puts it in
+        // `path`. Both are accepted rather than picking one and rejecting links
+        // that look identical to a user.
+        let route = (url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+            .lowercased()
+        guard !route.isEmpty else { return .failure(.unknownRoute("")) }
+
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String? {
+            items.first { $0.name.lowercased() == name }?.value.flatMap { $0.isEmpty ? nil : $0 }
+        }
+
+        switch route {
+        case "tmux", "zellij", "herdr":
+            guard let name = value("session") ?? value("workspace") else {
+                return .failure(.missingParameter("session"))
+            }
+            var window: Int?
+            if let raw = value("window") {
+                guard let number = Int(raw) else { return .failure(.badWindow(raw)) }
+                window = number
+            }
+            return .success(DeepLink(target: .session(mux: route, name: name, window: window)))
+
+        case "host":
+            guard let name = value("host") ?? value("name") else {
+                return .failure(.missingParameter("host"))
+            }
+            return .success(DeepLink(target: .host(name)))
+
+        default:
+            return .failure(.unknownRoute(route))
+        }
+    }
+
+    /// The session a link asks to attach to, if it names one.
+    ///
+    /// Deliberately not a command string: the terminal already knows how to
+    /// attach and how to jump to a window, and a second copy of those commands
+    /// here would be a second thing to keep in step with the session picker.
+    /// The caller hands these to the same `attachSession` / `selectWindow` the
+    /// picker calls, so a link and a tap cannot drift apart.
+    var session: (mux: String, name: String, window: Int?)? {
+        guard case .session(let mux, let name, let window) = target else { return nil }
+        return (mux, name, window)
+    }
+}
