@@ -28,11 +28,17 @@ const MAX_EVENTS = 2000
 const MAX_FILE_BYTES = 512 * 1024
 
 function parseArgs(argv) {
-  const args = { port: DEFAULT_PORT, token: process.env.CQUTMUX_TOKEN || '', root: homedir() }
+  const args = {
+    port: DEFAULT_PORT,
+    token: process.env.CQUTMUX_TOKEN || '',
+    root: homedir(),
+    webhook: process.env.CQUTMUX_WEBHOOK || '',
+  }
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port') args.port = Number(argv[++i])
     else if (argv[i] === '--token') args.token = argv[++i]
     else if (argv[i] === '--root') args.root = resolve(argv[++i])
+    else if (argv[i] === '--webhook') args.webhook = argv[++i]
   }
   return args
 }
@@ -52,6 +58,29 @@ function emit(event) {
   // Long-polling clients waiting for something new.
   for (const waiter of waiters) waiter(record)
   return record
+}
+
+// Fire-and-forget alert to an external endpoint (Slack, ntfy, a phone
+// shortcut…). Failures are logged and swallowed: the gateway must never block
+// or crash because a webhook is unreachable.
+async function postWebhook(record) {
+  if (!args.webhook) return
+  try {
+    const response = await fetch(args.webhook, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text: `[CQUTmux] ${record.source} needs approval: ${record.title}`,
+        event: record,
+      }),
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!response.ok) {
+      process.stderr.write(`[hook] webhook responded ${response.status}\n`)
+    }
+  } catch (error) {
+    process.stderr.write(`[hook] webhook failed: ${error.message || error}\n`)
+  }
 }
 
 function authorized(req) {
@@ -329,6 +358,7 @@ const server = createServer(async (req, res) => {
       data: parsed.data ?? null,
     })
     process.stderr.write(`[hook] #${record.id} ${record.source} ${record.kind} ${record.title}\n`)
+    if (kind === 'approval') postWebhook(record)
     return json(res, 201, record)
   }
 

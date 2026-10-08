@@ -4,10 +4,15 @@ Host-side gateway for CQUTmux. Agent hooks report events here; the iOS app
 reads them back over the SSH session it already has.
 
 ```
-node index.mjs [--port 24543] [--token <secret>]
+node index.mjs [--port 24543] [--token <secret>] [--root <dir>] [--webhook <url>]
 ```
 
 No dependencies, Node 18+.
+
+`--webhook` posts a small JSON alert to an external endpoint (Slack, ntfy, a
+phone Shortcut…) whenever an `approval` event arrives. Delivery is
+fire-and-forget with a 5s timeout; a failing webhook never blocks or crashes
+the gateway. `CQUTMUX_WEBHOOK` sets the same thing.
 
 ## Why loopback
 
