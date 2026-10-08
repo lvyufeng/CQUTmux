@@ -43,11 +43,6 @@ and simulator previews.
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) — `scripts/bootstrap.sh` fetches it if missing
 - Node 18+ for the host gateway
 
-## Requirements
-
-- Xcode 26+ (built against Xcode 27 / iOS 27 SDK)
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) — `scripts/bootstrap.sh` fetches it if missing
-
 ## Build
 
 ```sh

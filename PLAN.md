@@ -161,8 +161,17 @@ CQUTmux/
 **未验证项（诚实记录）**：本地通知的**投递**无法在模拟器验证（`simctl` 不能授予通知权限，
 仅能确认授权弹窗出现、代码路径执行）；P4/P5 的 UI 均在模拟器以 shim 数据实测，尚未上真机。
 
-**环境事实**：本机工具链仅 Swift 6.4 / Xcode 27 / Node 22。无 brew、无 Go/Rust、无 C 编译工具链。
-这直接决定了 daemon 选 Node、且 P2 排在 P3 之后。
+**未对齐项（尚未实现，UI 已明示"Not available yet"）**：
+
+| 项 | 原因 | 现状 |
+|---|---|---|
+| Mosh / ET / Auto 协商 | 需交叉编译 C/C++（mosh、ET）+ protobuf/OpenSSL，本机无工具链 | 选到 mosh/et 时表单明确提示将回退 SSH |
+| Jump host | SSH 传输目前直连目标；跳跃需要在其上再开一条 `direct-tcpip` 到目标的 22 端口 | 填了 jump host 时表单明确提示会被忽略 |
+| SSH agent forwarding | swift-nio-ssh 无 agent 通道，且 iOS 上也没有可转发的 ssh-agent socket | 打开开关时表单明确提示不可用 |
+| herdr | 作者自研多路复用器，无公开协议；无法在不知协议的情况下对接 | 支持 tmux / zellij 作为等价能力 |
+| Apple Watch 审批 | 需新增 watchOS target | 未做 |
+| 远程推送（APNs） | 需开发者账号 + 推送证书，本环境无法配置 | 本地通知 + webhook 告警已覆盖同类场景 |
+| Tailscale 网络探测 | 需集成 Tailscale SDK | 未做；直连与隧道不受影响 |
 
 ## 5. 主要风险
 

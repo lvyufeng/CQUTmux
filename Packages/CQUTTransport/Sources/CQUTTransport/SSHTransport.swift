@@ -188,13 +188,6 @@ private final class ShellChannelHandler: ChannelInboundHandler {
             // channel down ourselves.
             emit(.closed(nil))
             context.close(promise: nil)
-            // The remote sent EOF. With half-closure enabled NIO reports it as
-            // this event and deliberately leaves the channel open, so
-            // closeFuture never completes — which is why a severed session used
-            // to sit there claiming to be connected. Report it and tear the
-            // channel down ourselves.
-            emit(.closed(nil))
-            context.close(promise: nil)
         default:
             context.fireUserInboundEventTriggered(event)
         }

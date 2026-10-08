@@ -60,6 +60,17 @@ struct HostEditView: View {
                     ))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+
+                    // The SSH transport dials the target directly; a jump host
+                    // would need a second hop through a direct-tcpip channel
+                    // that isn't built yet. Say so rather than accepting the
+                    // value and silently connecting straight to the target.
+                    if host.jumpHost?.isEmpty == false {
+                        Label("Not available yet — the app will connect directly, ignoring this.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                 }
 
                 if host.transport == .mosh {
@@ -93,13 +104,22 @@ struct HostEditView: View {
 
                 if host.authMethod == .key {
                     LabeledContent("Private key", value: host.keyIdentifier == nil ? "None" : "In Keychain")
-                    Text("Key import and Face ID unlock arrive in Phase 1.")
+                    Text("Import an Ed25519 key from Settings, then unlock it with Face ID when connecting.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 if host.transport == .ssh && host.authMethod == .key {
                     Toggle("Forward SSH Agent", isOn: $host.forwardAgent)
+
+                    // swift-nio-ssh has no channel for agent forwarding yet, and
+                    // we have no ssh-agent socket to forward to on iOS anyway.
+                    if host.forwardAgent {
+                        Label("Not available yet — the app keeps the key to itself.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
 
