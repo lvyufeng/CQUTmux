@@ -150,7 +150,8 @@ CQUTmux/
 |---|---|---|
 | P0 骨架 | ✅ 已合并 | commit `0311e7e` |
 | P1 SSH 终端 | ✅ 已合并并**实测** | 见 commit `d4f663c` / `ab9245a`。公钥认证连真实 sshd、SwiftTerm 渲染活 shell 已验证 |
-| P2 Mosh / ET | 🟡 Mosh 已打通，待接入 UI | **之前标"受阻"是错的**：clang 一直在（Apple clang 21），缺的只是构建工具（pip 可装）。现以 `--with-crypto-library=apple-common-crypto` 交叉编译 mosh 客户端全部库 + protobuf-lite，并用自写驱动替代 `stmclient.cc` 的 `main()`。**实测**：`scripts/mosh-ios/test.sh` 在模拟器里跑通与真实 `mosh-server` 的完整握手并解出输出（`MOSH_E2E_OK`）。尚未接进 App 的终端 UI |
+| P2 Mosh | ✅ 已合并并**实测** | **之前标"受阻"是错的**：clang 一直在（Apple clang 21），缺的只是构建工具（pip 可装）。以 `--with-crypto-library=apple-common-crypto` 交叉编译 mosh 客户端全部库 + protobuf-lite，用自写驱动替代 `stmclient.cc` 的 `main()`，再以 `MoshTransport` 接到 `TerminalTransport`。**实测**：C 层 `scripts/mosh-ios/test.sh` 与 App 层 `scripts/mosh-ios/app-test.sh` 均跑通与真实 `mosh-server` 的双向会话——键入的命令在宿主 shell 执行并把结果回显到 iOS 终端。**踩到的真坑**：`Network::timestamp()` 返回的是 mosh 自己的缓存 `frozen_timestamp()`，而该缓存**只由 mosh 自己的 `Select::select()` 刷新**；自写 run loop 不刷新它，时钟就冻住，`tick()` 永远认为没到发送时刻——会话看起来正常（服务端输出照常到达），但**所有按键都被扣住不发**。修法：驱动器在 `mosh_tick` 里调 `freeze_timestamp()`。此 bug 在只有输出方向的旧测试里完全暴露不出来 |
+| P2b ET / Auto | 🟡 Auto 已可用（mosh→SSH 回退） | ET 需 `--enable-et` 编译 + 独立 TCP 端口协议，尚未做；选 ET 时表单明示"不可用"且**不会**静默回退成 SSH。Auto 按 Moshi 的顺序实现为 mosh→SSH（跳过未实现的 ET）：宿主没有 `mosh-server` 时自动改用 SSH |
 | P3 Agent 层 | ✅ 已合并并**实测** | 宿主 `cqutmux-hook` ↔ 隧道内 Inbox / Code / Diff / Usages，均经模拟器实测 |
 | P4 通知/语音 | ✅ 已合并并**实测** | 端侧听写、Live Activity / 灵动岛、本地通知、webhook 告警、图片标注上传、tmux 会话选择器 |
 | P5 收尾 | ✅ 主体完成 | iPad 侧栏、zellij、OSC 52 剪贴板、git 历史、网关 token、断线自动重连（修复会话静默失联的真实 bug）、浏览器预览、模拟器预览均已合并并在模拟器实测 |
@@ -158,7 +159,9 @@ CQUTmux/
 | P5b Jump host | ✅ 已合并并**实测** | 在跳跃主机上开 `direct-tcpip` 到目标的 22 端口，把目标 SSH 连接跑在该通道内（`ByteBufferToSSHDataHandler` / `SSHDataToByteBufferHandler` 做 `ByteBuffer`↔`SSHChannelData` 互转）。实测：两条本机 sshd (`:2222` 为跳板，`:2233` 为目标)，`lsof` 确认应用只连 `:2222`、`:2222`→`:2233` 由 sshd 转发；杀掉跳板会话后 UI 报 `jump host … Connection refused` 并自动重连成功；不带跳板的直连路径回归通过 |
 | P6 Apple Watch | 🟡 构建通过、已嵌入 | `CQUTmuxWatch` watchOS target：待审批列表 + 批准/拒绝，经 `WCSession` 与手机同步，决定回落到手机上的 `HookClient.resolve`。**未运行**——本机只装了 iOS 模拟器 runtime，无 watchOS runtime（SDK 在，runtime 不在），无法启动表盘验证 |
 
-**环境事实**：本机工具链仅 Swift 6.4 / Xcode 27 / Node 22。无 brew、无 Go/Rust、无 C 编译工具链。
+**环境事实**：本机工具链为 Swift 6.4 / Xcode 27 / Node 22，**且 clang（Apple clang 21）一直都在**——
+此前"无 C 编译工具链"的记载是错的，缺的只是构建工具（cmake/protoc 等，pip 可装），这正是 Mosh 一度被误判为受阻的原因。
+仍无 brew、无 Go/Rust。
 这直接决定了 daemon 选 Node、且 P2 排在 P3 之后。
 
 **未验证项（诚实记录）**：本地通知的**投递**无法在模拟器验证（`simctl` 不能授予通知权限，
@@ -167,12 +170,11 @@ Apple Watch 无 runtime，只验证到"编译 + 嵌入 + 配对字段正确"；C
 `UITextInput` 实现（已确认其实现 `setMarkedText`/`unmarkText`/`_markedTextRange` 全量协议，
 即系统输入法的组合文本路径），但未在真机上用中文键盘实测。
 
-**未对齐项（尚未实现，UI 已明示"Not available yet"）**：
+**未对齐项（尚未实现）**：
 
 | 项 | 原因 | 现状 |
 |---|---|---|
-| Mosh 接入 App | 库已跨编译并实测连通真实 server，但尚无 `TerminalTransport` 实现 + UI 接线 | 选 mosh 时表单明确提示将回退 SSH |
-| ET / Auto 协商 | ET 需 `--enable-et` 编译 + C++17 工具链（尚未尝试）；Auto 需要 mosh/ET 先可用 | 表单明确提示回退 SSH |
+| ET | 需 `--enable-et` 编译（独立 TCP 端口协议）；Auto 已用 mosh→SSH 覆盖同类场景 | 选 ET 时表单明示不可用，**不静默回退** |
 | SSH agent forwarding | swift-nio-ssh 无 agent 通道，且 iOS 上也没有可转发的 ssh-agent socket | 打开开关时表单明确提示不可用 |
 | herdr | 作者自研多路复用器，无公开协议；无法在不知协议的情况下对接 | 支持 tmux / zellij 作为等价能力 |
 | 远程推送（APNs） | 需开发者账号 + 推送证书，本环境无法配置 | 本地通知 + webhook 告警已覆盖同类场景 |

@@ -29,7 +29,12 @@ PROTOBUF_INC="${PROTOBUF_INC:-$(dirname "$MOSH_SRC")/protobuf-21.12/src}"
 # normally invoke through pkg-config) have to be compiled in too.
 PB_GEN="$OUT/pbgen"
 
+# The driver's public header is owned by the SwiftPM package, so the app and
+# this script cannot drift apart on what the C surface is.
+DRIVER_INCLUDE="$HERE/../../Packages/CQUTMosh/Sources/CQUTMoshC/include"
+
 INCLUDES=(
+  -I"$DRIVER_INCLUDE"
   -I"$HERE/include"
   -I"$HERE"
   -I"$MOSH_SRC/src/include"
@@ -105,6 +110,15 @@ for src in $CSOURCES; do
   echo "    $(basename "$src")"
   xcrun --sdk iphonesimulator clang "${CFLAGS[@]}" -c "$src" -o "$obj" || exit 1
 done
+
+echo "==> compiling the CQUTMosh driver"
+# It needs mosh's headers, which only exist here, so it is built with the rest
+# rather than as a SwiftPM target — SwiftPM has no way to see this tree.
+DRIVER="$HERE/driver/mosh_driver.cc"
+if [ -f "$DRIVER" ]; then
+  xcrun --sdk iphonesimulator clang++ "${CXXFLAGS[@]}" \
+    -c "$DRIVER" -o "$OUT/obj/cqutmosh_driver.o"
+fi
 
 echo "==> archiving"
 xcrun --sdk iphonesimulator libtool -static -o "$OUT/lib/libmoshclient.a" "$OUT"/obj/*.o

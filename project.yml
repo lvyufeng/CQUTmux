@@ -22,6 +22,8 @@ packages:
     exactVersion: 1.20.0
   CQUTTransport:
     path: Packages/CQUTTransport
+  CQUTMosh:
+    path: Packages/CQUTMosh
 
 targets:
   CQUTmuxWidgets:
@@ -79,6 +81,13 @@ targets:
     dependencies:
       - package: SwiftTerm
       - package: CQUTTransport
+      - package: CQUTMosh
+      # libc++ and zlib: the driver is C++, and mosh's compressor is zlib.
+      # The two mosh archives are not listed here — they go in OTHER_LDFLAGS
+      # below, because a `framework:` entry here emitted -lmoshclient without
+      # the -L that would let the linker find it.
+      - sdk: libc++.tbd
+      - sdk: libz.tbd
       - target: CQUTmuxWidgets
         embed: true
       - target: CQUTmuxWatch
@@ -86,6 +95,12 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.cqutmux.ios
+        # Prebuilt iOS archives from scripts/mosh-ios/: libmoshclient.a is
+        # mosh's client libraries plus the CQUTMosh driver, and protobuf-lite
+        # is what its generated protocol code needs. They are linked by path
+        # rather than declared as SwiftPM targets because compiling them needs
+        # mosh's own source tree, which only that script has.
+        OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/Vendor/moshclient -lmoshclient -lprotobuf-lite"
         CODE_SIGN_ENTITLEMENTS: App/CQUTmux.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

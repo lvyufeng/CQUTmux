@@ -294,12 +294,24 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
                 credential: credential
             )
         )
+        // The transport is chosen here rather than defaulted in the view, so a
+        // host that asks for something unavailable says why instead of quietly
+        // behaving like SSH.
+        let transport: TerminalTransport
+        switch TransportFactory.make(kind: host.transport, configuration: configuration, host: host) {
+        case .success(let built):
+            transport = built
+        case .failure(let unavailable):
+            transport = UnavailableTransport(reason: unavailable.reason)
+        }
+
         let view = CQUTTerminalView(
             frame: .zero,
             configuration: configuration,
             startupCommand: host.sessionCommand.isEmpty ? nil : host.sessionCommand,
             theme: theme,
-            font: fonts.uiFont()
+            font: fonts.uiFont(),
+            transport: transport
         )
         view.onStatus = { status in coordinator.status = status }
         // A pinch resizes the terminal and becomes the saved preference, so the
@@ -309,6 +321,15 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         }
         coordinator.terminal = view
         DispatchQueue.main.async { view.connect() }
+        #if DEBUG
+        // A simulator cannot be typed into from a test script without
+        // accessibility permissions, so the input half of a transport is
+        // otherwise untestable. This types a phrase in after the session is up
+        // — through the same `send` the on-screen keyboard calls.
+        if let phrase = ProcessInfo.processInfo.environment["CQUT_DEV_TYPE"] {
+            DebugSeed.typeWhenConnected(view: view, phrase: phrase)
+        }
+        #endif
         return view
     }
 

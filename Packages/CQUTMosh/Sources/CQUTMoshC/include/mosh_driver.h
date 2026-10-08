@@ -44,6 +44,11 @@ void mosh_push_resize(mosh_driver *driver, int cols, int rows);
 /* Let mosh send whatever is pending. Call on the wait_time cadence. */
 void mosh_tick(mosh_driver *driver);
 
+/* The last sendto() failure, or "" when sends are healthy. mosh records this
+ * rather than reporting it, so without asking, a send that never leaves looks
+ * exactly like a server that never answers. */
+const char *mosh_send_error(mosh_driver *driver);
+
 /* Read one datagram and return the screen update it produced, as a NUL-
  * terminated string of terminal escapes ready for the terminal view, or NULL
  * when the datagram changed nothing. Free with mosh_free. */

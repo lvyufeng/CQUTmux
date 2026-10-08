@@ -108,4 +108,16 @@ public protocol TerminalTransport: AnyObject {
     func send(_ data: Data)
     func resize(cols: Int, rows: Int)
     func disconnect()
+
+    /// Whether a dropped session is recovered by the transport itself.
+    ///
+    /// Mosh is a state-sync protocol: it keeps the screen on both ends and
+    /// resumes from the next datagram, so a caller that also retries would be
+    /// tearing down a session that was never actually lost. SSH has no such
+    /// layer, so the caller supplies the backoff.
+    var handlesReconnect: Bool { get }
+}
+
+extension TerminalTransport {
+    public var handlesReconnect: Bool { false }
 }

@@ -15,9 +15,21 @@
  * mosh's own client (stmclient.cc) is the only thing that pulls them in, and
  * this driver replaces it. Without this include the transport's constructor,
  * recv(), tick() and wait_time() are declared but never instantiated, and the
- * link fails with undefined symbols. */
+ * link fails with undefined symbols. fatal_assert.h comes first because the
+ * impl uses its macro. */
 #include "fatal_assert.h"
 #include "networktransport-impl.h"
+
+/* mosh keeps its own clock (Network::timestamp), and it is not a clock: it
+ * reads a cache that only mosh's Select::select() refreshes. The stock client
+ * drives one, so it never notices. We drive our own run loop — iOS gives the
+ * UDP socket to whoever created it, and that is this process — so unless the
+ * cache is refreshed the clock stays where it started, `now` is forever short
+ * of every deadline, and tick() decides there is never anything to send. The
+ * session still works: the server reaches us, and its output arrives, but
+ * every keystroke is withheld. Refreshing here is what makes the clock a
+ * clock again. */
+#include "timestamp.h"
 
 /* Mirrors NetworkType in stmclient.h: a UserStream up, a Complete down. */
 typedef Network::Transport<Network::UserStream, Terminal::Complete> NetworkType;
@@ -85,6 +97,13 @@ extern "C" mosh_driver *mosh_start(const char *key, const char *ip, const char *
 
     d->network->set_send_delay(1); /* minimal delay on outgoing keystrokes */
 
+    /* Diagnostic only: mosh then prints every fragment it sends and its own
+       view of the sender's timing, which is the difference between "the
+       keystrokes never got sent" and "they were sent and ignored". */
+    if (getenv("CQUTMOSH_VERBOSE") != nullptr) {
+        d->network->set_verbose(1);
+    }
+
     /* Tell the server our size before anything else, as the stock client does. */
     d->network->get_current_state().push_back(Parser::Resize(cols, rows));
 
@@ -109,11 +128,23 @@ extern "C" int mosh_wait_time(mosh_driver *d)
     return d->network->wait_time();
 }
 
+extern "C" const char *mosh_send_error(mosh_driver *d)
+{
+    if (d == nullptr || !d->network) {
+        return "";
+    }
+    return d->network->get_send_error().c_str();
+}
+
 extern "C" void mosh_push_keys(mosh_driver *d, const char *bytes, size_t len)
 {
     if (d == nullptr || !d->network || bytes == nullptr || len == 0) {
         return;
     }
+    /* Before the state change, so the sender's mindelay clock starts from the
+       real present rather than from whenever it was last ticked. */
+    freeze_timestamp();
+
     Network::UserStream &us = d->network->get_current_state();
     for (size_t i = 0; i < len; i++) {
         us.push_back(Parser::UserByte(bytes[i]));
@@ -133,6 +164,9 @@ extern "C" void mosh_push_resize(mosh_driver *d, int cols, int rows)
 extern "C" void mosh_tick(mosh_driver *d)
 {
     if (d != nullptr && d->network) {
+        /* See the note on timestamp.h: mosh's clock is a cache that only its
+           own select loop refills, and this driver is the select loop. */
+        freeze_timestamp();
         d->network->tick();
     }
 }

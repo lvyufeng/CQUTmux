@@ -27,13 +27,14 @@ SRC="$WORK/mosh-1.4.0/src"
 
 "$HERE/build.sh" "$WORK/mosh-1.4.0" "$WORK/out" "$WORK/protoc/bin"
 
-INC=(-I"$HERE/include"
+INC=(-I"$HERE/../../Packages/CQUTMosh/Sources/CQUTMoshC/include"
+     -I"$HERE/include"
      -I"$SRC/statesync" -I"$SRC/network" -I"$SRC/protobufs"
      -I"$SRC/util" -I"$SRC/crypto" -I"$SRC/terminal"
      -I"$WORK/out/pbgen" -I"$WORK/protobuf-21.12/src")
 SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 TARGET=arm64-apple-ios18.0-simulator
-DRIVER="$HERE/../../Packages/CQUTMosh/Sources/CQUTMoshC/mosh_driver.cc"
+DRIVER="$HERE/driver/mosh_driver.cc"
 
 echo "==> building the driver and the test harness"
 xcrun --sdk iphonesimulator clang++ -isysroot "$SDK" -target "$TARGET" \
@@ -50,7 +51,12 @@ xcrun --sdk iphonesimulator clang++ -isysroot "$SDK" -target "$TARGET" \
 echo "==> starting mosh-server"
 pkill -f mosh-server 2>/dev/null || true
 sleep 1
-"$MOSH_SERVER" new -c 256 -- sh -c 'echo MOSH_E2E_OK; sleep 45' >"$WORK/srv.out" 2>&1 &
+# The session command has to read its stdin: `exec sh` replaces the -c shell
+# with one that executes whatever is typed, so the input test below sees the
+# command's output come back. A session command that does not read — `sleep`,
+# say — swallows the typed line and looks exactly like a broken input path.
+"$MOSH_SERVER" new -c 256 -- sh -c 'echo MOSH_E2E_OK; exec sh' \
+  >"$WORK/srv.out" 2>&1 &
 sleep 3
 CONNECT=$(grep 'MOSH CONNECT' "$WORK/srv.out" | head -1)
 [ -n "$CONNECT" ] || { echo "mosh-server never reported a port"; exit 1; }
@@ -59,10 +65,13 @@ KEY=$(echo "$CONNECT" | awk '{print $4}')
 echo "    $CONNECT"
 
 echo "==> running the iOS client against it"
+# The harness exits non-zero on its own for either half failing, so the exit
+# status is the verdict. The greps are a second opinion on the transcript, in
+# case the exit status is ever reported for the wrong reason.
 if xcrun simctl spawn "$DEVICE" "$WORK/moshtest" "$KEY" 127.0.0.1 "$PORT" | tee "$WORK/e2e.out"; then
-  grep -q 'MOSH_E2E_OK' "$WORK/e2e.out" \
-    && echo "==> PASS: the iOS client decoded the server's output" \
-    || { echo "==> FAIL: connected but no server output"; exit 1; }
+  grep -q 'TYPED_24_OK' "$WORK/e2e.out" \
+    && echo "==> PASS: session up, output decoded, keystrokes ran on the server" \
+    || { echo "==> FAIL: no input round-trip in the transcript"; exit 1; }
 else
   echo "==> FAIL"
   exit 1

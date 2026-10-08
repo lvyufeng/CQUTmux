@@ -196,6 +196,10 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
     /// host doesn't hammer the radio.
     private func scheduleReconnect(reason: String) {
         guard autoReconnect, !userInitiated else { return }
+        // A transport that recovers on its own (mosh) must not be torn down and
+        // restarted: the stall it is recovering from would become a lost
+        // session, which is exactly what mosh exists to avoid.
+        guard !transport.handlesReconnect else { return }
         retryTask?.cancel()
         let delay = min(30, pow(2, Double(attempt)))
         attempt += 1
@@ -344,6 +348,18 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
     private func write(_ data: Data) {
         transport.send(data)
     }
+
+    #if DEBUG
+    /// Whether the session is up right now. Test-only.
+    var isLiveForTesting: Bool { status.isLive }
+
+    /// Types into the live session exactly as the keyboard does. Test-only;
+    /// see `DebugSeed.typeWhenConnected`.
+    func injectForTesting(_ text: String) {
+        guard status.isLive else { return }
+        write(Data(text.utf8))
+    }
+    #endif
 
     // MARK: - TerminalViewDelegate
 

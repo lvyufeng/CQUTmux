@@ -194,10 +194,65 @@ private final class ShellChannelHandler: ChannelInboundHandler {
     }
 }
 
+/// Collects everything a one-shot exec channel emits.
+private final class ExecCollector: ChannelInboundHandler {
+    typealias InboundIn = SSHChannelData
+
+    private let lock = NSLock()
+    private var buffer = Data()
+    private var code: Int?
+
+    var text: String {
+        lock.lock(); defer { lock.unlock() }
+        return String(decoding: buffer, as: UTF8.self)
+    }
+
+    var exitCode: Int? {
+        lock.lock(); defer { lock.unlock() }
+        return code
+    }
+
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        let payload = unwrapInboundIn(data)
+        guard case .byteBuffer(var bytes) = payload.data,
+              let chunk = bytes.readBytes(length: bytes.readableBytes)
+        else { return }
+        lock.lock()
+        buffer.append(contentsOf: chunk)
+        lock.unlock()
+    }
+
+    func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+        if let status = event as? SSHChannelRequestEvent.ExitStatus {
+            lock.lock()
+            code = status.exitStatus
+            lock.unlock()
+        }
+        context.fireUserInboundEventTriggered(event)
+    }
+}
+
+public extension String {
+    /// Single-quotes for a POSIX shell, closing and reopening around any
+    /// embedded quote so a path with a space or an apostrophe cannot break out.
+    /// Public because callers that build remote commands out of user input —
+    /// mosh's port range, for one — need it too.
+    var shellQuoted: String {
+        "'" + replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+}
+
 /// Plain SSH transport built on SwiftNIO SSH. All `onEvent` callbacks are
 /// delivered on the main queue.
 public final class SSHTransport: TerminalTransport {
     public var onEvent: (@Sendable (TransportEvent) -> Void)?
+
+    /// True once the SSH handshake finished and a handler exists. Callers that
+    /// need to run a command before the shell channel is up (mosh-server
+    /// launch) wait on this rather than inventing a second readiness signal.
+    public var hasActiveSession: Bool {
+        stateQueue.sync { sshHandler != nil }
+    }
 
     private var group: EventLoopGroup?
     private var connectionChannel: Channel?
@@ -480,6 +535,73 @@ public final class SSHTransport: TerminalTransport {
                 promise: nil
             )
         }
+    }
+
+    /// Looks up a command's absolute path on the host.
+    ///
+    /// iOS and macOS hold a GUI app's PATH to a bare minimum, so a remote
+    /// `command -v` run over SSH is the only reliable way to learn whether a
+    /// tool exists and where — needed before offering a transport that depends
+    /// on a host-side program.
+    public func locate(_ command: String) async -> String? {
+        let probe = "command -v \(command.shellQuoted)"
+        // A login shell first: `command -v` only sees the daemon's PATH, which
+        // on a login-configured host is a fraction of the user's — Homebrew,
+        // /usr/local/bin and whatever an rc file adds are all missing. `-l` and
+        // the `-` in `$0` are what make the shell read those files.
+        for candidate in ["sh -lc \(probe.shellQuoted)", probe] {
+            guard let output = await run(candidate, timeout: 15) else { continue }
+            for line in output.text.split(separator: "\n") {
+                let text = line.trimmingCharacters(in: .whitespaces)
+                // A path, not a shell complaint. Without this, "command not
+                // found" and warnings from an rc file would be returned as the
+                // program's path and only fail later, as a confusing exec error.
+                if text.hasPrefix("/") { return text }
+            }
+        }
+        return nil
+    }
+
+    /// The effect of running `command` over a one-shot SSH channel. A login
+    /// command produces a small banner, so this is sized for that rather than
+    /// for bulk output.
+    public struct ExecResult: Sendable {
+        public var text: String
+        public var exitCode: Int?
+    }
+
+    public func run(_ command: String, timeout: TimeInterval = 20) async -> ExecResult? {
+        guard let handler = stateQueue.sync(execute: { sshHandler }),
+              let channel = stateQueue.sync(execute: { connectionChannel })
+        else { return nil }
+
+        let collector = ExecCollector()
+        let promise = channel.eventLoop.makePromise(of: Channel.self)
+        channel.eventLoop.execute {
+            handler.createChannel(promise, channelType: .session) { child, type in
+                guard type == .session else {
+                    return child.eventLoop.makeFailedFuture(SSHTransportError.unexpectedChannelType)
+                }
+                return child.eventLoop.makeCompletedFuture {
+                    try child.pipeline.syncOperations.addHandler(collector)
+                }
+            }
+        }
+
+        guard let child = try? await promise.futureResult.get() else { return nil }
+
+        child.eventLoop.execute {
+            child.triggerUserOutboundEvent(
+                SSHChannelRequestEvent.ExecRequest(command: command, wantReply: false),
+                promise: nil
+            )
+        }
+
+        // The channel closes when the remote command exits; the cap is only a
+        // guard against a command that never does.
+        _ = try? await child.closeFuture.get()
+        _ = try? await Task.sleep(for: .milliseconds(1)) // let the last read land
+        return ExecResult(text: collector.text, exitCode: collector.exitCode)
     }
 
     /// Opens a `direct-tcpip` channel through the SSH connection to `host:port`

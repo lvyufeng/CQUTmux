@@ -45,21 +45,26 @@ struct HostEditView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                // Mosh and ET aren't wired up yet (their C/C++ dependencies
-                // don't cross-compile in this project's toolchain). Say so
-                // rather than letting the host silently behave like plain SSH.
-                if host.transport == .mosh || host.transport == .et {
-                    Label("Not available yet — this host will connect over SSH.",
+                // Mosh needs a program on the host that SSH alone does not
+                // require, so say so up front rather than letting the session
+                // fail with a half-explained message. `auto` hides this, and
+                // that is the point of `auto` — it falls back on its own.
+                if host.transport == .mosh {
+                    Label("Needs mosh-server on the host. The RTT-adaptive UDP session starts once it is running.",
+                          systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if host.transport == .et {
+                    Label("ET is not available in this build — this host will not connect.",
                           systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
 
-                // `auto` is the default, so leaving it silently identical to
-                // SSH is the worst place to be vague: nothing in the app tries
-                // mosh or ET. Say what actually happens.
                 if host.transport == .auto {
-                    Label("Mosh and ET aren't available yet, so this uses SSH.",
+                    Label("Tries mosh first, then falls back to SSH if the host has no mosh-server.",
                           systemImage: "info.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)

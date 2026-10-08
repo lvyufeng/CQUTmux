@@ -15,7 +15,10 @@ enum DebugSeed {
         host.port = Int(env["CQUT_DEV_PORT"] ?? "22") ?? 22
         host.username = env["CQUT_DEV_USER"] ?? ""
         host.authMethod = .key
-        host.transport = .ssh
+        // Selectable so a simulator run can exercise the mosh path, which is
+        // otherwise only reachable by hand-editing the form.
+        host.transport = TransportKind(rawValue: env["CQUT_DEV_TRANSPORT"] ?? "") ?? .ssh
+        host.moshPortRange = env["CQUT_DEV_MOSH_PORT_RANGE"]
         host.sessionCommand = ""
 
         if let jump = env["CQUT_DEV_JUMP"], !jump.isEmpty {
@@ -36,6 +39,38 @@ enum DebugSeed {
 
         if !store.hosts.contains(where: { $0.hostname == host.hostname && $0.port == host.port }) {
             store.upsert(host)
+        }
+    }
+
+    /// Types `phrase` into a live session, then reports whether the host echoed
+    /// it back.
+    ///
+    /// This exists because the input half of a transport cannot otherwise be
+    /// tested from a script: automating the simulator's keyboard needs
+    /// accessibility permissions the test environment does not have. Going
+    /// through the terminal view means this takes the same path a keypress does
+    /// — delegate callback, then `transport.send` — so a pass is evidence about
+    /// the real thing, not a parallel code path built to pass.
+    static func typeWhenConnected(view: CQUTTerminalView, phrase: String, attempt: Int = 0) {
+        // Poll for the session rather than sleeping a guessed interval: too
+        // early and the keystrokes go nowhere, which looks exactly like a broken
+        // input path.
+        guard attempt < 60 else { return }
+        guard view.isLiveForTesting else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                typeWhenConnected(view: view, phrase: phrase, attempt: attempt + 1)
+            }
+            return
+        }
+        // Let the shell settle: the server has sent its prompt, but a login
+        // shell may still be printing rc output, which would land on top of a
+        // command typed too soon.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            // `echo TYPED_$((20+4))_OK` rather than the phrase back: the shell
+            // has to expand the arithmetic, so the marker in the output proves
+            // the host ran the command rather than the terminal printing the
+            // characters it was handed.
+            view.injectForTesting(phrase + "; echo TYPED_$((20+4))_OK\n")
         }
     }
 }
