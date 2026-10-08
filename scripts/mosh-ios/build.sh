@@ -17,13 +17,13 @@ set -euo pipefail
 MOSH_SRC="${1:?usage: build.sh <mosh-source-dir> <out-dir> [protoc-dir]}"
 OUT="${2:?usage: build.sh <mosh-source-dir> <out-dir> [protoc-dir]}"
 # protoc generate step; fetch-deps.sh puts it next to the sources.
-PROTOC_DIR="${3:-$(dirname "$(dirname "$MOSH_SRC")")/protoc/bin}"
+PROTOC_DIR="${3:-$(dirname "$MOSH_SRC")/protoc/bin}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$PROTOC_DIR:$PATH"
 
 SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 TARGET="arm64-apple-ios18.0-simulator"
-PROTOBUF_INC="${PROTOBUF_INC:-$(dirname "$(dirname "$MOSH_SRC")")/protobuf-21.12/src}"
+PROTOBUF_INC="${PROTOBUF_INC:-$(dirname "$MOSH_SRC")/protobuf-21.12/src}"
 
 # protobuf's generated .pb.cc files (produced by protoc, which autoconf would
 # normally invoke through pkg-config) have to be compiled in too.
@@ -110,5 +110,10 @@ echo "==> archiving"
 xcrun --sdk iphonesimulator libtool -static -o "$OUT/lib/libmoshclient.a" "$OUT"/obj/*.o
 
 echo "==> done: $OUT/lib/libmoshclient.a"
-xcrun --sdk iphonesimulator nm -g "$OUT/lib/libmoshclient.a" 2>/dev/null \
-  | grep -cE "T _ZN" | sed 's/^/    exported C++ symbols: /'
+# Count defined C++ symbols as a sanity check that the archive is not empty.
+# `|| true` because grep -c exits 1 on a zero count, which set -e would take
+# as a build failure — the opposite of what a zero here means.
+count=$(xcrun --sdk iphonesimulator nm -g "$OUT/lib/libmoshclient.a" 2>/dev/null \
+  | grep -cE ' T __ZN' || true)
+echo "    defined C++ symbols: $count"
+[ "$count" -gt 0 ] || { echo "archive is empty"; exit 1; }
