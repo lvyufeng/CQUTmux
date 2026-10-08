@@ -9,6 +9,8 @@ struct HostEditView: View {
     /// Held in a local @State rather than the struct so the plaintext never
     /// travels with the persisted Host.
     @State private var gatewayToken = ""
+    /// Whether a key is in the Keychain for this host. Loaded once in `task`.
+    @State private var hasKey = false
 
     private var saveDisabled: Bool {
         host.hostname.isEmpty
@@ -51,6 +53,16 @@ struct HostEditView: View {
                           systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                }
+
+                // `auto` is the default, so leaving it silently identical to
+                // SSH is the worst place to be vague: nothing in the app tries
+                // mosh or ET. Say what actually happens.
+                if host.transport == .auto {
+                    Label("Mosh and ET aren't available yet, so this uses SSH.",
+                          systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if host.transport == .ssh || host.transport == .auto {
@@ -101,7 +113,13 @@ struct HostEditView: View {
                 .pickerStyle(.segmented)
 
                 if host.authMethod == .key {
-                    LabeledContent("Private key", value: host.keyIdentifier == nil ? "None" : "In Keychain")
+                    // Read the key's presence from the Keychain, which is
+                    // where it actually lives — the Host struct carries no
+                    // reference to it.
+                    LabeledContent(
+                        "Private key",
+                        value: hasKey ? "In Keychain" : "None"
+                    )
                     Text("Import an Ed25519 key from Settings, then unlock it with Face ID when connecting.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -146,6 +164,7 @@ struct HostEditView: View {
         .task {
             gatewayToken = KeychainStore.load(account: host.gatewayTokenAccount)
                 .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            hasKey = KeychainStore.load(account: host.keySeedAccount) != nil
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

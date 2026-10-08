@@ -40,8 +40,9 @@ struct Host: Identifiable, Codable, Hashable {
     var port: Int = 22
     var username: String = ""
     var authMethod: AuthMethod = .password
-    /// Keychain item reference for the private key. Never the key material itself.
-    var keyIdentifier: String? = nil
+    /// The key itself lives in the Keychain under `keySeedAccount`; nothing
+    /// about it is persisted here. (An earlier `keyIdentifier` field pretended
+    /// otherwise and was never written, so the form always read "None".)
     var transport: TransportKind = .auto
     var jumpHost: String? = nil            // "user@host:22"
     var moshPortRange: String? = nil
