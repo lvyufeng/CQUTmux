@@ -83,6 +83,19 @@ SOURCES=(
   src/base/UnixSocketHandlerUnix.cpp src/base/TcpSocketHandlerUnix.cpp
   src/base/PollSetUnix.cpp src/base/SubprocessUtilsUnix.cpp src/base/UserSocketOpsUnix.cpp
   src/terminal/TerminalClient.cpp src/terminal/TitleParser.cpp
+  # The forwarding handlers are required even though the app never opens a
+  # tunnel: TerminalClient.cpp calls hasActiveStdioForward() on the handler
+  # unconditionally, and that pulls in the whole PortForwardHandler, which
+  # pulls in both of these. Leaving them out is an undefined symbol at link,
+  # not a dead branch.
+  src/terminal/forwarding/PortForwardHandler.cpp
+  src/terminal/forwarding/ForwardSourceHandler.cpp
+  src/terminal/forwarding/ForwardDestinationHandler.cpp
+  # Console declares virtuals and defines only some of them inline, so its
+  # vtable — and therefore the typeinfo any Console subclass needs — is emitted
+  # here. Without this object the driver's own class fails to link, with an
+  # error that points at the subclass rather than at the missing base.
+  src/terminal/ConsoleUnix.cpp
 )
 
 echo "==> compiling ET client core"
@@ -104,7 +117,22 @@ for src in "$ET/external/easyloggingpp/src/easylogging++.cc" \
   xcrun --sdk "$SDK" clang++ "${CXXFLAGS[@]}" -c "$src" -o "$obj"
 done
 
+echo "==> compiling the CQUT ET driver"
+# It needs ET's headers, so it is built here rather than as a SwiftPM target —
+# SwiftPM cannot see this tree, the same reason mosh's driver lives here.
+# -fvisibility=default: the class-info symbols the driver's vtable needs are
+# typeinfo for ET's own classes, which -fvisibility-inlines-hidden can leave
+# undefined. Nothing else in this archive is loaded dynamically, so the flag
+# costs nothing here.
+xcrun --sdk "$SDK" clang++ "${CXXFLAGS[@]}" -fvisibility=default \
+  -c "$HERE/driver/et_driver.cc" -o "$OUT/obj/cqutet_driver.o"
+# TelemetryService is compiled out by NO_TELEMETRY but still referenced by
+# TerminalClient, so its two symbols are supplied from the driver directory.
+xcrun --sdk "$SDK" clang++ "${CXXFLAGS[@]}" \
+  -c "$HERE/driver/telemetry_stub.cc" -o "$OUT/obj/cqutet_telemetry.o"
+
 echo "==> archiving"
 xcrun --sdk "$SDK" libtool -static -o "$OUT/libetcore.a" "$OUT"/obj/*.o
 echo "==> done: $OUT/libetcore.a ($i sources)"
 nm -g "$OUT/libetcore.a" 2>/dev/null | grep -cE " T __ZN2et" || true
+nm -g "$OUT/libetcore.a" 2>/dev/null | grep -c " T _et_start" || true
