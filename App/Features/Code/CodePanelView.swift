@@ -15,6 +15,7 @@ struct CodePanelView: View {
     @State private var openFile: FileContents?
     @State private var path = "."
     @State private var showPreview = false
+    @State private var showSimulator = false
 
     private enum Mode: String, CaseIterable { case files = "Files", changes = "Changes", history = "History" }
 
@@ -55,10 +56,19 @@ struct CodePanelView: View {
         .toolbar {
             if connection.client != nil {
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showPreview = true
+                    Menu {
+                        Button {
+                            showPreview = true
+                        } label: {
+                            Label("Browser preview", systemImage: "safari")
+                        }
+                        Button {
+                            showSimulator = true
+                        } label: {
+                            Label("Simulator preview", systemImage: "iphone.gen3")
+                        }
                     } label: {
-                        Label("Preview", systemImage: "safari")
+                        Label("Preview", systemImage: "play.rectangle")
                     }
                 }
             }
@@ -66,6 +76,11 @@ struct CodePanelView: View {
         .sheet(isPresented: $showPreview) {
             if let client = connection.client {
                 PreviewView(client: client)
+            }
+        }
+        .sheet(isPresented: $showSimulator) {
+            if let client = connection.client {
+                SimulatorPreviewView(client: client)
             }
         }
     }
@@ -97,6 +112,7 @@ struct CodePanelView: View {
             await load(client)
             #if DEBUG
             if Self.previewInitiallyOpen { showPreview = true }
+            if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "simulator" { showSimulator = true }
             #endif
         }
         .sheet(item: $openFile) { (file: FileContents) in

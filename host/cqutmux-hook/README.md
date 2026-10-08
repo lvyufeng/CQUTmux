@@ -36,6 +36,8 @@ require `Authorization: Bearer <secret>` on every request.
 | `GET` | `/usage` | 5h / 7d burn windows per agent |
 | `GET` | `/sessions` | tmux and zellij sessions, windows/tabs and pane counts |
 | `GET` | `/ports` | listening TCP ports, dev-looking ones first |
+| `GET` | `/simulators` | booted iOS simulators on the host |
+| `GET` | `/simulator/screenshot?udid=<id>` | a PNG frame of one booted simulator |
 | `POST` | `/upload` | write a raw body (a pasted image) under `.cqutmux/paste/` |
 
 Event body:

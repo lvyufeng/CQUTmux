@@ -17,9 +17,9 @@ import { createServer } from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { execFile, spawn } from 'node:child_process'
-import { readdir, readFile, stat, mkdir, writeFile } from 'node:fs/promises'
+import { readdir, readFile, stat, mkdir, writeFile, rm } from 'node:fs/promises'
 import { resolve, relative, isAbsolute, join } from 'node:path'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 
 const run = promisify(execFile)
 
@@ -266,6 +266,43 @@ async function listeningPorts() {
   return { available: true, ports: [...new Set([...hinted, ...rest])] }
 }
 
+// Booted iOS simulators on the host, for the app's simulator preview. Parses
+// `xcrun simctl list devices booted --json`, which is the stable interface.
+async function bootedSimulators() {
+  let stdout
+  try {
+    ;({ stdout } = await run('xcrun', ['simctl', 'list', 'devices', 'booted', '--json'], {
+      maxBuffer: 4 * 1024 * 1024,
+    }))
+  } catch (error) {
+    return { available: false, error: 'simctl unavailable on this host', simulators: [] }
+  }
+
+  let parsed
+  try {
+    parsed = JSON.parse(stdout)
+  } catch {
+    return { available: true, simulators: [] }
+  }
+
+  const simulators = []
+  for (const [runtime, devices] of Object.entries(parsed.devices || {})) {
+    for (const device of devices) {
+      if (device.state !== 'Booted') continue
+      // Runtime keys look like "com.apple.CoreSimulator.SimRuntime.iOS-27-0";
+      // keep just the "iOS 27.0" tail.
+      const tail = runtime.split('.').pop() || ''
+      const [platform, ...rest] = tail.split('-')
+      simulators.push({
+        udid: device.udid,
+        name: device.name,
+        runtime: `${platform} ${rest.join('.')}`.trim(),
+      })
+    }
+  }
+  return { available: true, simulators }
+}
+
 // Enumerates tmux sessions, their windows, and whether a pane is attached, so
 // the app can offer a session picker and jump-to-window without a shell round
 // trip. Uses a stable tab-separated format rather than tmux's default grid.
@@ -450,6 +487,31 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/ports') {
     return json(res, 200, await listeningPorts())
+  }
+
+  if (req.method === 'GET' && url.pathname === '/simulators') {
+    return json(res, 200, await bootedSimulators())
+  }
+
+  // A screenshot of a booted simulator, sent as raw PNG so the app can show it
+  // without an image decoder on the gateway side.
+  if (req.method === 'GET' && url.pathname === '/simulator/screenshot') {
+    const udid = String(url.searchParams.get('udid') || '')
+    if (!/^[0-9A-Fa-f-]{20,40}$/.test(udid)) {
+      return json(res, 400, { error: 'invalid udid' })
+    }
+    const target = join(tmpdir(), `cqutmux-sim-${randomUUID()}.png`)
+    try {
+      await run('xcrun', ['simctl', 'io', udid, 'screenshot', target], { timeout: 15000 })
+      const png = await readFile(target)
+      await rm(target, { force: true })
+      res.writeHead(200, { 'content-type': 'image/png', 'content-length': png.length })
+      res.end(png)
+    } catch (error) {
+      await rm(target, { force: true })
+      return json(res, 500, { error: String(error.stderr || error.message || error).slice(0, 300) })
+    }
+    return
   }
 
   if (req.method === 'GET' && url.pathname === '/events') {

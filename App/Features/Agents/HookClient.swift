@@ -237,6 +237,20 @@ final class HookClient {
         return try JSONDecoder().decode(PortBoard.self, from: payload.body)
     }
 
+    // MARK: - Simulator preview
+
+    func simulators() async throws -> SimulatorBoard {
+        let payload = try await request("GET", "/simulators")
+        return try JSONDecoder().decode(SimulatorBoard.self, from: payload.body)
+    }
+
+    /// A PNG screenshot of a booted simulator on the host.
+    func simulatorScreenshot(udid: String) async throws -> Data {
+        let encoded = udid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? udid
+        let payload = try await request("GET", "/simulator/screenshot?udid=\(encoded)", timeout: 25)
+        return payload.body
+    }
+
     // MARK: - Uploads
 
     /// Uploads a pasted image to the host and returns the path it was written
@@ -259,6 +273,18 @@ struct PortBoard: Codable {
     var available: Bool
     var error: String?
     var ports: [Int]
+}
+
+struct SimulatorBoard: Codable {
+    struct Simulator: Codable, Identifiable {
+        var udid: String
+        var name: String
+        var runtime: String
+        var id: String { udid }
+    }
+    var available: Bool
+    var error: String?
+    var simulators: [Simulator]
 }
 
 struct SessionBoard: Codable {
