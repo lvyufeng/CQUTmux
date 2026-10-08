@@ -15,7 +15,7 @@ See plan: [PLAN.md](PLAN.md).
 |---|---|---|
 | 0 | Project skeleton, SwiftUI shell, host CRUD | ✅ |
 | 1 | SSH terminal MVP (swift-nio-ssh + SwiftTerm + tmux) | ✅ |
-| 2 | Mosh / ET transports | ⛔ blocked — needs a C/C++ cross-compile toolchain the host lacks. Roaming is covered instead by backoff auto-reconnect. |
+| 2 | Mosh / ET transports | 🟡 Mosh's client libraries cross-compile for iOS and complete a real handshake against `mosh-server` (verified end to end in the simulator). Not yet behind `TerminalTransport`/the UI. ET not attempted. |
 | 3 | Host gateway + agent Inbox / Diff / Files / History | ✅ |
 | 4 | Notifications, Live Activity, voice, image paste, tmux picker | ✅ |
 | 5 | zellij, iPad sidebar, browser + simulator preview, gateway token | ✅ |
@@ -62,6 +62,7 @@ App/                    SwiftUI app (features grouped by domain)
   Features/Preview/     browser bridge and simulator preview
   Features/Security/    Keychain, key management
 Packages/CQUTTransport/ local SwiftPM package: the SSH transport
+Packages/CQUTMosh/      the mosh↔Swift driver (C); see scripts/mosh-ios/
 host/cqutmux-hook/      host-side gateway daemon (Node.js)
 Widgets/                Live Activity / Dynamic Island extension
 Watch/                  watchOS app: approve agent requests from the wrist

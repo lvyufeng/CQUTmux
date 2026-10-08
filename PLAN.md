@@ -150,7 +150,7 @@ CQUTmux/
 |---|---|---|
 | P0 骨架 | ✅ 已合并 | commit `0311e7e` |
 | P1 SSH 终端 | ✅ 已合并并**实测** | 见 commit `d4f663c` / `ab9245a`。公钥认证连真实 sshd、SwiftTerm 渲染活 shell 已验证 |
-| P2 Mosh / ET | ⛔ 受阻 | 需要交叉编译 C/C++（mosh、ET）+ protobuf/OpenSSL，本机无工具链 |
+| P2 Mosh / ET | 🟡 Mosh 已打通，待接入 UI | **之前标"受阻"是错的**：clang 一直在（Apple clang 21），缺的只是构建工具（pip 可装）。现以 `--with-crypto-library=apple-common-crypto` 交叉编译 mosh 客户端全部库 + protobuf-lite，并用自写驱动替代 `stmclient.cc` 的 `main()`。**实测**：`scripts/mosh-ios/test.sh` 在模拟器里跑通与真实 `mosh-server` 的完整握手并解出输出（`MOSH_E2E_OK`）。尚未接进 App 的终端 UI |
 | P3 Agent 层 | ✅ 已合并并**实测** | 宿主 `cqutmux-hook` ↔ 隧道内 Inbox / Code / Diff / Usages，均经模拟器实测 |
 | P4 通知/语音 | ✅ 已合并并**实测** | 端侧听写、Live Activity / 灵动岛、本地通知、webhook 告警、图片标注上传、tmux 会话选择器 |
 | P5 收尾 | ✅ 主体完成 | iPad 侧栏、zellij、OSC 52 剪贴板、git 历史、网关 token、断线自动重连（修复会话静默失联的真实 bug）、浏览器预览、模拟器预览均已合并并在模拟器实测 |
@@ -171,7 +171,8 @@ Apple Watch 无 runtime，只验证到"编译 + 嵌入 + 配对字段正确"；C
 
 | 项 | 原因 | 现状 |
 |---|---|---|
-| Mosh / ET / Auto 协商 | 需交叉编译 C/C++（mosh、ET）+ protobuf/OpenSSL，本机无工具链 | 选到 mosh/et 时表单明确提示将回退 SSH |
+| Mosh 接入 App | 库已跨编译并实测连通真实 server，但尚无 `TerminalTransport` 实现 + UI 接线 | 选 mosh 时表单明确提示将回退 SSH |
+| ET / Auto 协商 | ET 需 `--enable-et` 编译 + C++17 工具链（尚未尝试）；Auto 需要 mosh/ET 先可用 | 表单明确提示回退 SSH |
 | SSH agent forwarding | swift-nio-ssh 无 agent 通道，且 iOS 上也没有可转发的 ssh-agent socket | 打开开关时表单明确提示不可用 |
 | herdr | 作者自研多路复用器，无公开协议；无法在不知协议的情况下对接 | 支持 tmux / zellij 作为等价能力 |
 | 远程推送（APNs） | 需开发者账号 + 推送证书，本环境无法配置 | 本地通知 + webhook 告警已覆盖同类场景 |
