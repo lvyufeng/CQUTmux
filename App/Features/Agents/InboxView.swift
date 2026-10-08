@@ -81,9 +81,20 @@ struct InboxView: View {
                 }
                 if client.events.isEmpty {
                     Section {
-                        Text(client.state == .connected ? "Waiting for agent activity…" : "Connecting to the host…")
-                            .foregroundStyle(.secondary)
-                            .font(.footnote)
+                        // A connected client with nothing to show is either
+                        // genuinely idle or failing to read the gateway, and
+                        // those look identical without the error. "Waiting for
+                        // agent activity" while every poll times out is the one
+                        // message that sends someone looking in the wrong place.
+                        if let error = client.lastError {
+                            Text("Connected, but the gateway is not answering: \(error)")
+                                .foregroundStyle(.orange)
+                                .font(.footnote)
+                        } else {
+                            Text(client.state == .connected ? "Waiting for agent activity…" : "Connecting to the host…")
+                                .foregroundStyle(.secondary)
+                                .font(.footnote)
+                        }
                     }
                 }
                 ForEach(client.events) { event in
@@ -120,15 +131,15 @@ private struct EventRow: View {
                 Image(systemName: icon)
                     .foregroundStyle(event.isPending ? .orange : Theme.accent)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(event.title.isEmpty ? event.sourceLabel : event.title)
+                    Text(event.displayTitle.isEmpty ? event.sourceLabel : event.displayTitle)
                         .font(.subheadline.weight(.medium))
                     Text("\(event.sourceLabel) · \(relativeTime)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
-            if !event.body.isEmpty {
-                Text(event.body)
+            if !event.displayBody.isEmpty {
+                Text(event.displayBody)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(4)

@@ -71,7 +71,27 @@ struct ApprovalListView: View {
             .navigationTitle("Approvals")
         }
         .onAppear { WatchLink.shared.start() }
+        #if DEBUG
+        // The watch simulator renders but cannot be tapped from the command
+        // line, so the decision path has no way to run in an automated check.
+        // This stands in for the finger: it sends exactly what the Allow button
+        // sends, through the same `decide`-to-`WatchLink.send` route, once the
+        // list is non-empty. It is DEBUG-only and gated on an explicit env var,
+        // so it can never fire in a build a wearer is using.
+        .onChange(of: items) { _, new in
+            guard let id = Self.autodecideTarget,
+                  let item = new.first(where: { $0.id == id }) else { return }
+            decide(item, allow: ProcessInfo.processInfo.environment["CQUT_DEV_WATCH_DECISION"] != "deny")
+        }
+        #endif
     }
+
+    #if DEBUG
+    /// The approval id a dev launch wants answered, or nil in a normal run.
+    private static var autodecideTarget: Int? {
+        ProcessInfo.processInfo.environment["CQUT_DEV_WATCH_APPROVE"].flatMap(Int.init)
+    }
+    #endif
 
     private func decide(_ item: WatchPayload.Snapshot.Item, allow: Bool) {
         sent[item.id] = allow

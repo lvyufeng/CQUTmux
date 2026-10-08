@@ -25,3 +25,5 @@ host/cqutmux-hook/cqutmux-hook
 # Secrets / local
 .env
 *.local
+# Watch-target derived data (scripts/watch-test.sh)
+build-watch/

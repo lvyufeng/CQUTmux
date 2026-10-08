@@ -20,7 +20,7 @@ final class ActivityManager {
 
         let state = AgentActivityAttributes.ContentState(
             pending: pending.count,
-            latestTitle: latest?.title ?? "Agent",
+            latestTitle: latest.map(\.displayTitle).flatMap { $0.isEmpty ? nil : $0 } ?? "Agent",
             latestSource: latest?.sourceLabel ?? "agent"
         )
 

@@ -62,7 +62,7 @@ final class AgentConnection {
     private static func snapshot(_ events: [AgentEvent]) -> WatchPayload.Snapshot {
         WatchPayload.Snapshot(
             items: events.filter(\.isPending).map {
-                .init(id: $0.id, source: $0.sourceLabel, title: $0.title, body: $0.body)
+                .init(id: $0.id, source: $0.sourceLabel, title: $0.displayTitle, body: $0.displayBody)
             }
         )
     }

@@ -38,7 +38,7 @@ enum ApprovalNotifier {
         for event in events where event.isPending {
             let content = UNMutableNotificationContent()
             content.title = "\(event.sourceLabel) needs approval"
-            content.body = event.title.isEmpty ? hostName : "\(event.title) — \(hostName)"
+            content.body = event.displayTitle.isEmpty ? hostName : "\(event.displayTitle) — \(hostName)"
             content.sound = .default
             content.userInfo = ["eventId": event.id]
 

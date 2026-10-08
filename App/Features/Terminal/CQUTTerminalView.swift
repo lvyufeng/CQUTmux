@@ -64,6 +64,19 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         self.font = font
         baseFontSize = font.pointSize
         theme.apply(to: self)
+
+        // Links are underlined and tappable without a modifier key. The default
+        // is `.hover`, which on a touch screen means a link is only clickable
+        // once a hover has already highlighted its whole row — reachable with a
+        // trackpad and not with a finger. `AppleTerminalView` is explicit that
+        // `.always` exists for this: it accepts implicit (regex-detected) links
+        // outright, where the other modes require the row to be highlighted
+        // first. `requestOpenLink` below does the opening, because on iOS
+        // SwiftTerm hands the URL to the app rather than opening it — which is
+        // also why nothing happens without that method.
+        linkReporting = .implicit
+        linkHighlightMode = .always
+
         installGestures()
 
         transport.onEvent = { [weak self] event in
@@ -389,7 +402,21 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
 
     func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
 
+    /// Opens a tapped link, but only if it is a web URL.
+    ///
+    /// The text on screen comes from whatever program is running on the far
+    /// end, and SwiftTerm will hand over anything that looks like a link —
+    /// including OSC 8 payloads, which the protocol allows to carry arbitrary
+    /// key/value metadata rather than a URL. Passing that straight to
+    /// `UIApplication.open` would let a remote program launch other apps on the
+    /// phone through custom schemes; the tab's purpose here is to be read, so
+    /// http and https are the whole of what opens.
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
-        if let url = URL(string: link) { UIApplication.shared.open(url) }
+        let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https"
+        else { return }
+        UIApplication.shared.open(url)
     }
 }

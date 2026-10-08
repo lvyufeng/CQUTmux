@@ -56,7 +56,7 @@
 | Agent 层 | Diff Viewer、文件浏览器、浏览器预览、模拟器预览 | P3 |
 | Agent 层 | Usages 看板（5h/7d 用量与 burn pace） | P4 |
 | 通知 | 本地/远程推送、webhook 告警 | P4 |
-| 系统 | Live Activity / Dynamic Island / Apple Watch | P4 |
+| 系统 | Live Activity / Dynamic Island / Apple Watch | P4 / P6 ✅ 表盘实测 |
 | 语音 | 端侧听写（Apple Speech → whisper.cpp/parakeet） | P4 |
 | 输入 | 图片粘贴 / 裁剪 / 标注 / 发送 | P4 |
 | 安全 | SSH key 存 Keychain + Face ID 保护 | P1 |
@@ -157,7 +157,7 @@ CQUTmux/
 | P5 收尾 | ✅ 主体完成 | iPad 侧栏、zellij、OSC 52 剪贴板、git 历史、网关 token、断线自动重连（修复会话静默失联的真实 bug）、浏览器预览、模拟器预览均已合并并在模拟器实测 |
 | P5c 字体 / 图标 | ✅ 已合并并**实测** | 终端字体（family / 字号 / 行距 + 实时预览）持久化，pinch 手势回写偏好；App 与 Watch 图标（`scripts/make-icon.py` 可复现）。补上 P4 里"字体"和图标两处空缺 |
 | P5b Jump host | ✅ 已合并并**实测** | 在跳跃主机上开 `direct-tcpip` 到目标的 22 端口，把目标 SSH 连接跑在该通道内（`ByteBufferToSSHDataHandler` / `SSHDataToByteBufferHandler` 做 `ByteBuffer`↔`SSHChannelData` 互转）。实测：两条本机 sshd (`:2222` 为跳板，`:2233` 为目标)，`lsof` 确认应用只连 `:2222`、`:2222`→`:2233` 由 sshd 转发；杀掉跳板会话后 UI 报 `jump host … Connection refused` 并自动重连成功；不带跳板的直连路径回归通过 |
-| P6 Apple Watch | 🟡 构建通过、已嵌入 | `CQUTmuxWatch` watchOS target：待审批列表 + 批准/拒绝，经 `WCSession` 与手机同步，决定回落到手机上的 `HookClient.resolve`。**未运行**——本机只装了 iOS 模拟器 runtime，无 watchOS runtime（SDK 在，runtime 不在），无法启动表盘验证 |
+| P6 Apple Watch | ✅ 已在 watchOS 模拟器**实测** | `CQUTmuxWatch` watchOS target：待审批列表 + 批准/拒绝，经 `WCSession` 与手机同步，决定回落到手机上的 `HookClient.resolve`。**已跑通完整回路**：手机 Inbox 的待审批经 `updateApplicationContext` 推到表盘并渲染；表盘上的决定经 `sendMessage` 回到手机，手机发出 `POST /approve/3`，网关侧 `decision=allow` + `resolvedAt` 落库。**模拟器限制（非 App 缺陷）**：`simctl` 只把 watch app 装进表盘容器，不会执行真机上的"手机代表表盘安装"那一步握手，于是 phone 侧 WCD 的 `WCDStoredInstalledWatchApps` 始终为空，`updateApplicationContext` 直接以 `WCErrorCodeWatchAppNotInstalled` 失败（`appInstalled: NO`）。实测前需先手工补上该记录并重启 `com.apple.wcd`；代码本身无需改动。真机由系统完成该握手，不存在此问题 |
 
 **环境事实**：本机工具链为 Swift 6.4 / Xcode 27 / Node 22，**且 clang（Apple clang 21）一直都在**——
 此前"无 C 编译工具链"的记载是错的，缺的只是构建工具（cmake/protoc 等，pip 可装），这正是 Mosh 一度被误判为受阻的原因。
@@ -166,7 +166,9 @@ CQUTmux/
 
 **未验证项（诚实记录）**：本地通知的**投递**无法在模拟器验证（`simctl` 不能授予通知权限，
 仅能确认授权弹窗出现、代码路径执行）；P4/P5 的 UI 均在模拟器以 shim 数据实测，尚未上真机；
-Apple Watch 无 runtime，只验证到"编译 + 嵌入 + 配对字段正确"；CJK 输入依赖 SwiftTerm 的
+Apple Watch 已在 watchOS 模拟器跑通（见 P6 行），表盘上的决定如何送达则用 `CQUT_DEV_WATCH_APPROVE`
+注入 —— 模拟器无法用命令行点击表盘按钮，该注入走的正是 `decide`→`WatchLink.send` 同一条路径；
+CJK 输入依赖 SwiftTerm 的
 `UITextInput` 实现（已确认其实现 `setMarkedText`/`unmarkText`/`_markedTextRange` 全量协议，
 即系统输入法的组合文本路径），但未在真机上用中文键盘实测。
 
