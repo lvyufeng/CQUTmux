@@ -222,3 +222,19 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   the bridge with none of the gateway's environment. The gateway now publishes
   its token to `~/.cqutmux/token` (0600) while it runs and removes it on exit,
   and both bridges send it.
+
+- **Ctrl double-tap locks it on**, so `^C ^C` or a shell's `^R` search is one
+  gesture rather than one tap per key. Done by re-arming SwiftTerm's own
+  `controlModifier` after each keystroke from both write paths — the bar's own
+  and `insertText`, which is what a hardware or on-screen key goes through —
+  rather than by translating keys here, which would be a second way of turning
+  a key into a control character.
+- **⌘K / ⌘O / ⌘N / ⌘W.** Two of these were bound and both were wrong: ⌘K cleared
+  the screen and ⌘O toggled Ctrl. Clear screen moves to ⌘L, where a terminal
+  normally puts it; ⌘K now opens the shortcut list, ⌘O the session switcher,
+  ⌘N the host list, and ⌘W minimizes. The shortcuts reach the same sheets the
+  accessory bar's buttons do, so the two cannot drift apart.
+- **Long press on the keyboard button** opens Speech settings. The bar has no
+  room for another key, and the keyboard button is the one that is about input,
+  so that is where the dictation settings live from inside a session — without
+  it, changing the engine means leaving the terminal you are dictating into.

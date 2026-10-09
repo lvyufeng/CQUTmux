@@ -46,6 +46,12 @@ struct TerminalScreen: View {
     /// loud and lives on the phone, the other is what was run and lives on the
     /// host.
     @State private var showCommandHistory = false
+    /// ⌘N opens the host list to start another connection. A sheet rather than
+    /// a push: the terminal is presented as one, so pushing would put a list
+    /// under it whose back button leads somewhere the user never was.
+    @State private var newConnection = false
+    /// Raised by a long press on the keyboard button. See `keyboardButton`.
+    @State private var showSpeechSettings = false
     /// Set once the link's attach command has been sent, so a reconnect — which
     /// also reaches `.connected` — does not attach a second time.
     @State private var didFollowLink = false
@@ -67,7 +73,11 @@ struct TerminalScreen: View {
                 input: input,
                 mux: mux,
                 pinchZoomsPane: toolbar.pinchAction == .zoomPane,
-                allowsClipboardRead: security.allowsClipboardRead
+                allowsClipboardRead: security.allowsClipboardRead,
+                onShowShortcuts: { showShortcuts = true },
+                onShowSessions: { if connection.client != nil { showSessions = true } },
+                onNewConnection: { newConnection = true },
+                onMinimize: { minimize() }
             )
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationTitle(host.displayName)
@@ -132,6 +142,13 @@ struct TerminalScreen: View {
                 }
             }
             .sheet(isPresented: $showSessions) { sessionPicker }
+            .sheet(isPresented: $newConnection) {
+                // The same screen the Terminal tab shows when nothing is
+                // connected, reached without leaving the session. Dismissing it
+                // returns here, which is what makes ⌘N safe to press by
+                // accident.
+                NavigationStack { HostsView(pendingLink: nil) }
+            }
             .sheet(isPresented: $showShortcuts) {
                 NavigationStack { ShortcutEditorView(store: shortcuts) }
             }
@@ -152,6 +169,9 @@ struct TerminalScreen: View {
                         }
                     }
                 }
+            }
+            .sheet(isPresented: $showSpeechSettings) {
+                NavigationStack { SpeechSettingsView() }
             }
             .sheet(isPresented: $showHistory) {
                 NavigationStack {
@@ -569,7 +589,16 @@ struct TerminalScreen: View {
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.roundedRectangle(radius: 6))
+        // A long press opens Speech settings. The bar has no room for another
+        // key and the keyboard button is the one that is about input, so this is
+        // where the dictation settings live from inside a session — otherwise
+        // reaching them means leaving the terminal you are dictating into.
+        .onLongPressGesture(minimumDuration: 0.4) {
+            Self.dismissKeyboard()
+            showSpeechSettings = true
+        }
         .accessibilityLabel("Hide keyboard")
+        .accessibilityHint("Long press for dictation settings")
     }
 
     /// Not named `resignFirstResponder`: that collides with `UIResponder`'s own
@@ -618,7 +647,7 @@ struct TerminalScreen: View {
     @ViewBuilder
     private func barItem(_ item: InputSettings.Item) -> some View {
         switch item {
-        case .control: key("Ctrl", CtrlKey.control)
+        case .control: controlKey
         case .escape: key("Esc", CtrlKey.escape)
         case .tab: key("Tab", CtrlKey.tab)
         case .enter: key("Return", CtrlKey.enter)
@@ -696,6 +725,39 @@ struct TerminalScreen: View {
         .accessibilityHint(action == .custom ? input.cornerShortcut(slot) ?? "" : "")
     }
 
+    /// The Ctrl key, which has a second job.
+    ///
+    /// One tap is the sticky modifier it has always been: the next key becomes a
+    /// control character. A double tap *locks* it, so a run of keys is one
+    /// gesture — which is what makes `^C ^C` or a shell's `^R` search usable
+    /// from a phone. The label changes to say which state it is in, because a
+    /// modifier that is silently on is the kind of thing that produces
+    /// `^[[A` in the wrong pane and a puzzled user.
+    private var controlKey: some View {
+        let locked = coordinator.controlLocked
+        return Button {
+            let now = Date()
+            let isDoubleTap = now.timeIntervalSince(coordinator.lastControlTap) < 0.4
+            coordinator.lastControlTap = now
+            if isDoubleTap {
+                // A double tap supersedes the single tap that just fired, so the
+                // lock state is set outright rather than toggled twice.
+                coordinator.setControlLocked(!coordinator.controlLocked)
+            } else {
+                coordinator.press(.control)
+            }
+        } label: {
+            Text("Ctrl")
+                .font(.system(.subheadline, design: .monospaced))
+                .frame(minWidth: 44, minHeight: 32)
+                .foregroundStyle(locked ? .white : .primary)
+        }
+        .buttonStyle(.bordered)
+        .tint(locked ? .accentColor : nil)
+        .accessibilityLabel(locked ? "Ctrl, locked" : "Ctrl")
+        .accessibilityHint(locked ? "Double-tap to unlock" : "Double-tap to lock")
+    }
+
     private func key(_ label: String, _ key: CtrlKey) -> some View {
         Button { coordinator.press(key) } label: {
             Text(label)
@@ -728,12 +790,30 @@ final class TerminalCoordinator {
     var dictationPreview = ""
     @ObservationIgnored weak var terminal: CQUTTerminalView?
 
+    /// When the Ctrl key was last tapped, so a second tap within the window
+    /// counts as a double tap. Held here rather than in the view because the
+    /// bar is rebuilt on every settings change and would forget it.
+    @ObservationIgnored var lastControlTap = Date.distantPast
+
+    /// Whether Ctrl is locked, mirrored from the terminal view so the bar can
+    /// render the state without reaching into a UIKit object during a body.
+    var controlLocked = false
+
     func setDictationPreview(_ text: String) { dictationPreview = text }
+
+    /// Locks or releases Ctrl for every following keystroke.
+    func setControlLocked(_ locked: Bool) {
+        controlLocked = terminal?.setControlLocked(locked) ?? locked
+    }
 
     func press(_ key: CtrlKey) {
         guard let terminal else { return }
         switch key {
-        case .control: terminal.toggleControl()
+        case .control:
+            // A single press while locked releases it: the key that was just
+            // armed for the next keystroke should count as that keystroke,
+            // rather than leaving Ctrl on with no way to see why.
+            if controlLocked { setControlLocked(false) } else { terminal.toggleControl() }
         case .escape: terminal.sendEscape()
         case .tab: terminal.sendTab()
         case .enter: terminal.sendEnter()
@@ -766,6 +846,12 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
     /// read from the environment because a `UIViewRepresentable`'s
     /// `updateUIView` has no environment of its own.
     let allowsClipboardRead: Bool
+    /// Where the hardware ⌘-shortcuts go. Passed in because the representable
+    /// cannot reach the screen's state to raise a sheet itself.
+    var onShowShortcuts: () -> Void = {}
+    var onShowSessions: () -> Void = {}
+    var onNewConnection: () -> Void = {}
+    var onMinimize: () -> Void = {}
 
     /// Remembers what the view was last painted with. A `UIViewRepresentable`
     /// has no way to compare its own inputs between updates, and repainting the
@@ -845,6 +931,13 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         view.onFontSizeChange = { size in
             fonts.size = Double(size)
         }
+        // The ⌘-shortcuts reach the same sheets the accessory bar's buttons do.
+        // Routed through the coordinator rather than to `showX` directly so the
+        // hardware path and the tap path cannot drift apart.
+        view.onShowShortcuts = onShowShortcuts
+        view.onShowSessions = onShowSessions
+        view.onNewConnection = onNewConnection
+        view.onMinimize = onMinimize
         coordinator.terminal = view
         context.coordinator.appliedTheme = theme.id
         context.coordinator.appliedCursor = cursor.style

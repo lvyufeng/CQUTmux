@@ -23,6 +23,17 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// Called when a pinch or a hardware change settles on a new size, so the
     /// user's font preference follows the gesture instead of being lost.
     var onFontSizeChange: ((CGFloat) -> Void)?
+    /// Where a hardware ⌘-shortcut that belongs to the screen rather than to
+    /// the terminal is sent. The SwiftUI layer owns the sheets, so the view
+    /// cannot open them itself; these mirror the accessory bar's own buttons,
+    /// which is what makes ⌘-shortcuts and taps the same feature rather than
+    /// two implementations of it.
+    var onShowShortcuts: (() -> Void)?
+    var onShowSessions: (() -> Void)?
+    var onNewConnection: (() -> Void)?
+    /// ⌘W. Not "close the window" — there is one window — but Moshi's
+    /// minimize: drop the connection and go back to the host list.
+    var onMinimize: (() -> Void)?
 
     private let transport: TerminalTransport
     private let configuration: TransportConfiguration
@@ -537,10 +548,19 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// here and dispatched to the same helpers the accessory bar uses.
     override var keyCommands: [UIKeyCommand]? {
         var commands: [UIKeyCommand] = [
-            UIKeyCommand(input: "k", modifierFlags: .command, action: #selector(hardwareClear),
+            UIKeyCommand(input: "k", modifierFlags: .command, action: #selector(hardwareShowShortcuts),
+                         discoverabilityTitle: "Show shortcuts"),
+            UIKeyCommand(input: "o", modifierFlags: .command, action: #selector(hardwareShowSessions),
+                         discoverabilityTitle: "Session switcher"),
+            UIKeyCommand(input: "n", modifierFlags: .command, action: #selector(hardwareNewConnection),
+                         discoverabilityTitle: "New connection"),
+            UIKeyCommand(input: "w", modifierFlags: .command, action: #selector(hardwareMinimize),
+                         discoverabilityTitle: "Minimize session"),
+            // Clear screen moves to ⌘L, which is where every terminal puts it
+            // and where a user's fingers already go. It previously sat on ⌘K,
+            // which Moshi documents for opening the shortcut list.
+            UIKeyCommand(input: "l", modifierFlags: .command, action: #selector(hardwareClear),
                          discoverabilityTitle: "Clear screen"),
-            UIKeyCommand(input: "o", modifierFlags: .command, action: #selector(hardwareToggleControl),
-                         discoverabilityTitle: "Toggle Ctrl"),
             UIKeyCommand(input: "r", modifierFlags: .command, action: #selector(hardwareReconnect),
                          discoverabilityTitle: "Reconnect"),
             UIKeyCommand(input: "v", modifierFlags: .command, action: #selector(hardwarePaste),
@@ -563,7 +583,10 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
 
     /// Ctrl-L clears the screen without touching the running program's state.
     @objc private func hardwareClear() { write(Data([0x0C])) }
-    @objc private func hardwareToggleControl() { toggleControl() }
+    @objc private func hardwareShowShortcuts() { onShowShortcuts?() }
+    @objc private func hardwareShowSessions() { onShowSessions?() }
+    @objc private func hardwareNewConnection() { onNewConnection?() }
+    @objc private func hardwareMinimize() { onMinimize?() }
     @objc private func hardwareReconnect() { reconnect() }
     @objc private func hardwarePaste() { pasteFromClipboard() }
 
@@ -585,6 +608,38 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// Ctrl is a sticky modifier SwiftTerm already understands: toggling it
     /// turns the next key the user types into its control character.
     func toggleControl() { controlModifier.toggle() }
+
+    /// Whether Ctrl is being held down for every key rather than for the next
+    /// one.
+    ///
+    /// A double-tap on the Ctrl key sets this. It is done by re-arming
+    /// SwiftTerm's own `controlModifier` after each keystroke rather than by
+    /// translating keys ourselves: SwiftTerm clears the flag the moment it
+    /// sends data, and its clearing is also what tells its accessory view to
+    /// redraw. Fighting that would mean a second, divergent path for turning a
+    /// key into a control character.
+    private(set) var isControlLocked = false
+
+    /// Locks or releases Ctrl. Returns the state after the change, so the bar
+    /// can label itself without reading back.
+    @discardableResult
+    func setControlLocked(_ locked: Bool) -> Bool {
+        isControlLocked = locked
+        controlModifier = locked
+        return locked
+    }
+
+    /// Re-arms the lock after a keystroke, if it is on.
+    ///
+    /// Called from the same place `write` reaches the terminal, so a key that
+    /// goes through any path — the bar, a hardware keyboard, a pasted string —
+    /// stays under the lock. Called unconditionally: checking `isControlLocked`
+    /// at every call site is how the lock would come to apply to some keys and
+    /// not others, which is worse than not having it.
+    func rearmControlLockIfNeeded() {
+        guard isControlLocked else { return }
+        controlModifier = true
+    }
 
     func sendEscape() { write(Data([0x1B])) }
 
@@ -698,6 +753,17 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
 
     private func write(_ data: Data) {
         transport.send(data)
+        rearmControlLockIfNeeded()
+    }
+
+    /// A key from a hardware keyboard or the software one, which SwiftTerm
+    /// routes through here rather than through our own `write`. Re-arming after
+    /// the base call — not before — is what makes the lock hold: SwiftTerm
+    /// clears `controlModifier` while handling the text, so setting it
+    /// beforehand would be undone by the very keystroke it is meant to affect.
+    override func insertText(_ text: String) {
+        super.insertText(text)
+        rearmControlLockIfNeeded()
     }
 
     #if DEBUG
