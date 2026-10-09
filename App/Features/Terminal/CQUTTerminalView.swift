@@ -23,6 +23,21 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// Called when a pinch or a hardware change settles on a new size, so the
     /// user's font preference follows the gesture instead of being lost.
     var onFontSizeChange: ((CGFloat) -> Void)?
+
+    /// Whether a pinch asks the host gateway to zoom herdr's focused pane
+    /// instead of resizing the text.
+    ///
+    /// The gateway route rather than a mux prefix key, because herdr's own
+    /// binding is a chord into whatever has focus: it would toggle whichever
+    /// pane herdr thinks is focused, which is not necessarily the one the
+    /// screen is showing when a jump has not been made. The socket API names
+    /// the pane, so the zoom lands where the user is looking.
+    var pinchZoomsHerdrPane = false
+    /// Asks the host to zoom (`true`) or restore (`false`) the focused pane.
+    /// A closure rather than a URL here because the gateway is reached over the
+    /// SSH tunnel `HookClient` already owns, and a second connection from the
+    /// view would be a second tunnel doing what the first one can.
+    var onPinchZoom: ((Bool) -> Void)?
     /// Where a hardware ⌘-shortcut that belongs to the screen rather than to
     /// the terminal is sent. The SwiftUI layer owns the sheets, so the view
     /// cannot open them itself; these mirror the accessory bar's own buttons,
@@ -393,6 +408,15 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         // sent once per gesture rather than per frame the way the font is.
         // Anything else would spray the key at the mux and leave the pane
         // flickering between states.
+        //
+        // The gesture's direction picks the mode: pinching out full-screens the
+        // pane and pinching back restores the layout. A bare toggle would make
+        // the same gesture mean different things on alternate pinches, which is
+        // the one thing a gesture cannot be.
+        if pinchZoomsHerdrPane, gesture.state == .ended {
+            onPinchZoom?(gesture.scale > 1)
+            return
+        }
         if pinchZoomsPane, MuxSettings.MuxCommand.zoomPane.isAvailable(on: muxKind) {
             if gesture.state == .ended,
                let bytes = MuxSettings.MuxCommand.zoomPane.bytes(prefix: muxPrefix, mux: muxKind) {

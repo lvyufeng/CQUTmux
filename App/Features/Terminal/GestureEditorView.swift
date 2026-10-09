@@ -9,6 +9,7 @@ import SwiftUI
 /// something is not a guess about what it will fall back to.
 struct GestureEditorView: View {
     @Environment(ThemeStore.self) private var themes
+    @Environment(ToolbarSettings.self) private var toolbar
     @Environment(\.dismiss) private var dismiss
     @Bindable var store: GestureStore
 
@@ -18,7 +19,24 @@ struct GestureEditorView: View {
     @State private var draft = ""
 
     var body: some View {
+        // Not named `toolbar`: that is already a `View` modifier in scope.
+        @Bindable var settings = toolbar
         List {
+            Section {
+                Picker("Pinch", selection: $settings.pinchAction) {
+                    ForEach(ToolbarSettings.PinchAction.allCases) { action in
+                        Text(action.label).tag(action)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } header: {
+                Text("Pinch")
+            } footer: {
+                Text(settings.pinchAction.detail)
+                    .font(.caption)
+            }
+
             Section {
                 ForEach(TerminalGesture.allCases) { gesture in
                     row(gesture)

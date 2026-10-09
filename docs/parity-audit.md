@@ -274,3 +274,28 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   test script cannot open, so `scripts/jumpto-check.sh` starts the sheet in each
   layout via `CQUT_DEV_JUMPTO_LAYOUT` and checks the pixels against a live herdr
   server reporting a blocked pane.
+
+- **A pinch that zooms the pane, and a custom-key lock.** The pinch has been
+  the font-size control here since before there was a setting for it, so moving
+  it outright would make the app feel like it had lost a control — both are now
+  offered, with the font as the default and Moshi's documented behaviour a
+  choice, in Settings → Toolbar *and* inline in the Gestures screen where the
+  other terminal gestures live. The zoom goes through the host gateway's socket
+  route rather than herdr's own `prefix z` chord, because the chord acts on
+  whatever *herdr* thinks is focused, which is not necessarily the pane the
+  phone is looking at; the socket API's default target is herdr's focused pane.
+  The direction is explicit (`on` for pinch-out, `off` for pinch-back) so one
+  gesture cannot mean two different things on alternate pinches.
+
+  The custom keys gained a lock, and reading Moshi's docs properly moved it:
+  their "shortcuts button" is the button that opens the shortcuts *panel*, not
+  the accessory bar's Ctrl — which already has its own double-tap lock. So the
+  head of the custom-key group now takes a single tap to open the editor and a
+  double tap to stop the group sending to the terminal, with a single tap
+  afterwards to bring it back. Deliberately not symmetric: demanding the double
+  tap again to undo traps anyone who taps once and sees nothing happen. The
+  lock does not survive a launch — a bar that comes back locked reads as a
+  broken bar. `scripts/pinch-lock-check.sh` runs the real `ShortcutLock.swift`
+  through the interpreter for the gesture logic and drives the zoom route
+  against a live herdr, reading the result back from herdr's own layout rather
+  than from the route's reply.

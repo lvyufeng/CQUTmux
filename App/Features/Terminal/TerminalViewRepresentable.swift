@@ -73,6 +73,16 @@ struct TerminalScreen: View {
                 input: input,
                 mux: mux,
                 pinchZoomsPane: toolbar.pinchAction == .zoomPane,
+                // Only herdr has a socket route that names the pane, and only
+                // when a gateway is actually connected — otherwise the pinch
+                // falls through to the mux prefix key, which is what tmux and
+                // zellij need.
+                pinchZoomsHerdrPane: toolbar.pinchAction == .zoomPane
+                    && host.mux == "herdr" && connection.client != nil,
+                onPinchZoom: { zoomed in
+                    guard let client = connection.client else { return }
+                    Task { try? await client.zoomHerdrPane(zoomed: zoomed) }
+                },
                 allowsClipboardRead: security.allowsClipboardRead,
                 onShowShortcuts: { showShortcuts = true },
                 onShowSessions: { if connection.client != nil { showSessions = true } },
@@ -419,21 +429,56 @@ struct TerminalScreen: View {
     /// reason it does nothing is visible.
     @ViewBuilder
     private var customShortcutKeys: some View {
-        ForEach(shortcuts.shortcuts) { shortcut in
-            Button {
-                guard let bytes = shortcut.bytes else { return }
-                coordinator.terminal?.sendRaw(Data(bytes))
-            } label: {
-                Text(shortcut.label)
-                    .font(.caption)
-                    .lineLimit(1)
-                    .frame(minWidth: 40, minHeight: 32)
+        Group {
+            ForEach(shortcuts.shortcuts) { shortcut in
+                Button {
+                    guard let bytes = shortcut.bytes else { return }
+                    coordinator.terminal?.sendRaw(Data(bytes))
+                } label: {
+                    Text(shortcut.label)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .frame(minWidth: 40, minHeight: 32)
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.roundedRectangle(radius: 6))
+                .tint(shortcut.problem == nil ? nil : .orange)
+                .accessibilityHint(shortcut.problem ?? shortcut.text)
+                // Disabled rather than hidden: a key that vanishes when locked
+                // leaves nothing to tap to get the bar back, and the positions
+                // of the remaining keys would shift under a thumb.
+                .disabled(coordinator.shortcutLock.isLocked)
             }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.roundedRectangle(radius: 6))
-            .tint(shortcut.problem == nil ? nil : .orange)
-            .accessibilityHint(shortcut.problem ?? shortcut.text)
+            if !shortcuts.shortcuts.isEmpty { shortcutLockKey }
         }
+    }
+
+    /// The head of the custom-key group: a tap opens the editor, a double tap
+    /// locks the group. See `ShortcutLock`.
+    ///
+    /// The two gestures are the same pair the Ctrl key already uses — single
+    /// tap does the button's own job, double tap arms it — so there is one
+    /// gesture to learn rather than two. It is never disabled, because a tap
+    /// while locked is how the bar comes back.
+    private var shortcutLockKey: some View {
+        let locked = coordinator.shortcutLock.isLocked
+        return Button {
+            // The whole gesture belongs to the lock: unlocking is the lock's
+            // business too, so the view only decides what happens when the tap
+            // was *not* consumed.
+            if coordinator.shortcutLock.tap() { return }
+            showShortcuts = true
+        } label: {
+            Image(systemName: locked ? "lock.fill" : "keyboard")
+                .frame(width: 32, height: 32)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 6))
+        .tint(locked ? .orange : nil)
+        .accessibilityLabel(locked ? "Unlock custom keys" : "Custom keys")
+        .accessibilityHint(locked
+            ? "Tap to let the custom keys through again"
+            : "Tap to edit the keys; double tap to stop them sending to the terminal")
     }
 
     /// Puts the session away and goes back to the host list.
@@ -785,6 +830,14 @@ enum CtrlKey {
 /// Owns the UIKit terminal and the SSH session across SwiftUI updates.
 @Observable
 final class TerminalCoordinator {
+    /// Whether the custom keys are letting taps through to the terminal.
+    ///
+    /// See `customShortcutKeys` on the view: the keys are ordinary buttons, so
+    /// a session that mostly types means every fumbled tap on the bar lands a
+    /// control sequence in a shell. Holding here rather than in the view so the
+    /// bar survives a rebuild — the same reason `lastControlTap` is here.
+    @ObservationIgnored var shortcutLock = ShortcutLock()
+
     var status: CQUTTerminalView.Status = .idle
     /// Live dictation text, shown above the accessory bar while listening.
     var dictationPreview = ""
@@ -842,6 +895,11 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
     let mux: MuxSettings
     /// Whether a pinch zooms the multiplexer's pane instead of resizing text.
     let pinchZoomsPane: Bool
+    /// Whether a pinch should go through herdr's socket API instead of a mux
+    /// prefix key. Only set where a gateway connection exists.
+    var pinchZoomsHerdrPane = false
+    /// Asks the host to zoom or restore herdr's focused pane.
+    var onPinchZoom: (Bool) -> Void = { _ in }
     /// Whether a host program may read the clipboard. Passed in rather than
     /// read from the environment because a `UIViewRepresentable`'s
     /// `updateUIView` has no environment of its own.
@@ -924,6 +982,8 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         view.muxKind = host.mux
         view.muxGestures = input.muxGestures
         view.pinchZoomsPane = pinchZoomsPane
+        view.pinchZoomsHerdrPane = pinchZoomsHerdrPane
+        view.onPinchZoom = onPinchZoom
         view.refreshMuxSweeps()
         view.onStatus = { status in coordinator.status = status }
         // A pinch resizes the terminal and becomes the saved preference, so the
@@ -1001,6 +1061,8 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         uiView.muxKind = host.mux
         uiView.muxGestures = input.muxGestures
         uiView.pinchZoomsPane = pinchZoomsPane
+        uiView.pinchZoomsHerdrPane = pinchZoomsHerdrPane
+        uiView.onPinchZoom = onPinchZoom
         uiView.refreshMuxSweeps()
     }
 }

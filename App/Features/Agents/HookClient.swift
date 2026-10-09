@@ -329,6 +329,15 @@ final class HookClient {
         _ = try await request("POST", "/herdr/focus/\(encoded)")
     }
 
+    /// Full-screens herdr's focused pane, or restores the layout.
+    ///
+    /// Through the tunnel like everything else: the gateway runs on the host,
+    /// and the phone's own loopback has nothing listening on that port.
+    func zoomHerdrPane(zoomed: Bool) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["zoomed": zoomed])
+        _ = try await request("POST", "/herdr/zoom", body: body)
+    }
+
     // MARK: - Dev-server ports
 
     func ports() async throws -> PortBoard {

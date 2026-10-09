@@ -111,6 +111,28 @@ export async function herdrFocusPane(args, paneId) {
   return { ok: true, paneId }
 }
 
+/**
+ * Toggles zoom on herdr's focused pane.
+ *
+ * `pane.zoom` takes no pane_id and defaults to herdr's own focused pane, which
+ * is the right target: the phone is looking at that pane's output, so zooming
+ * anything else would full-screen something the user cannot see. The explicit
+ * mode (rather than `toggle`) is what makes a pinch direction meaningful —
+ * pinching out always zooms in, pinching back always zooms out, so the same
+ * gesture does not mean different things on alternate pinches.
+ *
+ * The CLI has this too (`herdr pane zoom --on/--off`), and either works; the
+ * socket is used because the gateway is already speaking it for `pane.focus`,
+ * so one path is one thing to keep working.
+ */
+export async function herdrZoomPane(args, zoomed) {
+  const result = await callHerdrSocket(args, 'pane.zoom', { mode: zoomed ? 'on' : 'off' })
+  if (!result.ok) {
+    return { ok: false, error: result.message || result.reason }
+  }
+  return { ok: true, zoomed: Boolean(zoomed), result: result.result ?? null }
+}
+
 async function callHerdr(args, argv, timeout = SNAPSHOT_TIMEOUT_MS) {
   const bin = binary(args)
   try {

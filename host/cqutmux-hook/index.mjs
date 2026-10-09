@@ -26,7 +26,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node
 import { resolve, relative, isAbsolute, join, dirname } from 'node:path'
 import { homedir, hostname, networkInterfaces, tmpdir, userInfo } from 'node:os'
 import { createPushService } from './push.mjs'
-import { herdrStatus, herdrSnapshot, herdrApprove, herdrRead, herdrFocusPane } from './herdr.mjs'
+import { herdrStatus, herdrSnapshot, herdrApprove, herdrRead, herdrFocusPane, herdrZoomPane } from './herdr.mjs'
 import { readTranscript } from './transcript.mjs'
 import { recentDirectories } from './recent.mjs'
 import { commandHistory } from './history.mjs'
@@ -929,6 +929,19 @@ const server = createServer(async (req, res) => {
   const herdrFocusRoute = url.pathname.match(/^\/herdr\/focus\/([^/]+)$/)
   if (req.method === 'POST' && herdrFocusRoute) {
     const result = await herdrFocusPane(args, decodeURIComponent(herdrFocusRoute[1]))
+    return json(res, result.ok ? 200 : 502, result)
+  }
+
+  // Pinch on the terminal: full-screen herdr's focused pane, or restore the
+  // layout. The body carries the direction, so the same gesture never means
+  // different things on alternate pinches.
+  if (req.method === 'POST' && url.pathname === '/herdr/zoom') {
+    let zoomed = true
+    try {
+      const body = await readBody(req)
+      if (body.length) zoomed = JSON.parse(body.toString('utf8')).zoomed !== false
+    } catch { /* default to zooming in, which is what "pinch out" means */ }
+    const result = await herdrZoomPane(args, zoomed)
     return json(res, result.ok ? 200 : 502, result)
   }
 
