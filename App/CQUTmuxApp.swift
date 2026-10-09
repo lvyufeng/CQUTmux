@@ -76,6 +76,9 @@ struct CQUTmuxApp: App {
                     // `apply` returns, the seeded host and its Keychain entries
                     // are both in place.
                     DebugSeed.resolveAndReport(hostStore)
+                    if ProcessInfo.processInfo.environment["CQUT_DEV_FONT_PROBE"] == "1" {
+                        DebugSeed.reportFonts()
+                    }
                     // Runs off to the side: it loads a model and transcribes,
                     // which is seconds of work, and the notification prompt
                     // below should not wait behind it.

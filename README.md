@@ -64,7 +64,8 @@ App/                    SwiftUI app (features grouped by domain)
   Features/Code/        files, diffs, git history, pasted files
   Features/Preview/     browser bridge and simulator preview
   Features/Security/    Keychain, key management (passphrase-protected OpenSSH keys)
-  Features/Settings/    theme, font (+ custom font import), cursor, speech, iCloud sync, integrations, input
+  Features/Settings/    theme, font (bundled faces + custom font import), cursor, speech, iCloud sync, integrations, input
+App/Fonts/              ten bundled terminal faces (JetBrains Mono default, Ioskeley Mono, Iosevka, DejaVu Sans Mono) with their licences
   Features/Voice/       dictation engines (Apple / Whisper / Parakeet / cloud)
 Packages/CQUTTransport/ local SwiftPM package: the SSH transport, agent forwarding,
                         OpenSSH key import (bcrypt_pbkdf + AES-CTR for encrypted keys)

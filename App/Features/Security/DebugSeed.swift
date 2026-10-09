@@ -255,5 +255,31 @@ enum DebugSeed {
         guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
         try? outcome.write(to: docs.appendingPathComponent("resolve.txt"), atomically: true, encoding: .utf8)
     }
+
+    /// Reports which bundled font faces actually resolve on this device.
+    ///
+    /// The check script can prove the .ttf files are in the bundle and that
+    /// `UIAppFonts` names them, but neither of those is the same as Core Text
+    /// accepting them — a font with a corrupt table, or a name that does not
+    /// match, still lands in the bundle and still appears in the plist. This is
+    /// the half that has to run on a device, and it is the half that decides
+    /// whether the terminal renders in the chosen font or silently in the
+    /// system one.
+    static func reportFonts() {
+        var lines: [String] = []
+        for family in TerminalFontFamily.builtIn where family.isBundled {
+            let activated = EmbeddedFonts.isAvailable(family)
+            // Resolve the actual face, which is what the terminal does; the
+            // file being present is only half of it.
+            let font = family.font(ofSize: 12)
+            let resolved = font.fontName
+            let isSystem = resolved.hasPrefix(".")
+            lines.append("\(family.rawValue) files=\(activated) resolved=\(resolved) system=\(isSystem)")
+        }
+        let outcome = lines.joined(separator: "\n")
+        print("CQUT_FONTS:\n\(outcome)")
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        try? outcome.write(to: docs.appendingPathComponent("fonts.txt"), atomically: true, encoding: .utf8)
+    }
 }
 #endif

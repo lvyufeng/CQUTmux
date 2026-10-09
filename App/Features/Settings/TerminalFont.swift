@@ -141,6 +141,15 @@ enum CJKFallback: String, CaseIterable, Identifiable {
 /// a font picker whose entries silently render as the system font.
 enum TerminalFontFamily: String, CaseIterable, Identifiable {
     case system, menlo, courier, andale
+    /// The default, and the only family that ships inside the app rather than
+    /// with iOS. Its four faces are in `App/Fonts` and registered through
+    /// `UIAppFonts`, so it resolves on first launch with no download.
+    case jetBrainsMono
+    /// Bundled faces that are *not* registered at launch, because registering
+    /// nine more faces costs launch time and memory for fonts almost nobody
+    /// has chosen. `EmbeddedFonts.activate` registers one the first time it is
+    /// picked, which is cheap because the files are already in the bundle.
+    case iosevka, ioskeley, dejaVu
     /// A font the user imported. Not a family of its own — which one it is
     /// lives in `CustomFontStore` — but a distinct choice so the picker can
     /// offer "whatever I imported" without the enum having to know the list.
@@ -154,6 +163,10 @@ enum TerminalFontFamily: String, CaseIterable, Identifiable {
         case .menlo: "Menlo"
         case .courier: "Courier"
         case .andale: "Andale Mono"
+        case .jetBrainsMono: "JetBrains Mono"
+        case .iosevka: "Iosevka"
+        case .ioskeley: "Ioskeley Mono"
+        case .dejaVu: "DejaVu Sans Mono"
         case .custom: "Imported"
         }
     }
@@ -165,13 +178,42 @@ enum TerminalFontFamily: String, CaseIterable, Identifiable {
         case .menlo: "Menlo-Regular"
         case .courier: "Courier"
         case .andale: "AndaleMono"
+        case .jetBrainsMono: "JetBrainsMono-Regular"
+        case .iosevka: "Iosevka"
+        case .ioskeley: "Ioskeley-Mono"
+        case .dejaVu: "DejaVuSansMono"
         case .custom: nil
         }
     }
 
+    /// Whether the face is expected to be present without any download.
+    ///
+    /// `jetBrainsMono` is registered from `UIAppFonts` at launch; the rest are
+    /// registered on first use. Both are in the bundle, which is why a failure
+    /// to resolve either is a bug rather than a missing download — the picker
+    /// shows the distinction, since a font that renders as the system font is
+    /// otherwise indistinguishable from one that was chosen and ignored.
+    var isBundled: Bool {
+        switch self {
+        case .system, .menlo, .courier, .andale: false
+        case .jetBrainsMono, .iosevka, .ioskeley, .dejaVu: true
+        case .custom: false
+        }
+    }
+
+    /// Resolves the face for a size, registering a bundled family first if it
+    /// is not already available.
     func font(ofSize size: Double) -> UIFont {
+        if isBundled { EmbeddedFonts.activate(self) }
         if let postScriptName, let font = UIFont(name: postScriptName, size: size) {
             return font
+        }
+        // The bundled families are supposed to always resolve. Falling back
+        // silently would hide a missing `UIAppFonts` entry behind text that
+        // looks merely plain, so the failure is logged where a UI run can see
+        // it — the picker shows the chosen name either way.
+        if isBundled {
+            print("CQUT_FONT_UNRESOLVED: \(rawValue) (\(postScriptName ?? "?"))")
         }
         return UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }
@@ -182,8 +224,16 @@ enum TerminalFontFamily: String, CaseIterable, Identifiable {
         allCases.filter { $0 != .custom }
     }
 
+    /// The default family.
+    ///
+    /// Deliberately not `.system`. JetBrains Mono ships in the bundle, so a
+    /// first launch gets it with no download and no choice to make — which is
+    /// the point of embedding it at all. `.system` would make the bundled font
+    /// something only people who go looking ever see.
+    static let defaultFamily: TerminalFontFamily = .jetBrainsMono
+
     static func named(_ id: String?) -> TerminalFontFamily {
-        id.flatMap(TerminalFontFamily.init(rawValue:)) ?? .system
+        id.flatMap(TerminalFontFamily.init(rawValue:)) ?? defaultFamily
     }
 }
 
@@ -213,6 +263,15 @@ struct FontSettingsView: View {
                             Text(font.displayName).tag(String?.some(font.id))
                         }
                     }
+                }
+                // Only shown when something is wrong. A bundled family that
+                // will not resolve renders as the system font, which is
+                // indistinguishable from having chosen the system font — so
+                // the one case a user cannot diagnose gets a line of its own.
+                if fonts.family.isBundled, !EmbeddedFonts.isAvailable(fonts.family) {
+                    Label("Not available in this build", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                 }
             }
 

@@ -73,6 +73,19 @@
 	<string>Scan a QR code to import a theme or pair a host. The camera is used only while that screen is open, and nothing is recorded.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>JetBrainsMono-Regular.ttf</string>
+		<string>JetBrainsMono-Bold.ttf</string>
+		<string>JetBrainsMono-Italic.ttf</string>
+		<string>JetBrainsMono-BoldItalic.ttf</string>
+		<string>IoskeleyMono-Regular.ttf</string>
+		<string>IoskeleyMono-Bold.ttf</string>
+		<string>Iosevka-Regular.ttf</string>
+		<string>Iosevka-Bold.ttf</string>
+		<string>DejaVuSansMono.ttf</string>
+		<string>DejaVuSansMono-Bold.ttf</string>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

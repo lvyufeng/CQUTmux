@@ -535,3 +535,48 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   "Remember in Keychain" on. The four resolve cases (correct passphrase,
   wrong passphrase, none, bare seed) each report the expected
   requirement and either the right public key or no seed at all.
+
+- **Bundled terminal fonts, with JetBrains Mono as the default.** The docs say
+  the default font is embedded JetBrains Mono and that Iosevka, Ioskeley and
+  DejaVu Sans Mono download on first selection. Neither half was true: the
+  family list stopped at the four faces iOS ships, the default was `.system`,
+  and there was not a single font binary in the repo.
+
+  All four families now ship *inside* the app — ten faces, 9.4MB — rather than
+  downloading. That is a deliberate divergence, and it is the point: the claim
+  itself calls JetBrains Mono "embedded", and a download the user never asked
+  for is a worse first launch than a bundle that is 9.4MB larger. The
+  faces land at the bundle root through `UIAppFonts`, so JetBrains Mono resolves
+  on the very first frame; the other three register the first time they are
+  picked, because nine more registered faces is launch time and memory spent on
+  fonts almost nobody has chosen. Each licence travels beside its font.
+
+  Fonts fail silently in a way almost nothing else does — `UIFont(name:)`
+  returns nil, Core Text hands back the system monospaced face, and the user
+  sees plain text and concludes the picker is decorative. So the check
+  (`scripts/fonts-bundled-check.sh`, 94 checks) reads the font binaries
+  themselves: the `name` table for the PostScript name the code looks up by, the
+  `cmap` table for what a terminal will actually be able to draw. No font
+  library and no device are needed, and it catches the four failures that look
+  identical on screen — a file missing from the bundle, a file in the bundle but
+  not in `UIAppFonts`, a plist naming a file that is not there, and a
+  PostScript name that does not match the font's own.
+
+  Writing it caught my own over-claim twice. I first asserted that the subset
+  Iosevka faces kept every codepoint in `0x2500–0x28FF`; upstream never shipped
+  all of those, so the check failed for a reason that had nothing to do with
+  subsetting. I then set per-range floors from memory, and they were wrong in
+  the same direction again — JetBrains Mono has 43 geometric shapes, not 96, and
+  35 arrows, not 100. The floors are now *measured* at the weakest of the four
+  faces (ASCII 95, Latin 256, Greek/Cyrillic 201, box drawing 128, block
+  elements 32, geometric 43, arrows 35), which is the tightest line every face
+  can be held to. Braille and the powerline separators are deliberately not
+  asserted: JetBrains Mono and DejaVu ship neither and Iosevka only part of the
+  powerline range, so demanding them would be a check that cannot pass for a
+  reason unrelated to what is being guarded. The subset faces were instead
+  compared against upstream `cmap` and found identical in all nine ranges.
+
+  The half that no file check can reach — whether Core Text actually accepts a
+  face — was verified on the simulator: all four families resolve to their real
+  faces rather than the system fallback, with ten TTFs at the bundle root and
+  ten `UIAppFonts` entries.
