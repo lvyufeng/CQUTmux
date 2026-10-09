@@ -5,7 +5,7 @@ struct SettingsView: View {
     /// cannot drift. A `cqutmux://theme` link sets `pendingRoute` on the store
     /// and the push below happens here, once, in the same place the tap does.
     enum Route: Hashable {
-        case theme, font, cursor, icon, speech, standIn(String)
+        case theme, font, cursor, icon, speech, sessions, standIn(String)
     }
 
     @Environment(ThemeStore.self) private var themes
@@ -46,6 +46,11 @@ struct SettingsView: View {
                         Label("App Icon", systemImage: "app.badge")
                     }
                 }
+                Section("Terminal sessions") {
+                    NavigationLink(value: Route.sessions) {
+                        Label("Sessions layout", systemImage: "rectangle.grid.1x2")
+                    }
+                }
                 Section("About") {
                     LabeledContent("Version", value: Bundle.main.appVersion)
                     LabeledContent("Hook gateway", value: "127.0.0.1:24543")
@@ -58,6 +63,7 @@ struct SettingsView: View {
                 case .font: FontSettingsView()
                 case .cursor: CursorSettingsView()
                 case .icon: AppIconSettingsView()
+                case .sessions: SessionLayoutView()
                 case .speech: SpeechSettingsView()
                 case .standIn(let title): PlaceholderView(
                     title: title,

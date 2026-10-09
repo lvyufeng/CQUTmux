@@ -12,6 +12,7 @@ struct CQUTmuxApp: App {
     @State private var fonts = TerminalFontStore()
     @State private var cursor = CursorSettings()
     @State private var icons = AppIconStore()
+    @State private var sessionLayout = SessionLayout()
 
     var body: some Scene {
         WindowGroup {
@@ -22,6 +23,7 @@ struct CQUTmuxApp: App {
                 .environment(fonts)
                 .environment(cursor)
                 .environment(icons)
+                .environment(sessionLayout)
                 .task {
                     #if DEBUG
                     DebugSeed.apply(to: hostStore)

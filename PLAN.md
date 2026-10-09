@@ -48,6 +48,8 @@
 | 终端 | 自定义键盘附件栏 + 硬件键盘 ⌘K/⌘O/⌘1-9 | P1 |
 | 终端 | 手势：swipe 切窗口、pinch 缩放、双击 Tab | P3 |
 | 终端 | 主题 / 字体 / 图标、CJK 输入 | P4 ✅ 主题+字体+图标+CJK |
+| 外观 | 主题驱动整个 App（chrome/选中/强调色）、主题导入（粘贴/QR/深链）、光标形状与闪烁、CJK 字形回退、备选 App 图标 | P4 ✅ 实测 |
+| 终端 | 鼠标滚轮手势（双指拖动转 wheel）、滚到底收键盘 | P5 ✅ |
 | 会话 | 会话持久化、切后台恢复、断线重连 | P1–P2 |
 | 多路复用 | tmux 集成、会话选择器、jump-to window | P2 |
 | 多路复用 | zellij / herdr 支持 | P5 |
@@ -121,6 +123,34 @@ SSH agent forwarding 已实现并实测（见下表）；APNs 投递受环境所
 **最近目录已接并实测**：`RecentDirectoryStore`（按 `host:port` 分机存储，最多 12 条，
 重访上浮去重，`.` 与空串不记）+ `GoToDirectoryView`（可直接输路径，或从最近列表点选），
 入口在 Code 页的 Preview 菜单里；点目录进入时也会记录。13 项用例无需模拟器。
+
+**本轮新增：主题真正驱动整个 App**（此前只有终端 16 色 + 字体 + 图标，
+说明与 Moshi 的 Personalization 页差得最远的一处）。逐项：
+
+- **chrome 随主题**：原来 `Theme.accent` 是写死的绿色、25 处引用，选 Solarized Light 只改终端、
+  App 外壳仍是深色。现由 `ThemeStore` 驱动：根部 `.tint` 取主题强调色，`preferredColorScheme`
+  取主题明暗，系统自身的列表/表单随之切换。**刻意不做"每面一个背景色"**——那正是主题与深色模式
+  互相打架、而非驱动的方式。主题格式里没有强调色字段，故取调色板自己的绿。
+- **主题导入**（Moshi 的 v1 格式，逐字对齐）：JSON / `moshi-theme:` base64 / QR / `cqutmux://theme` 深链，
+  四条路都落到同一个导入页。`mode` **必须显式给出**（不从颜色猜），缺 bright 取 base、缺 base 取 foreground。
+- **9 个内置主题**（6 深 3 浅），带导入主题的持久化与去重（按名字 slug，重导是同一条而不是两条）。
+- **光标形状（Block/Underline/Bar）与闪烁**：SwiftTerm 把二者编码成单个六值枚举，故存储分开、用时合成；
+  经 `setCursorStyle` 应用（直接写 `options.cursorStyle` 不会通知 delegate，画出来的光标仍是旧形状）。
+- **CJK 字形回退**：是 fallback 不是字体选择——拉丁仍用所选字体，`cascadeList` 补中日韩。
+  iOS 自带每种脚本的字体，故不像 Moshi 需要下载。
+- **备选 App 图标**：XcodeGen 的 asset 支持不暴露 alternate set，故用松散文件 + `CFBundleAlternateIcons`
+  声明；`CFBundlePrimaryIcon` **不是可选项**——缺了它 iOS 能显示备选却回不到默认，用户没有退路。
+- **鼠标滚轮手势**：SwiftTerm 把单指拖动转成 mouse drag，**从不发送 wheel**，于是只认滚轮的
+  `less`/`htop`/agent transcript 根本没法滚。现双指拖动转 wheel（Cb 64/65），并把它的拖动识别器
+  限制为单指，二者不会同时触发。滚到底收键盘用 UIKit 的 `keyboardDismissMode = .interactive`，
+  不自己造（终端滚动几何在 SwiftTerm 内部，第二个"底部在哪"的意见只会打架）。
+- **深链新增 `cqutmux://theme`**（对应 `moshi://theme`）：链接与点击共用同一个 route 枚举，
+  不再各知一份设置页布局。
+
+**实测**：深链按 `scripts/deeplink-test.sh` 的方式从 Usages 页打开且确实压栈；GitHub Light 整 App 变浅色；
+Dracula 经真 sshd 进到活终端；导入页渲染正常；`scripts/theme-format/run.sh` **61 项断言全绿**。
+**该检查抓到一个真 bug**：ANSI 数组我写成了交错（black, brightBlack, red…），而调色板要的是
+前 8 基础色、后 8 亮色——每个导入主题的颜色都会错位且**导入不报错**，正是往返测试存在的意义。
 
 ## 2. 技术选型
 
