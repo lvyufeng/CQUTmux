@@ -294,6 +294,18 @@ final class Dictation {
         isListening = false
     }
 
+    /// Starts listening, and does nothing if it already is.
+    ///
+    /// `toggle` cannot serve a press-and-hold: holding fires on press and again
+    /// on release through the press-state callback, and a toggle would start on
+    /// the first and start again — or stop and restart — on the second. Named
+    /// for the distinction rather than as `toggle(force:)` because the two are
+    /// answering different questions, not one question with an argument.
+    func start(locale: Locale = .current) {
+        guard !isListening else { return }
+        toggle(locale: locale)
+    }
+
     // MARK: - Internals
 
     private func language(for locale: Locale) -> String? {

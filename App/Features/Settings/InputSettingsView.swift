@@ -26,7 +26,11 @@ struct InputSettingsView: View {
                     for index in offsets { input.remove(input.items[index]) }
                 }
 
-                ForEach(InputSettings.Item.allCases.filter { !input.items.contains($0) }) { item in
+                // `allItems`, not `allCases`: the off-by-default items (Enter,
+                // Backspace, the keyboard toggle) are exactly the ones someone
+                // has to be able to add, and `allCases` order would list them
+                // among the defaults with no sign of which is which.
+                ForEach(InputSettings.allItems.filter { !input.items.contains($0) }) { item in
                     Button {
                         input.restore(item)
                     } label: {
@@ -50,11 +54,24 @@ struct InputSettingsView: View {
                             Text(action.label).tag(action)
                         }
                     }
+                    if input.corner(slot) == .custom {
+                        TextField(
+                            "Shortcut",
+                            text: Binding(
+                                get: { input.cornerShortcut(slot) ?? "" },
+                                set: { input.setCornerShortcut($0, for: slot) }
+                            )
+                        )
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .font(.system(.body, design: .monospaced))
+                    }
                 }
             } header: {
                 Label("D-pad corners", systemImage: "square.grid.3x3")
             } footer: {
-                Text("Shown only when the D-pad is in the bar above.")
+                Text("Shown only when the D-pad is in the bar above. "
+                     + "A custom shortcut takes the same grammar as the key bar's bindings.")
             }
         }
         .navigationTitle("Input")
@@ -76,6 +93,9 @@ struct InputSettingsView: View {
     private func icon(_ item: InputSettings.Item) -> String {
         switch item {
         case .control, .escape, .tab: "keyboard"
+        case .enter: "return"
+        case .backspace: "delete.left"
+        case .keyboard: "keyboard.chevron.compact.down"
         case .arrows: "arrow.up.and.down.and.arrow.left.and.right"
         case .dpad: "square.grid.3x3"
         case .clipboard: "doc.on.doc"

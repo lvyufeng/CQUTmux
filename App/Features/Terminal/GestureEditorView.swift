@@ -35,6 +35,17 @@ struct GestureEditorView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section {
+                Button("Reset all gestures", role: .destructive) {
+                    store.resetAll()
+                    editing = nil
+                }
+                .disabled(store.bindings.isEmpty)
+            } footer: {
+                Text("Clears every binding above and restores the defaults. "
+                     + "Key-bar shortcuts and custom keys are reset on their own screen.")
+            }
         }
         .navigationTitle("Gestures")
         .navigationBarTitleDisplayMode(.inline)

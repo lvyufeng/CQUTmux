@@ -13,11 +13,19 @@ final class InputSettings {
         static let hideBarWithHardwareKeyboard = "input.hideBarWithHardwareKeyboard"
         static let barItems = "input.barItems"
         static let corners = "input.dpadCorners"
+        static let cornerShortcuts = "input.dpadCornerShortcuts"
         static let hidesWindowRow = "input.hidesWindowRow"
     }
 
     /// The D-pad corner actions, as raw strings keyed by corner.
     private var corners: [String: String] = [:]
+
+    /// The shortcut text for any corner set to `.custom`, keyed by corner.
+    /// Stored separately from `corners` so switching a corner to something else
+    /// and back does not lose what was typed — and so the raw text survives a
+    /// grammar change to be shown and explained rather than dropped, exactly as
+    /// `ShortcutStore` and `GestureStore` keep theirs.
+    private var cornerShortcuts: [String: String] = [:]
 
     /// Where the settings live. Injectable so a check can use its own suite:
     /// a check that writes to `standard` both depends on whatever a previous
@@ -27,6 +35,7 @@ final class InputSettings {
     /// What the accessory bar can show, in the user's order.
     enum Item: String, CaseIterable, Codable, Identifiable {
         case control, escape, tab
+        case enter, backspace, keyboard
         case arrows
         case dpad
         case clipboard, pasteImage
@@ -41,6 +50,9 @@ final class InputSettings {
             case .control: "Ctrl"
             case .escape: "Esc"
             case .tab: "Tab"
+            case .enter: "Enter"
+            case .backspace: "Backspace"
+            case .keyboard: "Keyboard"
             case .arrows: "Arrows"
             case .dpad: "D-pad"
             case .clipboard: "Paste"
@@ -56,6 +68,17 @@ final class InputSettings {
     static let defaultItems: [Item] = [
         .control, .escape, .tab, .arrows, .clipboard, .pasteImage, .sessions, .dictation, .customKeys,
     ]
+
+    /// Every item the bar can show, whether or not it is on by default.
+    ///
+    /// Kept in one place so the settings screen and `defaultItems` cannot drift:
+    /// an item that exists but is missing from `defaultItems` is off for a new
+    /// install and on for nobody, which is a switch nobody can turn on.
+    static var allItems: [Item] {
+        var seen: [Item] = defaultItems
+        for item in Item.allCases where !seen.contains(item) { seen.append(item) }
+        return seen
+    }
 
     /// Whether the accessory bar should be on screen.
     ///
@@ -101,7 +124,7 @@ final class InputSettings {
     /// for the bottom two: a four-way pad where every corner does something
     /// surprising is worse than one where the extra slots are visibly empty.
     enum CornerAction: String, CaseIterable, Codable, Identifiable {
-        case none, escape, delete, interrupt, hideKeyboard
+        case none, escape, delete, interrupt, hideKeyboard, custom
 
         var id: String { rawValue }
 
@@ -112,6 +135,7 @@ final class InputSettings {
             case .delete: "Delete"
             case .interrupt: "Interrupt (Ctrl-C)"
             case .hideKeyboard: "Hide keyboard"
+            case .custom: "Custom shortcut"
             }
         }
 
@@ -123,6 +147,7 @@ final class InputSettings {
             case .delete: "Del"
             case .interrupt: "^C"
             case .hideKeyboard: "⌄"
+            case .custom: "⇥"
             }
         }
     }
@@ -135,6 +160,30 @@ final class InputSettings {
     func setCorner(_ slot: Corner, to action: CornerAction) {
         corners[slot.rawValue] = action.rawValue
         store.set(corners, forKey: Key.corners)
+    }
+
+    /// The shortcut text typed for a corner, or nil if that corner is not a
+    /// custom binding.
+    func cornerShortcut(_ slot: Corner) -> String? { cornerShortcuts[slot.rawValue] }
+
+    func setCornerShortcut(_ text: String?, for slot: Corner) {
+        let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            cornerShortcuts.removeValue(forKey: slot.rawValue)
+        } else {
+            cornerShortcuts[slot.rawValue] = trimmed
+        }
+        store.set(cornerShortcuts, forKey: Key.cornerShortcuts)
+    }
+
+    /// The bytes a custom corner sends, or nil when it has not been filled in.
+    ///
+    /// A corner left on `.custom` with nothing typed is a blank slot, not an
+    /// error: it behaves like `.none` until a shortcut is entered, which is what
+    /// the picker implies the moment the option is chosen.
+    func cornerBytes(_ slot: Corner) -> [UInt8]? {
+        guard let text = cornerShortcuts[slot.rawValue] else { return nil }
+        return (try? ShortcutGrammar.parse(text))?.bytes
     }
 
     /// Esc top-left and Delete top-right: the two a TUI needs most often, in
@@ -195,6 +244,8 @@ final class InputSettings {
         // to a terminal with no keys on it would look like a bug.
         items = restored.isEmpty ? Self.defaultItems : restored
         corners = store.dictionary(forKey: Key.corners) as? [String: String] ?? [:]
+        cornerShortcuts =
+            store.dictionary(forKey: Key.cornerShortcuts) as? [String: String] ?? [:]
     }
 
     /// Adds an item the user removed, or does nothing if it is already there.

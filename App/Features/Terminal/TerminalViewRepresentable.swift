@@ -465,6 +465,32 @@ struct TerminalScreen: View {
         }
     }
 
+    /// Shows or hides the software keyboard.
+    ///
+    /// The bar sits above the keyboard, so hiding it is how the bar stops
+    /// occupying the bottom of the screen without leaving the session. The D-pad
+    /// already has this as a corner action; as a bar item it can be a key of its
+    /// own, which is where anyone who uses it often will want it.
+    private var keyboardButton: some View {
+        Button {
+            Self.dismissKeyboard()
+        } label: {
+            Image(systemName: "keyboard.chevron.compact.down")
+                .frame(width: 40, height: 32)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 6))
+        .accessibilityLabel("Hide keyboard")
+    }
+
+    /// Not named `resignFirstResponder`: that collides with `UIResponder`'s own
+    /// instance method and the compiler resolves the call inside a `Button`
+    /// action to the view's inherited one rather than to this.
+    static func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
     private var dictationButton: some View {
         // The button reflects the selected engine's state, which is why this
         // reads through `dictation` rather than owning a `VoiceDictation`: with
@@ -483,6 +509,21 @@ struct TerminalScreen: View {
         .tint(listening ? themes.current.accentColor : nil)
         .disabled(dictation?.isReady == false)
         .accessibilityHint(dictation?.setupHint ?? "")
+        // Press and hold to talk, release to stop — the walkie-talkie gesture
+        // Moshi documents. A long press *after* a tap is not how a touchscreen
+        // works, so this cannot fire when the tap does: SwiftUI runs the tap
+        // only if the hold never reaches its threshold, and the two cannot both
+        // complete for one press.
+        .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 60) {
+            // Released: stop, having started below.
+            if dictation?.isListening == true { dictation?.stop() }
+        } onPressingChanged: { pressing in
+            if pressing {
+                if dictation?.isListening == false { dictation?.start() }
+            } else if dictation?.isListening == true {
+                dictation?.stop()
+            }
+        }
     }
 
     @ViewBuilder
@@ -491,6 +532,9 @@ struct TerminalScreen: View {
         case .control: key("Ctrl", CtrlKey.control)
         case .escape: key("Esc", CtrlKey.escape)
         case .tab: key("Tab", CtrlKey.tab)
+        case .enter: key("Return", CtrlKey.enter)
+        case .backspace: key("⌫", CtrlKey.backspace)
+        case .keyboard: keyboardButton
         case .arrows:
             icon("arrow.up", CtrlKey.upArrow)
             icon("arrow.down", CtrlKey.downArrow)
@@ -535,14 +579,22 @@ struct TerminalScreen: View {
 
     private func cornerKey(_ slot: InputSettings.Corner) -> some View {
         let action = input.corner(slot)
+        // A custom corner with nothing typed yet is blank rather than disabled:
+        // it is one keystroke away from working, and greying it out would read
+        // as the option not having taken.
+        let blank = action == .none
+            || (action == .custom && input.cornerBytes(slot) == nil)
         return Button {
             switch action {
             case .none: break
-            case .hideKeyboard: UIApplication.shared.sendAction(
-                #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            case .hideKeyboard: Self.dismissKeyboard()
             case .delete: coordinator.terminal?.sendDelete()
             case .interrupt: coordinator.terminal?.sendInterrupt()
             case .escape: coordinator.terminal?.sendEscape()
+            case .custom:
+                if let bytes = input.cornerBytes(slot) {
+                    coordinator.terminal?.sendRaw(Data(bytes))
+                }
             }
         } label: {
             Text(action.cornerLabel)
@@ -550,7 +602,8 @@ struct TerminalScreen: View {
                 .frame(width: 30, height: 30)
         }
         .buttonStyle(.bordered)
-        .disabled(action == .none)
+        .disabled(blank)
+        .accessibilityHint(action == .custom ? input.cornerShortcut(slot) ?? "" : "")
     }
 
     private func key(_ label: String, _ key: CtrlKey) -> some View {
@@ -574,7 +627,7 @@ struct TerminalScreen: View {
 }
 
 enum CtrlKey {
-    case control, escape, tab, upArrow, downArrow, leftArrow, rightArrow, clipboard
+    case control, escape, tab, enter, backspace, upArrow, downArrow, leftArrow, rightArrow, clipboard
 }
 
 /// Owns the UIKit terminal and the SSH session across SwiftUI updates.
@@ -593,6 +646,8 @@ final class TerminalCoordinator {
         case .control: terminal.toggleControl()
         case .escape: terminal.sendEscape()
         case .tab: terminal.sendTab()
+        case .enter: terminal.sendEnter()
+        case .backspace: terminal.sendBackspace()
         case .upArrow: terminal.sendArrow(up: true, down: false, left: false, right: false)
         case .downArrow: terminal.sendArrow(up: false, down: true, left: false, right: false)
         case .rightArrow: terminal.sendArrow(up: false, down: false, left: false, right: true)

@@ -61,6 +61,13 @@ extension SyncPayload {
             if action != InputSettings.defaultCorner(slot) { out[slot.rawValue] = action.rawValue }
         }
         if !corners.isEmpty { payload.dpadCorners = corners }
+        // The shortcut text is stored apart from the corner action, so a corner
+        // syncing as `.custom` without this would arrive blank — the setting
+        // would travel and the thing it names would not.
+        let cornerText = InputSettings.Corner.allCases.reduce(into: [String: String]()) { out, slot in
+            if let text = stores.input.cornerShortcut(slot) { out[slot.rawValue] = text }
+        }
+        if !cornerText.isEmpty { payload.dpadCornerShortcuts = cornerText }
         payload.hidesWindowRow = stores.input.hidesWindowRow
         payload.tmuxPrefix = stores.mux.tmuxPrefix.rawValue
         payload.updatedAt = Date()
@@ -138,6 +145,11 @@ extension SyncPayload {
                 guard let raw = dpadCorners[slot.rawValue],
                       let action = InputSettings.CornerAction(rawValue: raw) else { continue }
                 stores.input.setCorner(slot, to: action)
+            }
+        }
+        if let dpadCornerShortcuts {
+            for slot in InputSettings.Corner.allCases {
+                stores.input.setCornerShortcut(dpadCornerShortcuts[slot.rawValue], for: slot)
             }
         }
     }

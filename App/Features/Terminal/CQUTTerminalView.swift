@@ -477,6 +477,17 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
 
     func sendTab() { write(Data([0x09])) }
 
+    /// Return, as the Return key sends it. A bar without this is missing the
+    /// one key a phone keyboard cannot reach without dismissing and retargeting
+    /// it, which is the whole reason the bar exists.
+    func sendEnter() { write(Data([0x0D])) }
+
+    /// Backspace sends BS (0x08). Distinct from `sendDelete`: a terminal's
+    /// "Delete" key is DEL (0x7F) — forward delete in the shell's own model —
+    /// while Backspace is the backward-delete most people mean. Sending DEL for
+    /// both would make one of the two buttons a lie.
+    func sendBackspace() { write(Data([0x08])) }
+
     /// Delete sends DEL (0x7F), not Backspace (0x08). A terminal's "Delete"
     /// key is DEL — that is what the hardware key sends and what readline and
     /// every TUI expect for backward-delete-char. 0x08 is Ctrl-H.

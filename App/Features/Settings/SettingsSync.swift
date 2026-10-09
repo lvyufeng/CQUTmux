@@ -56,6 +56,8 @@ struct SyncPayload: Codable, Equatable {
     var hideBarWithHardwareKeyboard: Bool?
     var barItems: [String]?
     var dpadCorners: [String: String]?
+    /// The shortcut text for any corner set to `.custom`, keyed by corner.
+    var dpadCornerShortcuts: [String: String]?
     var hidesWindowRow: Bool?
 
     /// The host's tmux prefix. Worth syncing for the same reason it is a

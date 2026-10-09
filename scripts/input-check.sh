@@ -20,7 +20,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
+# `ShortcutGrammar` is here because the custom D-pad corner action turns a
+# typed shortcut into bytes through it — the store is what decides whether a
+# corner is blank, so the grammar has to be on the compile line too.
 swiftc -O -o "$OUT/check" \
+  "$ROOT/App/Features/Terminal/ShortcutGrammar.swift" \
   "$ROOT/App/Features/Terminal/InputSettings.swift" \
   "$ROOT/scripts/input/main.swift"
 

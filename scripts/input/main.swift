@@ -251,6 +251,62 @@ writer.setCorner(.bottomTrailing, to: .interrupt)
 check(InputSettings(store: defaults).corner(.bottomTrailing) == .interrupt,
       "a corner binding survives a relaunch")
 
+// MARK: - Custom corners
+
+// The custom action turns typed text into bytes. A corner set to `.custom`
+// with nothing typed is blank, which is what keeps the button disabled rather
+// than sending nothing at all.
+writer.setCorner(.bottomLeading, to: .custom)
+check(writer.cornerBytes(.bottomLeading) == nil,
+      "a custom corner with no shortcut sends nothing")
+
+writer.setCornerShortcut("C-c", for: .bottomLeading)
+check(writer.cornerBytes(.bottomLeading) == [0x03],
+      "a custom corner parses its shortcut to the same bytes the grammar gives")
+
+// The whole point of choosing the custom action is that it survives a restart;
+// storing it apart from the action means one file write has to carry both.
+let reopened = InputSettings(store: defaults)
+check(reopened.corner(.bottomLeading) == .custom
+      && reopened.cornerBytes(.bottomLeading) == [0x03],
+      "a custom corner and its shortcut both survive a relaunch")
+
+// Clearing the text leaves the action in place rather than silently reverting
+// to whatever the corner used to be.
+writer.setCornerShortcut(nil, for: .bottomLeading)
+check(InputSettings(store: defaults).corner(.bottomLeading) == .custom
+      && InputSettings(store: defaults).cornerBytes(.bottomLeading) == nil,
+      "clearing a custom shortcut keeps the action and blanks the key")
+
+// An unparsable shortcut is treated as unset, not as half of something. It has
+// to fall back the same way every other binding does.
+writer.setCornerShortcut("C-", for: .bottomLeading)
+check(writer.cornerBytes(.bottomLeading) == nil,
+      "an unparsable custom shortcut does not send a partial sequence")
+
+writer.setCorner(.bottomLeading, to: InputSettings.defaultCorner(.bottomLeading))
+writer.setCornerShortcut(nil, for: .bottomLeading)
+
+// MARK: - Items the bar can add
+
+// Enter, Backspace and the keyboard toggle are off by default, and every one
+// of them is unreachable unless the settings screen can offer it — an item in
+// `Item.allCases` but missing from `allItems` is a switch nobody can turn on.
+check(InputSettings.allItems.contains(.enter), "Enter can be added to the bar")
+check(InputSettings.allItems.contains(.backspace), "Backspace can be added to the bar")
+check(InputSettings.allItems.contains(.keyboard), "the keyboard toggle can be added")
+check(!InputSettings.defaultItems.contains(.enter),
+      "Enter is off by default, as Moshi ships it")
+
+// Every item a user can end up with is restorable: the settings screen adds
+// from `allItems` and removes from `items`, so a case missing from either list
+// is a key that can be lost for good.
+let allCases = Set(InputSettings.Item.allCases)
+check(Set(InputSettings.allItems) == allCases,
+      "every bar item appears in allItems exactly once")
+check(InputSettings.allItems.count == allCases.count,
+      "allItems lists no item twice")
+
 // Put the store back, so running this check twice does not change what a
 // second run measures.
 writer.setCorner(.bottomTrailing, to: InputSettings.defaultCorner(.bottomTrailing))

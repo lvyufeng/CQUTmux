@@ -714,7 +714,17 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/usage') {
-    return json(res, 200, usageSnapshot())
+    // `usage-collection off` was parsed from the config file and then never
+    // read, so the setting did nothing at all. It now stops this endpoint
+    // serving anything: this gateway only ever computes usage when asked, so
+    // the flag cannot mean "do not poll in the background" — there is no
+    // background — and the honest reading of it is "do not collect this".
+    // `enabled: false` is returned rather than a 403 so the app can say why the
+    // board is empty instead of showing an error for a choice the user made.
+    if (args.usageCollection === false) {
+      return json(res, 200, { enabled: false, generatedAt: new Date().toISOString(), entries: [] })
+    }
+    return json(res, 200, { enabled: true, ...usageSnapshot() })
   }
 
   if (req.method === 'GET' && url.pathname === '/sessions') {
@@ -722,7 +732,12 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/ports') {
-    return json(res, 200, await listeningPorts())
+    // `always-on-discovery off` likewise did nothing. As with usage there is no
+    // background scan here to stop, so the flag disables discovery itself.
+    if (args.alwaysOnDiscovery === false) {
+      return json(res, 200, { enabled: false, available: true, ports: [] })
+    }
+    return json(res, 200, { enabled: true, ...(await listeningPorts()) })
   }
 
   if (req.method === 'GET' && url.pathname === '/simulators') {

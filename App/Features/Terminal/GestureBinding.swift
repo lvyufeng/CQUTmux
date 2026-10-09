@@ -88,6 +88,17 @@ final class GestureStore {
     /// The text the user typed for a gesture, or nil if they have not bound it.
     func text(for gesture: TerminalGesture) -> String? { bindings[gesture] }
 
+    /// Puts every gesture back to its built-in behaviour.
+    ///
+    /// Removing the key rather than writing an empty dictionary: a launch that
+    /// finds no stored bindings and one that finds an empty set mean the same
+    /// thing here, and removing is what a fresh install looks like — which is
+    /// the state this is meant to reproduce.
+    func resetAll() {
+        bindings.removeAll()
+        defaults.removeObject(forKey: Self.key)
+    }
+
     func set(_ text: String?, for gesture: TerminalGesture) {
         let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if trimmed.isEmpty {
