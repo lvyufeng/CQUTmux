@@ -118,6 +118,26 @@ enum DebugSeed {
         }
     }
 
+    /// Sends a message the way chat mode does, once the session is live.
+    /// Test-only.
+    ///
+    /// Goes through `sendComposed`, so the bracketed-paste decision is the
+    /// program's own `bracketedPasteMode` and the bytes are the shipped
+    /// `ChatComposer`'s — a script cannot type into a `TextField`, and a
+    /// payload assembled here would test the harness instead of the feature.
+    static func sendComposedWhenConnected(view: CQUTTerminalView, text: String, attempt: Int = 0) {
+        guard attempt < 60 else { return }
+        guard view.isLiveForTesting else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                sendComposedWhenConnected(view: view, text: text, attempt: attempt + 1)
+            }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            view.sendComposed(text)
+        }
+    }
+
     /// Runs a tmux window jump once the session is live. Test-only.
     ///
     /// Goes through the view's own `selectWindow`, so the prefix the user

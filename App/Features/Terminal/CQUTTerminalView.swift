@@ -699,6 +699,28 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         write(Data(text.utf8))
     }
 
+    /// Sends a composed message to the session as one piece.
+    ///
+    /// The difference from `typeText`/`sendDictatedLine` is the whole point of
+    /// chat mode: the text is handed to the program in a single write, wrapped
+    /// in bracketed-paste markers when the program has asked for them, so a
+    /// full-screen TUI receives it as text to insert rather than as keys to
+    /// interpret. `getTerminal().bracketedPasteMode` is the program's own
+    /// answer to "wrap it or not" — the same bit SwiftTerm reads for a real
+    /// paste — so the markers and their absence cannot drift from what the
+    /// other end expects.
+    ///
+    /// Returns whether anything was sent, so a caller can clear its field only
+    /// on success.
+    @discardableResult
+    func sendComposed(_ text: String) -> Bool {
+        guard let data = ChatComposer.payload(
+            for: text, bracketed: getTerminal().bracketedPasteMode
+        ) else { return false }
+        write(data)
+        return true
+    }
+
     /// Sends a dictated phrase followed by Return, so the shell runs it.
     func sendDictatedLine(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

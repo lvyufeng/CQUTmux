@@ -69,7 +69,7 @@ These are ordinary features that simply have not been built:
   subcommands, and any effect from `usage-collection` and `always-on-discovery`
   (both are parsed and then never read).
 - Herdr prefix independent of tmux; Herdr pane-zoom on pinch.
-- Chat View: Markdown/code/image rendering, approval bar, composer, mini-diffs.
+- Chat View: Markdown/code/image rendering, approval bar, mini-diffs. (Composer now exists as Chat Mode — see the progress list.)
 - Diff viewer: side-by-side layout, syntax highlighting, commit browsing,
   remembering the open file, terminal-font reuse.
 - Watch: grouping, usage complication, freshness.
@@ -388,3 +388,39 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   can say *why* nothing appeared. `scripts/hooks-activity-check.sh` pins the
   defaults, the decision, the sample timestamps, the plist key, and the absence
   of the `try?`.
+
+- **Chat mode — a composer outside the TUI.** Gaps 2 and 37 are the same missing
+  feature seen from two directions: the docs describe a chat mode that composes a
+  prompt before sending (rather than typing straight into the shell), and name it
+  again as the fallback when a full-screen TUI disrupts CJK composition. Neither
+  existed; the Chat surface was a read-only transcript reader.
+
+  The reason the terminal cannot serve this is worth stating, because "just add a
+  text field" would miss it. Command mode types *into* the terminal through
+  SwiftTerm's `UITextInput`, which lives inside the TUI — and a TUI that repaints
+  over the marked range breaks iOS keyboard composition, so Chinese and Japanese
+  marked text and candidate selection can land in the wrong place, in the wrong
+  order, or not at all. The composer is a real `TextField` outside the terminal,
+  in a view no agent can repaint, and its finished string is delivered in one
+  piece.
+
+  Delivery is what makes it chat mode rather than a slower keyboard: when the
+  program on the other end has turned on bracketed paste, the message is wrapped
+  in `ESC[200~ … ESC[201~` so it arrives as *one paste* rather than as typing,
+  which is what makes a TUI insert it as text instead of interpreting keystrokes.
+  The mode bit comes from the terminal's own `bracketedPasteMode` — the same bit
+  SwiftTerm reads for a real paste — so the markers and their absence cannot
+  drift from what the other end expects. When bracketed paste is off (a plain
+  shell) the markers are not sent, because a shell that never negotiated them
+  prints them as literal garbage. A trailing CR always follows, which is the
+  difference from command mode: the message is submitted, not left in the input.
+
+  `ChatComposer` is Foundation-only and run directly by
+  `scripts/chat-composer-check.sh`, which pins the cases that fail invisibly:
+  whitespace-only input sends nothing (an empty Enter would fire an empty turn),
+  the CR stays outside the paste (a CR inside it is an inserted newline, not a
+  submit), edges are trimmed while interior newlines are kept, and a CJK message
+  survives byte-for-byte inside the markers. Verified end to end on the simulator
+  against a real sshd: `CQUT_DEV_COMPOSE` drives the view's own `sendComposed`
+  and the host runs the command, and `CQUT_DEV_CHAT_MODE=1` screenshots the
+  composer in place of the key bar.

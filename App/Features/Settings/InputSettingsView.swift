@@ -8,9 +8,12 @@ struct InputSettingsView: View {
         List {
             Section {
                 Toggle("Option sends Meta", isOn: $input.optionIsMeta)
+                Toggle("Chat mode", isOn: $input.chatMode)
                 Toggle("Hide the key bar with a hardware keyboard",
                        isOn: $input.hideBarWithHardwareKeyboard)
+                    .disabled(input.chatMode)
                 Toggle("Hide the window row", isOn: $input.hidesWindowRow)
+                    .disabled(input.chatMode)
             } header: {
                 Label("Keyboard", systemImage: "keyboard")
             } footer: {
@@ -99,7 +102,11 @@ struct InputSettingsView: View {
         "Meta sends Option+letter as Esc then the letter, which is what readline and "
         + "emacs expect for word motions. Off, Option types the accented character "
         + "the keyboard is set up for. The window row taps straight to tmux window "
-        + "1\u{2013}9, above the keys; windows past 9 need the session picker."
+        + "1\u{2013}9, above the keys; windows past 9 need the session picker. "
+        + "Chat mode replaces the key bar with a message field: you compose a whole "
+        + "line outside the terminal and it is delivered in one piece, which is what "
+        + "to reach for when a full-screen agent interface mangles Chinese or "
+        + "Japanese composition as it repaints."
     }
 
     private func icon(_ item: InputSettings.Item) -> String {

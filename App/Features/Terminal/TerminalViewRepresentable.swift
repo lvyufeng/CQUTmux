@@ -199,7 +199,23 @@ struct TerminalScreen: View {
             .sheet(item: $annotating) { pending in annotator(pending.image) }
             .overlay(alignment: .top) { pasteNotice }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if InputSettings.showsBar(
+                if input.chatMode {
+                    // Chat mode replaces the bar wholesale rather than adding a
+                    // field above it. The window row goes with it: it sends mux
+                    // prefix keys into the pane, which is command-mode behaviour
+                    // and not what a message field is for.
+                    ChatComposerBar(
+                        send: { text in
+                            coordinator.terminal?.sendComposed(text) ?? false
+                        },
+                        insert: { text in
+                            // Insert without a trailing Return, so the message
+                            // sits in the agent's input for the user to review
+                            // or finish — `typeText`'s contract exactly.
+                            coordinator.terminal?.typeText(text)
+                        }
+                    )
+                } else if InputSettings.showsBar(
                     hideWithHardwareKeyboard: input.hideBarWithHardwareKeyboard,
                     hardwareKeyboard: hardwareKeyboard
                 ) {
@@ -279,6 +295,14 @@ struct TerminalScreen: View {
                 // wants and the bar builds it the same way a tap would.
                 if let spec = ProcessInfo.processInfo.environment["CQUT_DEV_SHORTCUT"], !spec.isEmpty {
                     shortcuts.add(spec)
+                }
+                // The chat-mode bar is a `TextField`, and a script cannot type
+                // into one or tap its send button — so a run declares that it
+                // wants the bar in chat mode and the screenshot shows it. The
+                // delivery half is exercised by `CQUT_DEV_COMPOSE`, which calls
+                // the same `sendComposed` the button does.
+                if ProcessInfo.processInfo.environment["CQUT_DEV_CHAT_MODE"] == "1" {
+                    input.chatMode = true
                 }
                 if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "shortcuts" {
                     showShortcuts = true
@@ -1016,6 +1040,13 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         // Option press, so the Meta rewrite is exercised through this instead.
         if let composed = ProcessInfo.processInfo.environment["CQUT_DEV_TYPE_COMPOSED"] {
             DebugSeed.typeComposedWhenConnected(view: view, text: composed)
+        }
+        // Chat mode's delivery, which a script cannot reach: the composer is a
+        // TextField and `simctl` cannot type into one. This calls the view's own
+        // `sendComposed`, so the bracketed-paste wrap is decided by the
+        // program's real mode bit and the bytes are the shipped composer's.
+        if let message = ProcessInfo.processInfo.environment["CQUT_DEV_COMPOSE"] {
+            DebugSeed.sendComposedWhenConnected(view: view, text: message)
         }
         // Fires a tmux jump so the configured prefix is the one on the wire;
         // the host's `cat -v` then shows it as `^B` or `^A`.

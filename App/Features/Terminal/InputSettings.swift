@@ -16,6 +16,7 @@ final class InputSettings {
         static let cornerShortcuts = "input.dpadCornerShortcuts"
         static let hidesWindowRow = "input.hidesWindowRow"
         static let muxGestures = "input.muxGestures"
+        static let chatMode = "input.chatMode"
     }
 
     /// The D-pad corner actions, as raw strings keyed by corner.
@@ -249,6 +250,21 @@ final class InputSettings {
         didSet { store.set(muxGestures, forKey: Key.muxGestures) }
     }
 
+    /// Chat mode: the key bar becomes a native message field that composes a
+    /// whole line and sends it in one piece, rather than a row of keys that
+    /// types into the session.
+    ///
+    /// Off by default. It changes what the bar *is* — every key on it is
+    /// replaced — so turning it on for someone who wanted the keys would be
+    /// taking the keyboard away to offer a text field they did not ask for.
+    /// The mode exists for the two cases the terminal cannot serve: an agent
+    /// whose TUI mangles iOS keyboard composition as it repaints (CJK, most of
+    /// all), and a prompt that should arrive as one message rather than as
+    /// keystrokes.
+    var chatMode: Bool {
+        didSet { store.set(chatMode, forKey: Key.chatMode) }
+    }
+
     /// The bar's items, in order. Stored as raw values so a build that adds an
     /// item does not lose a user's arrangement, and one that removes an item
     /// does not resurrect it.
@@ -269,6 +285,7 @@ final class InputSettings {
         // two-finger swipes do nothing — so "absent" has to mean the new
         // behaviour or the feature would ship switched off for everyone.
         muxGestures = store.object(forKey: Key.muxGestures) as? Bool ?? true
+        chatMode = store.bool(forKey: Key.chatMode)
 
         let stored = store.stringArray(forKey: Key.barItems) ?? []
         let restored = stored.compactMap(Item.init(rawValue:))
