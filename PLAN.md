@@ -57,7 +57,7 @@
 | Agent 层 | Usages 看板（5h/7d 用量与 burn pace） | P4 |
 | 通知 | 本地/远程推送、webhook 告警 | P4 |
 | 系统 | Live Activity / Dynamic Island / Apple Watch | P4 / P6 ✅ 表盘实测 |
-| 语音 | 端侧听写（Apple Speech ✅ + whisper.cpp ✅ 已实测；cloud 引擎按 Moshi 是托管服务，不做） | P4 ✅ |
+| 语音 | 端侧听写（Apple Speech ✅ + whisper.cpp ✅ 已实测；**Parakeet ⚠️ 已编成并实测转写，但未接线**——见 4b 表末行；cloud 引擎按 Moshi 是托管服务，不做） | P4 ⚠️ |
 | 输入 | 图片粘贴 / 裁剪 / 标注 / 发送 | P4 |
 | 安全 | SSH key 存 Keychain + Face ID 保护 | P1 |
 | 其他 | 远程剪贴板 OSC 52、Tailscale、iPad 分栏 | P5 |
@@ -244,6 +244,7 @@ CJK 输入依赖 SwiftTerm 的
 网关本就跑在宿主上、紧挨着那个 Unix socket，于是直接说协议（`callHerdrSocket`，一行 JSON，`{id,method,params}` 信封，与 CLI 自身一致）。
 实测：`POST /herdr/focus/w1:p1` 后 herdr 自报 `focused_pane_id=w1:p1`，再 focus `w1:p2` 又变回 `w1:p2`——**确认焦点真的动了**，而不是返回 ok 却什么也没发生 |
 | 远程推送（APNs） | **两端代码已写全并已跑通到系统边界**：App 侧 `PushCoordinator`/`AppDelegate`（令牌注册、`CQUT_APPROVAL` 分类的锁屏 Allow/Deny、前后台推送回调）→ `POST /push/register` → 宿主 `push.mjs`（HTTP/2 + ES256 provider JWT，签名经 openssl 生成的测试密钥**验签通过**、64 字节裸 r‖s 编码正确）。**卡在签名**：模拟器日志 `Push registration with a nil environment`——无 `aps-environment` entitlement，而该 entitlement 必须有付费开发者账号的 provisioning profile。本地通知 + webhook 告警已覆盖同类场景。<br>**查 Moshi 文档后的两点更正**：① 推送**不需要账号登录**，也不需要用户自备 Apple 开发者证书——Moshi 自己是发送方，走 `api.getmoshi.app` 再分发（Expo Push / APNs），文档只说 per-device "license join"，从未要求用户有开发者账号。也就是说，**如果要对齐，需要的不是用户掏钱，而是我们也得有一个托管推送服务**——这与 Moshi 自己声称的 "no session relay" 并不矛盾（它明确区分了会话中转与推送服务）。② 我们目前是**直接对 APNs 发**（provider JWT），所以确实需要付费账号；Moshi 的路线不需要。两条路都能到，只是前者要多一个自有服务。 |
+| Parakeet 语音引擎 | **Moshi 有四个语音引擎，Parakeet 是它当前推荐的默认**（getmoshi.app/docs/voice："Parakeet runs a fast on-device model and is the engine we currently recommend for English and many European languages … Start here unless you need a language it doesn't cover"）。我们此前只对齐了 Apple + whisper 两个。<br>**已做**：`scripts/parakeet-ios/build.sh` 交叉编出 iOS 静态库（simulator 与 device 均成功），`scripts/parakeet-ios/check.sh` 在模拟器上实测转写出**逐字正确**的文本（`Well, I don't wish to see it any more, observed Phoebe, turning away her eyes. It is certainly very like the old portrait.`，模型 `tdt_ctc-110m-q8_0` 169.6 MB）。parakeet.cpp 是 iOS 友好的——无 `fork`/`exec`、无 PTY，C API 直接吃内存里的 float PCM。<br>**未接线的原因（真障碍，非环境所限）**：本 App 已经静态链了 whisper 自己的 **ggml 0.26.0**，而 parakeet.cpp 自带一份**不同的、打过补丁的 ggml**（submodule `e705c5f` + 3 个 conv-2d/broadcast 补丁）。两者全局符号重叠：`libggml-base.a` 910 个、`libggml-cpu.a` 533 个。**两个静态库同时链不会报错**——静态库只补未定义符号，第二份被静默忽略，于是其中一个引擎会绑到另一个的 ggml 上：能编过、能加载两个模型、然后给出错误结果或在 ggml 内部崩。实测把两者链在一起，退出码 0。`ggml_tensor` 两者都是 336 字节，但 `ggml.h` 差 255 行，后端不通用。<br>**三条出路**（尚未选）：① 统一到一份 ggml（whisper 改用 `e705c5f` + parakeet 的三个补丁），代价是两个引擎从此共用一个 ggml 版本；② 用 `objcopy --prefix-symbols` 给 parakeet 的 ggml 加前缀，机械但每次重建都要重做；③ 拆成各自进程的 extension。<br>**也踩到一个坑**：Metal 开关是 `PARAKEET_GGML_METAL` 而非 `GGML_METAL`——parakeet.cpp 用自己的变量 `FORCE` 掉 ggml 的选项，直接设 `GGML_METAL=ON` 会被静默覆盖、编出纯 CPU 版且无任何警告。详见 `scripts/parakeet-ios/README.md` | ⚠️ 引擎已编成并实测，未接线 |
 | Tailscale 网络探测 | **不需要**：Moshi 自己的文档写明它不做内置集成（"no built-in Tailscale host picker"，VPN 在系统层透明工作），用 `100.x.y.z` / MagicDNS 名当普通 SSH 目标即可 | 与 Moshi 一致；直连与隧道不受影响 |
 
 ## 5. 主要风险
