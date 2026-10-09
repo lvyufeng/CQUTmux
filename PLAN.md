@@ -117,6 +117,10 @@ Metal 着色器用 `GGML_METAL_EMBED_LIBRARY` 编进归档，App 不带 `.metal`
 路径会 dyld abort；且它会挑到第一个已启动设备——本机常常是 Apple Watch 模拟器。
 
 **仍未做**：无原生 Windows、无 macOS 菜单栏 / Moshi Desktop（属另一产品）；
+**界面语言固定**（Moshi 可把 UI 语言钉在某个 locale）：本 App **没有任何本地化**——所有字符串
+都写死在调用处，全是英文，**没有可钉的对象**。要做对意味着提取并翻译整个界面，那是另一件事，
+不是加一个开关；
+**会话卡片/紧凑列表布局**已做（默认卡片，见 P4 行）；
 Tailscale 不需集成（Moshi 文档亦确认：它工作在系统层，用 100.x 地址直连即可）；
 SSH agent forwarding 已实现并实测（见下表）；APNs 投递受环境所限，非代码问题。
 
