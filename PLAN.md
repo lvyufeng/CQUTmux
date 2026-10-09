@@ -62,6 +62,8 @@
 | 语音 | 端侧听写（**Parakeet ✅ + Apple Speech ✅ + whisper.cpp ✅，三个均已实测**；cloud 引擎按 Moshi 是托管服务，不做） | P4 ✅ |
 | 输入 | 图片粘贴 / 裁剪 / 标注 / 发送 | P4 |
 | 安全 | SSH key 存 Keychain + Face ID 保护 | P1 |
+| 安全 | 重开需生物识别（后台 >30s）、key 导出页（显式空缺） | P4 ✅ 实测 |
+| 通知 | 通知设置页：权限状态、暂停（客户端强制）、测试通知、远程推送状态 | P4 ✅ 实测 |
 | 其他 | 远程剪贴板 OSC 52、Tailscale、iPad 分栏 | P5 |
 
 ### 1b. 逐项复核（2026-10-09，对照 getmoshi.app 全部 42 个文档页）
@@ -155,6 +157,26 @@ SSH agent forwarding 已实现并实测（见下表）；APNs 投递受环境所
 Dracula 经真 sshd 进到活终端；导入页渲染正常；`scripts/theme-format/run.sh` **61 项断言全绿**。
 **该检查抓到一个真 bug**：ANSI 数组我写成了交错（black, brightBlack, red…），而调色板要的是
 前 8 基础色、后 8 亮色——每个导入主题的颜色都会错位且**导入不报错**，正是往返测试存在的意义。
+
+**本轮新增：Security 与 Notifications 两个设置页**（Moshi 设置里的最后两块）。
+
+- **Security**：存储事实（key 在 Keychain、只在本机解锁时可读）、key 保护方式（Face ID / Touch ID / 无）。
+  "重开需生物识别"开关会**在后台超过 30 秒后回到前台时**弹一次（`CQUTmuxApp` 的 `scenePhase` +
+  `SecuritySettings.Gate`），盖在 App 之上而**不拆视图树**——重建 SwiftUI 树会丢掉正在保护的终端会话，
+  那就比不锁更糟。开关在**本机没有录入生物识别**时禁用并说明去哪录，因为 `canEvaluatePolicy`
+  是唯一诚实的"是否可用"判据，光有 `biometryType` 会给出一个按下去只会失败的开关。
+- **导出密钥**页做成**显式的空缺**（`ContentUnavailableView`），不是隐藏：Moshi 的导出要生物识别确认，
+  在那条路径存在之前，声称"密钥安全"的页面上应当写明没有出口，而不是留个空列表。
+- **iCloud 同步刻意不做**（Moshi 有）：不是没时间，是它会把密钥复制出本机，
+  与上一条"key 永不离开设备"的说明直接矛盾。宁可不给这个开关，也不给一个改变安全性质的开关。
+- **Notifications**：权限状态、**暂停**（保留注册、不弹横幅）、发送测试通知、远程推送注册状态。
+  暂停必须**在客户端强制**——网关无法知道某台设备暂停了，所以拦在 `AppDelegate.willPresent`
+  （`completionHandler([])`）并在暂停时清掉已投递的横幅；只在发送侧拦会漏掉已经在途的推送。
+- **测试通知**用真实审批同一个 category，于是 Allow/Deny 按钮会一起出现——
+  这条路径最可能配错、也最难靠等一个真审批来验证。
+
+**实测**：`scripts/build.sh` 通过；Security / Notifications / Cursor 三页在模拟器渲染正常，
+调试入口 `CQUT_DEV_TAB` 已覆盖 `cursor`/`icon`/`sessions`/`security`/`notifications`。
 
 ## 2. 技术选型
 

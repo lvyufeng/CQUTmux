@@ -33,6 +33,29 @@ final class PushCoordinator: NSObject, @unchecked Sendable {
     /// then, because there is nowhere to send it before that. Like the watch
     /// bridge's callbacks, these are read and written only on the main queue.
     private(set) var deviceToken: String?
+
+    /// Whether the app is accepting pushes. Pausing keeps the token and only
+    /// quiets delivery on this device, which is what Moshi's switch does — the
+    /// alternative (unregistering) would mean the user has to re-authorise to
+    /// resume.
+    ///
+    /// The switch is enforced here rather than server-side because the gateway
+    /// sends to every registered device; a "paused" device that still received
+    /// banners would make the setting a lie.
+    var isPaused: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.pausedKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.pausedKey)
+            // Delivery is decided in `received` and `willPresent`, so pausing
+            // also has to clear what is already on the lock screen — otherwise
+            // the switch quiets the next push and leaves this one sitting there.
+            if newValue {
+                UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+            }
+        }
+    }
+
+    private static let pausedKey = "cqutmux.push.paused"
     /// Called with (eventId, allow) when the user answers from a notification.
     var onRemoteDecision: ((Int, Bool) -> Void)?
     /// Called when a push arrives, so the feed can refresh immediately rather

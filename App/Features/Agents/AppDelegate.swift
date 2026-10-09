@@ -64,6 +64,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         let info = notification.request.content.userInfo
+        // A paused device still receives the push — the gateway has no way to
+        // know — so the suppression has to happen here, at the last point
+        // before it would be shown.
+        guard !PushCoordinator.shared.isPaused else {
+            completionHandler([])
+            return
+        }
         if let id = Self.eventId(from: info) {
             Task { @MainActor in PushCoordinator.shared.onRemoteEvent?(id) }
         }

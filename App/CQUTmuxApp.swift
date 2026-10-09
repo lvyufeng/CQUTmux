@@ -13,6 +13,14 @@ struct CQUTmuxApp: App {
     @State private var cursor = CursorSettings()
     @State private var icons = AppIconStore()
     @State private var sessionLayout = SessionLayout()
+    @State private var security = SecuritySettings()
+    @State private var gate = SecuritySettings.Gate()
+
+    /// Whether the app was away long enough that coming back should re-prompt.
+    /// A glance at another app is not a handoff, and prompting for it would
+    /// make the setting unusable rather than protective.
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var leftAt: Date?
 
     var body: some Scene {
         WindowGroup {
@@ -24,6 +32,11 @@ struct CQUTmuxApp: App {
                 .environment(cursor)
                 .environment(icons)
                 .environment(sessionLayout)
+                .environment(security)
+                .environment(gate)
+                .overlay {
+                    if gate.isLocked { LockedView(gate: gate) }
+                }
                 .task {
                     #if DEBUG
                     DebugSeed.apply(to: hostStore)
@@ -50,6 +63,56 @@ struct CQUTmuxApp: App {
                     // round trip to fetch a token for pushes we'd drop.
                     PushCoordinator.shared.register()
                 }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background:
+                leftAt = Date()
+            case .active:
+                // A session on a real host is worth protecting when the phone
+                // has been put down and handed over; thirty seconds is the
+                // boundary Moshi uses and the one that keeps a glance at a
+                // notification from demanding a face.
+                if let leftAt, Date().timeIntervalSince(leftAt) > 30 {
+                    gate.lockIfNeeded(settings: security)
+                }
+                leftAt = nil
+            default:
+                break
+            }
+        }
+    }
+}
+
+/// Covers the app while the biometric prompt is up.
+///
+/// Deliberately not a `switch`: the app's state has to survive the lock, and
+/// tearing the view tree down would drop the terminal's session — which is the
+/// thing worth protecting, and losing it would make the setting cost more than
+/// it protects.
+private struct LockedView: View {
+    let gate: SecuritySettings.Gate
+    @Environment(SecuritySettings.self) private var security
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.background).ignoresSafeArea()
+            VStack(spacing: 16) {
+                Image(systemName: "lock.fill").font(.system(size: 44))
+                Text("CQUTmux is locked")
+                    .font(.headline)
+                if let problem = gate.problem {
+                    Text(problem)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                Button("Unlock") {
+                    Task { await gate.unlock(reason: "Unlock CQUTmux") }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
         }
     }
 }

@@ -28,6 +28,28 @@ enum ApprovalNotifier {
         }
     }
 
+    /// Posts a notification that is not about anything, so the user can see
+    /// whether delivery works on this device.
+    ///
+    /// It carries the same category a real approval does, so the Allow/Deny
+    /// buttons appear and can be tried — the part of the path most likely to be
+    /// misconfigured and the hardest to check by waiting for a real approval.
+    static func sendTest() async throws {
+        let content = UNMutableNotificationContent()
+        content.title = "Test notification"
+        content.body = "If you can read this, the app's side of notifications works."
+        content.sound = .default
+        content.categoryIdentifier = PushCoordinator.Category.approval
+
+        try await UNUserNotificationCenter.current().add(
+            UNNotificationRequest(
+                identifier: "cqutmux.test.\(UUID().uuidString)",
+                content: content,
+                trigger: nil
+            )
+        )
+    }
+
     /// Posts one notification per new pending approval.
     static func notify(_ events: [AgentEvent], hostName: String) async {
         let center = UNUserNotificationCenter.current()

@@ -5,7 +5,7 @@ struct SettingsView: View {
     /// cannot drift. A `cqutmux://theme` link sets `pendingRoute` on the store
     /// and the push below happens here, once, in the same place the tap does.
     enum Route: Hashable {
-        case theme, font, cursor, icon, speech, sessions, standIn(String)
+        case theme, font, cursor, icon, speech, sessions, security, notifications, standIn(String)
     }
 
     @Environment(ThemeStore.self) private var themes
@@ -24,8 +24,14 @@ struct SettingsView: View {
         NavigationStack(path: $path) {
             List {
                 Section("Security") {
-                    Label("SSH keys in Keychain", systemImage: "key.fill")
-                    Label("Face ID unlock", systemImage: "faceid")
+                    NavigationLink(value: Route.security) {
+                        Label("Security", systemImage: "lock.shield")
+                    }
+                }
+                Section("Notifications") {
+                    NavigationLink(value: Route.notifications) {
+                        Label("Notifications", systemImage: "bell.badge")
+                    }
                 }
                 Section("Dictation") {
                     NavigationLink(value: Route.speech) {
@@ -64,6 +70,8 @@ struct SettingsView: View {
                 case .cursor: CursorSettingsView()
                 case .icon: AppIconSettingsView()
                 case .sessions: SessionLayoutView()
+                case .security: SecuritySettingsView()
+                case .notifications: NotificationSettingsView()
                 case .speech: SpeechSettingsView()
                 case .standIn(let title): PlaceholderView(
                     title: title,
@@ -90,8 +98,11 @@ struct SettingsView: View {
     private var debugTab: String? {
         guard let tab = ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] else { return nil }
         switch tab {
-        case "theme", "font", "speech": return tab
-        default: return nil
+        case "theme", "font", "speech", "cursor", "icon", "sessions", "security",
+             "notifications":
+            return tab
+        default:
+            return nil
         }
     }
 
@@ -100,6 +111,11 @@ struct SettingsView: View {
         switch tab {
         case "theme": ThemeSettingsView()
         case "font": FontSettingsView()
+        case "cursor": CursorSettingsView()
+        case "icon": AppIconSettingsView()
+        case "sessions": SessionLayoutView()
+        case "security": SecuritySettingsView()
+        case "notifications": NotificationSettingsView()
         default: SpeechSettingsView()
         }
     }
