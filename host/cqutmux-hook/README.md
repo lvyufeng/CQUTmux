@@ -9,6 +9,29 @@ node index.mjs [--port 24543] [--token <secret>] [--root <dir>] [--webhook <url>
 
 No dependencies, Node 18+.
 
+## Command line
+
+The same file answers to `cqutmux` and `cqutmux-hook`, as Moshi ships `moshi`
+alongside `moshi-hook`. With no subcommand it behaves exactly as before — it
+starts the gateway — because that is what already-running installs expect.
+
+```
+cqutmux <dir>       open (or attach to) a tmux session named after the directory
+cqutmux diff        summarise the current repo's diff (the app's Diff view reads /diff)
+cqutmux status      is a gateway running here, and what does it say
+cqutmux doctor      check tmux, git, ssh, the gateway and the token, in that order
+cqutmux logs [-f]   tail ~/.cqutmux/hook.log
+cqutmux serve       run the gateway, spelled out
+cqutmux install     how to keep the gateway running at login
+cqutmux pair        host, address, port and token — what to enter in the app
+cqutmux help
+```
+
+A single argument is a **path**, not a subcommand, so `cqutmux ~/src/api` names
+a project rather than being read as a typo'd command. `scripts/cli-check.sh`
+covers this file's behaviour, including the one thing that must not change:
+that a bare invocation still starts the gateway.
+
 `--webhook` posts a small JSON alert to an external endpoint (Slack, ntfy, a
 phone Shortcut…) whenever an `approval` event arrives. Delivery is
 fire-and-forget with a 5s timeout; a failing webhook never blocks or crashes
@@ -38,6 +61,17 @@ require `Authorization: Bearer <secret>` on every request.
 | `GET` | `/ports` | listening TCP ports, dev-looking ones first |
 | `GET` | `/simulators` | booted iOS simulators on the host |
 | `GET` | `/simulator/screenshot?udid=<id>` | a PNG frame of one booted simulator |
+| `GET` | `/herdr` | herdr workspaces, tabs and panes (needs `--herdr <path>`) |
+
+## Containers
+
+The gateway expects to share the host's tmux, git and simulator state, so it is
+meant to run on the host itself. If you run it inside a container, mount the
+project directories and the tmux socket (`/tmp/tmux-$(id -u)`) through, and
+start it with `serve` so it does not try to be a project launcher:
+`docker run -v /tmp/tmux-$(id -u):/tmp/tmux-1000 <image> serve`. Running it in a
+container with a private tmux server is the one arrangement that will not work:
+the app would attach to an empty session list.
 | `POST` | `/upload` | write a raw body (a pasted image) under `.cqutmux/paste/` |
 
 Event body:

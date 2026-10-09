@@ -64,6 +64,7 @@
 | 安全 | SSH key 存 Keychain + Face ID 保护 | P1 |
 | 安全 | 重开需生物识别（后台 >30s）、key 导出页（显式空缺） | P4 ✅ 实测 |
 | 同步 | iCloud 设置同步（hosts/主题/字体/光标/布局/引擎；冲突合并；**载荷无密钥**）；凭据同步显示但禁用并说明 | P4 ✅ 实测 |
+| 宿主 | `cqutmux` CLI（`<dir>` 起 tmux / `diff` / `status` / `doctor` / `logs` / `serve` / `install` / `pair`），裸调用仍是网关 | P5 ✅ 实测 |
 | 通知 | 通知设置页：权限状态、暂停（客户端强制）、测试通知、远程推送状态 | P4 ✅ 实测 |
 | 其他 | 远程剪贴板 OSC 52、Tailscale、iPad 分栏 | P5 |
 
@@ -201,6 +202,25 @@ Moshi 把两件事**分开**，设置同步（hosts/偏好）与**单独一个�
    一并写了个测不到的断言——现改成如实注明不可达并断言真正会发生的路径；
 ③ 我的另外两条断言本身写反了（把"合并"当成"推送"），是**测试错、实现对**。
 模拟器截图确认：无 iCloud 账号时开关**禁用并说明去哪登录**，而不是给一个按不动的开关。
+
+**本轮新增：宿主 CLI（`cqutmux`）。**
+对照 Moshi 文档页清单逐条核时发现一处漏项：Moshi 在 `moshi-hook` 之外还发一个 **`moshi` 命令**
+（`/docs/moshi-cli`："project tmux launcher and one-shot diff viewer"）。
+我们的 `host/cqutmux-hook/index.mjs` 一直只有**参数**、没有**子命令**，即文档里的这一项是缺的。
+按 Moshi 的形状补齐（同一个文件两个名字，`cqutmux` 与 `cqutmux-hook`）：
+`<dir>`（按目录名开/接入 tmux 会话，用 `spawn` 而非 `exec`——见下）、`diff`、`status`、`doctor`、
+`logs [-f]`、`serve`、`install`、`pair`、`help`。
+**默认路径刻意不变**：不给子命令时仍然启动网关——已装好的机器就是这么调它的，
+一个改变"裸调用语义"的改动会直接弄坏现有安装。
+单个位置参数按 Moshi 的规则理解为**路径**（`cqutmux ~/src/api` 应是项目名，不能被当成拼错的命令）。
+
+**实测**：`scripts/cli-check.sh` **13 项**全绿，可重复运行（连跑两次均通过）。该检查抓到**三个真 bug**：
+① **`--port 24880` 的值被当成位置参数路径**——扫描位置参数时没有跳过带值标志的值，
+   于是"裸调用"直接变成"打不开目录 /private/tmp/24880"；
+② **`serve` 什么也不做就退出**——分派分支无条件 `process.exit(0)`，于是 `serve` 既没启动网关、
+   又返回成功；现改为 `serve` 不进入分派、直接落到服务器代码；
+③ 脚本自身的**端口争用**（后台 `node ... &` 记录的是子 shell 的 pid，`kill $!` 杀不掉 node），
+   让 `status` 检查在上一轮残留的服务上"通过"——现按 pid 杀并让这个检查自带端口占用检测。
 
 ## 2. 技术选型
 

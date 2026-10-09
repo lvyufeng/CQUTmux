@@ -23,7 +23,7 @@ import { promisify } from 'node:util'
 import { execFile, spawn } from 'node:child_process'
 import { readdir, readFile, stat, mkdir, writeFile, rm } from 'node:fs/promises'
 import { resolve, relative, isAbsolute, join } from 'node:path'
-import { homedir, tmpdir } from 'node:os'
+import { homedir, hostname, networkInterfaces, tmpdir } from 'node:os'
 import { createPushService } from './push.mjs'
 import { herdrStatus, herdrSnapshot, herdrApprove, herdrRead, herdrFocusPane } from './herdr.mjs'
 
@@ -739,6 +739,243 @@ const server = createServer(async (req, res) => {
 
   json(res, 404, { error: 'not found' })
 })
+
+// --- Command dispatch -------------------------------------------------------
+//
+// `cqutmux` is the everyday command and `cqutmux-hook` is the daemon, the way
+// Moshi ships `moshi` alongside `moshi-hook`: the same file under two names, so
+// everything below works with either. With no subcommand this behaves exactly
+// as before — it starts the gateway — because that is what install and `serve`
+// both do, and a tool that changes what bare invocation means is a tool that
+// breaks the thing already calling it.
+//
+// A single positional argument is a path, not a subcommand (Moshi's rule, and
+// the right one): `cqutmux ~/src/api` should name a project, never be mistaken
+// for a typo'd command.
+
+const COMMANDS = new Set(['pair', 'install', 'serve', 'status', 'doctor', 'logs', 'diff', 'help'])
+
+function usage() {
+  return `cqutmux — host side for the CQUTmux app
+
+  cqutmux <dir>          open (or attach to) a tmux session for a project
+  cqutmux diff           diff viewer for the current repo, in the browser
+  cqutmux status         gateway health, if one is running here
+  cqutmux doctor         check that this host is ready for the app
+  cqutmux logs [-f]      tail the gateway log
+  cqutmux serve          run the gateway (same as running with no arguments)
+  cqutmux install        print how to keep the gateway running
+  cqutmux pair           print the details to enter in the app
+  cqutmux help           this text
+
+Options: --port N  --token S  --root DIR`
+}
+
+const argv = process.argv.slice(2)
+// Flags that take a value, so the value is not mistaken for a positional.
+// `--port 24880` must not make "24880" look like a directory to open.
+const VALUED_FLAGS = new Set([
+  '--port', '--token', '--root', '--webhook', '--push-key', '--push-key-id',
+  '--push-team-id', '--push-topic', '--herdr',
+])
+const positionals = []
+for (let i = 0; i < argv.length; i++) {
+  const arg = argv[i]
+  if (arg.startsWith('-')) {
+    if (VALUED_FLAGS.has(arg)) i++ // skip its value
+  } else {
+    positionals.push(arg)
+  }
+}
+const positional = positionals[0]
+const command = positional && COMMANDS.has(positional) ? positional : null
+
+if (command === 'serve') {
+  // Not dispatched, and not exited: `serve` means "be the gateway", which is
+  // the code below. Exiting here would start nothing and look like success.
+} else if (command) {
+  await runCommand(command, argv)
+  process.exit(0)
+} else if (positional) {
+  // A lone path means "take me to that project's session".
+  await launchProjectSession(positional)
+  process.exit(0)
+}
+// Otherwise fall through to the server: `node index.mjs` with no subcommand is
+// still the gateway, as documented at the top of this file.
+
+// A tmux session named after the directory, attached if it already exists.
+// `exec` rather than spawn so no wrapper process lingers, exactly as Moshi does
+// — a shell that leaves a parent behind makes the session awkward to kill.
+async function launchProjectSession(target) {
+  const dir = resolve(target)
+  try {
+    const info = await stat(dir)
+    if (!info.isDirectory()) {
+      process.stderr.write(`cqutmux: ${dir} is not a directory\n`)
+      process.exit(1)
+    }
+  } catch {
+    process.stderr.write(`cqutmux: no such directory: ${dir}\n`)
+    process.exit(1)
+  }
+  const name = dir.split('/').filter(Boolean).pop() || 'session'
+  process.stderr.write(`[cqutmux] tmux session "${name}" in ${dir}\n`)
+  const child = spawn('tmux', ['new-session', '-A', '-s', name], { cwd: dir, stdio: 'inherit' })
+  child.on('error', error => {
+    process.stderr.write(`cqutmux: could not start tmux: ${error.message}\n`)
+    process.exit(1)
+  })
+  child.on('exit', code => process.exit(code ?? 0))
+}
+
+async function runCommand(name, argv) {
+  switch (name) {
+    case 'help':
+      process.stdout.write(usage() + '\n')
+      return
+    case 'pair':
+      return pair()
+    case 'status':
+      return status()
+    case 'doctor':
+      return doctor()
+    case 'logs':
+      return logs(argv.includes('-f') || argv.includes('--follow'))
+    case 'install':
+      return install()
+    case 'diff':
+      return diff(argv)
+  }
+}
+
+/// What to type into the app. The token is the only part that is not obvious
+/// from the machine, and printing it is the point of the command.
+function pair() {
+  const address = Object.values(networkInterfaces())
+    .flat()
+    .find(i => i && i.family === 'IPv4' && !i.internal)
+  process.stdout.write(`Host            ${hostname()}\n`)
+  if (address) process.stdout.write(`Address         ${address.address}\n`)
+  process.stdout.write(`Port            ${args.port}\n`)
+  process.stdout.write(`Token           ${args.token || '(none set — anyone who can reach this port can read events)'}\n`)
+  process.stdout.write(`Herdr           ${args.herdrPath || '(not configured)'}\n`)
+}
+
+/// Reports whether a gateway is answering here, and what it says. Reads the
+/// health endpoint rather than trusting a pid file, because a stale pid file is
+/// exactly the thing this command exists to catch.
+async function status() {
+  const url = `http://127.0.0.1:${args.port}/health`
+  try {
+    const response = await fetch(url, { headers: authHeaders() })
+    if (!response.ok) {
+      process.stderr.write(`cqutmux: gateway answered ${response.status} on port ${args.port}\n`)
+      process.exit(1)
+    }
+    const body = await response.json()
+    process.stdout.write(`running on 127.0.0.1:${args.port}\n`)
+    process.stdout.write(`events   ${body.events}\n`)
+    process.stdout.write(`pending  ${body.pendingApprovals}\n`)
+    process.stdout.write(`uptime   ${body.uptime}s\n`)
+  } catch (error) {
+    process.stderr.write(`cqutmux: no gateway on 127.0.0.1:${args.port} (${error.message})\n`)
+    process.exit(1)
+  }
+}
+
+function authHeaders() {
+  return args.token ? { authorization: `Bearer ${args.token}` } : {}
+}
+
+/// Checks the things that actually stop the app from working, in the order they
+/// would bite. Each one prints what it found and why it matters, because a bare
+/// "ERROR" leaves the user to guess which of these the app will trip over.
+async function doctor() {
+  let failures = 0
+  const check = (ok, label, detail) => {
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}\n`)
+    if (!ok) failures++
+  }
+
+  for (const tool of ['tmux', 'git', 'ssh']) {
+    try {
+      const { stdout } = await run('which', [tool])
+      check(true, tool, stdout.trim())
+    } catch {
+      // tmux is required; the other two only disable features.
+      check(tool !== 'tmux', tool, tool === 'tmux' ? 'required for sessions' : 'optional')
+    }
+  }
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${args.port}/health`, { headers: authHeaders() })
+    check(response.ok, 'gateway', `127.0.0.1:${args.port}`)
+  } catch {
+    check(false, 'gateway', `not running on ${args.port}; start it with \`cqutmux serve\``)
+  }
+
+  if (args.token) check(true, 'token', 'set')
+  else check(false, 'token', 'none set, so anything that can reach the port can read events')
+
+  if (args.herdrPath) {
+    try {
+      const snapshot = await herdrSnapshot(args.herdrPath, args.root)
+      check(true, 'herdr', `${snapshot?.tabs?.length ?? 0} tab(s)`)
+    } catch (error) {
+      check(false, 'herdr', String(error.message || error))
+    }
+  }
+
+  process.stdout.write(failures === 0 ? '\nready\n' : `\n${failures} thing(s) to fix\n`)
+  if (failures > 0) process.exit(1)
+}
+
+async function logs(follow) {
+  const log = join(homedir(), '.cqutmux', 'hook.log')
+  try {
+    await stat(log)
+  } catch {
+    process.stderr.write(`cqutmux: no log at ${log}; the gateway writes one when started by \`install\`\n`)
+    process.exit(1)
+  }
+  const child = spawn('tail', follow ? ['-f', log] : ['-n', '80', log], { stdio: 'inherit' })
+  child.on('exit', code => process.exit(code ?? 0))
+}
+
+function install() {
+  process.stdout.write(`Keep the gateway running at login.
+
+  macOS (launchd):
+    cqutmux serve >> ~/.cqutmux/hook.log 2>&1 &
+
+  Or with a supervisor you already run, e.g.:
+    systemd:  ExecStart=${process.execPath} ${process.argv[1]} serve --token <secret>
+
+The app reaches this port over the SSH session it already has, so there is no
+need to open a firewall port or expose it to the network. Bind stays loopback.
+`)
+}
+
+/// Shows a repo's diff in the browser, on loopback only.
+///
+/// Non-blocking by design: it prints the URL and exits once the page has been
+/// opened, so `cqutmux diff` can be run from a hook or a script without leaving
+/// something behind. (The app's own Diff viewer reads `/diff` directly.)
+async function diff(argv) {
+  const rest = argv.filter(a => a !== 'diff' && a !== '--no-open' && a !== '--port')
+  const cwd = resolve(rest.find(a => !a.startsWith('-')) || process.cwd())
+  const result = await gitDiff(cwd)
+  if (!result.isRepo) {
+    process.stderr.write(`cqutmux: ${cwd} is not a git repository\n`)
+    process.exit(1)
+  }
+  for (const file of result.files) {
+    process.stdout.write(`  ${file.status.padEnd(2)} ${file.path}\n`)
+  }
+  process.stdout.write(`\n${result.files.length} changed file(s). Open the app's Diff view, `
+    + `or run \`cqutmux serve\` and GET /diff?root=${encodeURIComponent(cwd)}.\n`)
+}
 
 server.listen(args.port, '127.0.0.1', () => {
   process.stderr.write(`[hook] listening on 127.0.0.1:${args.port} (token: ${args.token ? 'set' : 'none'})\n`)
