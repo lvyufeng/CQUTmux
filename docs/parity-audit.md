@@ -255,3 +255,22 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
 - **The Files panel can be hidden on its own.** Settings → Agents already hid
   the whole Code tab; this drops just the Files mode, for when the diff and the
   transcript are useful and browsing the host's tree is not.
+
+- **Jump To's three layouts and the waiting count.** The screen had one flat
+  list. Herdr's tree is the one thing here that can be *long* — every pane on
+  the machine — and a flat list makes the pane you want a scroll rather than a
+  glance. It now switches between List, Accordion (one workspace's panes shown,
+  the rest folded to a header that still carries its counts and status) and Grid
+  (mission-control cards, each workspace's panes as chips), and remembers the
+  choice in `@AppStorage`, because someone who wants mission control wants it
+  every launch. Above all three sits the aggregate "N waiting" banner, which is
+  the reason to open this screen at all — it only appears when something is
+  actually blocked, and its Show button drops straight into the grid. The
+  per-row status dot is deliberately separate from the tinted agent glyph: the
+  glyph says *what* runs in a pane, the dot says whether it needs you, and
+  folding them into one mark leaves a blocked agent and an idle one differing
+  only by hue — the exact distinction the screen exists to make. The
+  `accordion`/`grid` layouts are reachable only through a toolbar menu, which a
+  test script cannot open, so `scripts/jumpto-check.sh` starts the sheet in each
+  layout via `CQUT_DEV_JUMPTO_LAYOUT` and checks the pixels against a live herdr
+  server reporting a blocked pane.
