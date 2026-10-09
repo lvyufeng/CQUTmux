@@ -5,6 +5,7 @@ import SwiftUI
 /// Tapping down a deep tree is fine once and tedious every time after; this is
 /// the way back to the one directory someone actually works in.
 struct GoToDirectoryView: View {
+    @Environment(ThemeStore.self) private var themes
     let host: Host
     let current: String
     let recents: RecentDirectoryStore
@@ -48,7 +49,7 @@ struct GoToDirectoryView: View {
                                     if path == current {
                                         Image(systemName: "checkmark")
                                             .font(.caption.weight(.bold))
-                                            .foregroundStyle(Theme.accent)
+                                            .foregroundStyle(themes.current.accentColor)
                                     }
                                 }
                             }

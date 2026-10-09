@@ -91,9 +91,6 @@ final class SpeechSettings {
         }
     }
 
-    /// Kept for callers that predate the second local engine.
-    var whisperModel: WhisperModel { model }
-
     /// The models to list for the current engine. Apple's engine has none of
     /// its own — its model is the system's.
     var modelsForCurrentEngine: [WhisperModel] {

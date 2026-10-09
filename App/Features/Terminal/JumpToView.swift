@@ -9,6 +9,7 @@ import SwiftUI
 /// to. Herdr is the only mux that can be addressed this way — tmux and zellij
 /// have no way to name a pane — so the tab only appears where it works.
 struct JumpToView: View {
+    @Environment(ThemeStore.self) private var themes
     let client: HookClient
     /// Called after a successful jump. The host focuses the pane; the app does
     /// not type anything, so the only thing left to do is get out of the way.
@@ -86,7 +87,7 @@ struct JumpToView: View {
                         if workspace.status != "unknown" {
                             Text(workspace.status)
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(workspace.status == "blocked" ? .orange : Theme.accent)
+                                .foregroundStyle(workspace.status == "blocked" ? .orange : themes.current.accentColor)
                         }
                         Spacer()
                         Text("\(workspace.tabCount) tabs · \(workspace.paneCount) panes")
@@ -130,7 +131,7 @@ struct JumpToView: View {
             } else if tree.focusedPaneId == pane.paneId {
                 Image(systemName: "checkmark")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(themes.current.accentColor)
             } else if pane.status != "unknown" {
                 Text(pane.status)
                     .font(.caption2)
@@ -142,7 +143,7 @@ struct JumpToView: View {
     private func color(for status: String) -> Color {
         switch status {
         case "blocked": .orange
-        case "working": Theme.accent
+        case "working": themes.current.accentColor
         case "idle": .secondary
         default: .secondary
         }

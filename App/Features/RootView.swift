@@ -6,6 +6,7 @@ import SwiftUI
 struct RootView: View {
     @Environment(HostStore.self) private var store
     @Environment(AgentConnection.self) private var connection
+    @Environment(ThemeStore.self) private var themes
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     enum Tab: String, CaseIterable, Hashable {
@@ -50,7 +51,13 @@ struct RootView: View {
                 tabs
             }
         }
-        .tint(Theme.accent)
+        // One theme drives the whole app, not just the terminal pane: the tint
+        // below reaches buttons, links and toggles, and `preferredColorScheme`
+        // makes the system's own surfaces — lists, sheets, the tab bar — agree
+        // with the palette instead of staying on whatever the device is set to.
+        // A light theme that left the chrome dark would defeat picking it.
+        .tint(themes.current.accentColor)
+        .preferredColorScheme(themes.current.dark ? .dark : .light)
         .onOpenURL { handle($0) }
         .alert("Could not open the link", isPresented: .constant(linkProblem != nil)) {
             Button("OK") { linkProblem = nil }
@@ -82,11 +89,22 @@ struct RootView: View {
     private func handle(_ url: URL) {
         switch DeepLink.parse(url) {
         case .success(let link):
+            if handleTheme(link) { return }
             selection = .terminal
             pendingLink = link
         case .failure(let error):
             linkProblem = error.localizedDescription
         }
+    }
+
+    /// A theme link does not go through `handle` like the others: those name a
+    /// host or a session and belong to the terminal, while this one has nothing
+    /// to do with the terminal and only opens a screen.
+    private func handleTheme(_ link: DeepLink) -> Bool {
+        guard case .theme = link.target else { return false }
+        selection = .settings
+        themes.pendingRoute = .theme
+        return true
     }
 
     private var tabs: some View {
@@ -107,7 +125,7 @@ struct RootView: View {
                         selection = tab
                     } label: {
                         Label(tab.title, systemImage: tab.symbol)
-                            .foregroundStyle(selection == tab ? Theme.accent : .primary)
+                            .foregroundStyle(selection == tab ? themes.current.accentColor : .primary)
                     }
                 }
             }

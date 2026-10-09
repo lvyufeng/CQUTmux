@@ -5,6 +5,7 @@ import CQUTTransport
 /// Resolves credentials for a host, prompting when nothing is stored, then
 /// hands off to the live terminal.
 struct ConnectFlowView: View {
+    @Environment(ThemeStore.self) private var themes
     let host: Host
     /// A link that opened this screen. Carries the session to attach to once
     /// the terminal is actually up.
@@ -36,7 +37,7 @@ struct ConnectFlowView: View {
                 Section("Password") {
                     SecureField("Password", text: $password)
                         .textContentType(.password)
-                    Toggle("Remember in Keychain", isOn: $remember).tint(Theme.accent)
+                    Toggle("Remember in Keychain", isOn: $remember).tint(themes.current.accentColor)
                 }
             } else {
                 Section("SSH Key") {

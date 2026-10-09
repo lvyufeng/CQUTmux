@@ -3,6 +3,7 @@ import SwiftUI
 /// Rate-limit burn pace per agent, mirroring Moshi's Usages board: 5h and 7d
 /// windows with a progress bar, percent used, and time until reset.
 struct UsagesView: View {
+    @Environment(ThemeStore.self) private var themes
     @Environment(AgentConnection.self) private var connection
 
     @State private var board: UsageBoard?
@@ -23,7 +24,7 @@ struct UsagesView: View {
                         } header: {
                             HStack(spacing: 6) {
                                 Image(systemName: "circle.hexagongrid.fill")
-                                    .foregroundStyle(Theme.accent)
+                                    .foregroundStyle(themes.current.accentColor)
                                 Text(entry.label)
                             }
                         }
@@ -68,6 +69,7 @@ struct UsagesView: View {
 }
 
 private struct UsageRow: View {
+    @Environment(ThemeStore.self) private var themes
     let window: UsageWindow
 
     var body: some View {
@@ -96,7 +98,7 @@ private struct UsageRow: View {
 
     private var tint: Color {
         switch window.percent {
-        case ..<60: Theme.accent
+        case ..<60: themes.current.accentColor
         case ..<85: .yellow
         default: .red
         }

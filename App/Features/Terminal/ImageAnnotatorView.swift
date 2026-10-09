@@ -6,6 +6,7 @@ import UIKit
 /// Moshi's image flow: the drawing is flattened against the photo so the
 /// annotations the user just made are what the agent actually sees.
 struct ImageAnnotatorView: View {
+    @Environment(ThemeStore.self) private var themes
     /// Base image to annotate (from the clipboard or the photo library).
     let image: UIImage
     let client: HookClient
@@ -77,9 +78,9 @@ struct ImageAnnotatorView: View {
                 } label: {
                     Image(systemName: item.symbol)
                         .frame(width: 34, height: 34)
-                        .background(tool == item ? Theme.accent.opacity(0.25) : .clear, in: Circle())
+                        .background(tool == item ? themes.current.accentColor.opacity(0.25) : .clear, in: Circle())
                 }
-                .tint(tool == item ? Theme.accent : .white)
+                .tint(tool == item ? themes.current.accentColor : .white)
             }
 
             Divider().frame(height: 24).overlay(.white.opacity(0.3))

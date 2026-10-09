@@ -200,4 +200,5 @@ struct HostEditView: View {
     NavigationStack {
         HostEditView(host: Host()) { _ in }
     }
+    .environment(ThemeStore())
 }

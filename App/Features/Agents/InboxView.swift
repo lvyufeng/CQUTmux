@@ -3,6 +3,7 @@ import SwiftUI
 /// The agent feed. Mirrors Moshi's Inbox: a host picker, pending approvals
 /// with Allow / Deny, and a running log of what agents have been doing.
 struct InboxView: View {
+    @Environment(ThemeStore.self) private var themes
     @Environment(HostStore.self) private var store
     @Environment(AgentConnection.self) private var connection
 
@@ -124,12 +125,13 @@ struct InboxView: View {
 private struct EventRow: View {
     let event: AgentEvent
     let resolve: (Bool) -> Void
+    @Environment(ThemeStore.self) private var themes
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .foregroundStyle(event.isPending ? .orange : Theme.accent)
+                    .foregroundStyle(event.isPending ? .orange : themes.current.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(event.displayTitle.isEmpty ? event.sourceLabel : event.displayTitle)
                         .font(.subheadline.weight(.medium))
@@ -148,7 +150,7 @@ private struct EventRow: View {
                 HStack(spacing: 10) {
                     Button("Allow") { resolve(true) }
                         .buttonStyle(.borderedProminent)
-                        .tint(Theme.accent)
+                        .tint(themes.current.accentColor)
                     Button("Deny", role: .destructive) { resolve(false) }
                         .buttonStyle(.bordered)
                 }

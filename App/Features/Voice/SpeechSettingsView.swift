@@ -9,6 +9,7 @@ import CQUTWhisper
 /// single toggle would mean a microphone that silently does nothing on some
 /// phones and not others.
 struct SpeechSettingsView: View {
+    @Environment(ThemeStore.self) private var themes
     @State private var settings = SpeechSettings()
     @State private var models = WhisperModelStore()
     @State private var error: String?
@@ -93,7 +94,7 @@ struct SpeechSettingsView: View {
                         .foregroundStyle(.secondary)
                 } else if settings.model.name == model.name && installed {
                     Image(systemName: "checkmark")
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(themes.current.accentColor)
                 } else if installed {
                     Image(systemName: "arrow.down.circle")
                         .foregroundStyle(.secondary)

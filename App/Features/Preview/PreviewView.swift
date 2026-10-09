@@ -5,6 +5,7 @@ import WebKit
 /// preview pane: pick a listening port, and the app loads it as if it were
 /// local — the bytes actually travel through the SSH tunnel.
 struct PreviewView: View {
+    @Environment(ThemeStore.self) private var themes
     let client: HookClient
 
     @Environment(\.dismiss) private var dismiss
@@ -87,7 +88,7 @@ struct PreviewView: View {
                                     .font(.system(.body, design: .monospaced))
                                 Spacer()
                                 if Self.commonPorts.contains(candidate) {
-                                    Text("dev").font(.caption2).foregroundStyle(Theme.accent)
+                                    Text("dev").font(.caption2).foregroundStyle(themes.current.accentColor)
                                 }
                                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                             }

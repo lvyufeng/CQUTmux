@@ -8,6 +8,7 @@ import SwiftUI
 /// half-learned ones. What each gesture does today is shown, so unbinding
 /// something is not a guess about what it will fall back to.
 struct GestureEditorView: View {
+    @Environment(ThemeStore.self) private var themes
     @Environment(\.dismiss) private var dismiss
     @Bindable var store: GestureStore
 
@@ -57,7 +58,7 @@ struct GestureEditorView: View {
                     } label: {
                         Text(store.text(for: gesture) ?? gesture.fallback?.label ?? "Not set")
                             .font(.system(.subheadline, design: .monospaced))
-                            .foregroundStyle(store.text(for: gesture) == nil ? .secondary : Theme.accent)
+                            .foregroundStyle(store.text(for: gesture) == nil ? .secondary : themes.current.accentColor)
                     }
                     .buttonStyle(.plain)
                 }

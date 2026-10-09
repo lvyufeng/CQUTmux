@@ -1,53 +1,103 @@
 import SwiftUI
 
 struct SettingsView: View {
+    /// Destinations reached by a link as well as by tapping, so the two paths
+    /// cannot drift. A `cqutmux://theme` link sets `pendingRoute` on the store
+    /// and the push below happens here, once, in the same place the tap does.
+    enum Route: Hashable {
+        case theme, font, cursor, icon, speech, standIn(String)
+    }
+
+    @Environment(ThemeStore.self) private var themes
+    @State private var path = NavigationPath()
+
     var body: some View {
         #if DEBUG
-        if ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] == "theme" {
-            return AnyView(ThemeSettingsView())
-        }
-        if ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] == "font" {
-            return AnyView(FontSettingsView())
-        }
-        if ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] == "speech" {
-            return AnyView(SpeechSettingsView())
+        if let tab = debugTab {
+            return AnyView(debugDestination(tab))
         }
         #endif
         return AnyView(list)
     }
 
     private var list: some View {
-        List {
-            Section("Security") {
-                Label("SSH keys in Keychain", systemImage: "key.fill")
-                Label("Face ID unlock", systemImage: "faceid")
-            }
-            Section("Dictation") {
-                NavigationLink {
-                    SpeechSettingsView()
-                } label: {
-                    Label("Speech engine", systemImage: "waveform")
+        NavigationStack(path: $path) {
+            List {
+                Section("Security") {
+                    Label("SSH keys in Keychain", systemImage: "key.fill")
+                    Label("Face ID unlock", systemImage: "faceid")
+                }
+                Section("Dictation") {
+                    NavigationLink(value: Route.speech) {
+                        Label("Speech engine", systemImage: "waveform")
+                    }
+                }
+                Section("Appearance") {
+                    NavigationLink(value: Route.theme) {
+                        Label("Theme", systemImage: "paintpalette")
+                    }
+                    NavigationLink(value: Route.font) {
+                        Label("Font", systemImage: "textformat.size")
+                    }
+                    NavigationLink(value: Route.cursor) {
+                        Label("Cursor", systemImage: "cursorarrow.rays")
+                    }
+                    NavigationLink(value: Route.icon) {
+                        Label("App Icon", systemImage: "app.badge")
+                    }
+                }
+                Section("About") {
+                    LabeledContent("Version", value: Bundle.main.appVersion)
+                    LabeledContent("Hook gateway", value: "127.0.0.1:24543")
                 }
             }
-            Section("Appearance") {
-                NavigationLink {
-                    ThemeSettingsView()
-                } label: {
-                    Label("Theme", systemImage: "paintpalette")
+            .navigationTitle("Settings")
+            .navigationDestination(for: Route.self) { route in
+                switch route {
+                case .theme: ThemeSettingsView()
+                case .font: FontSettingsView()
+                case .cursor: CursorSettingsView()
+                case .icon: AppIconSettingsView()
+                case .speech: SpeechSettingsView()
+                case .standIn(let title): PlaceholderView(
+                    title: title,
+                    systemImage: "gear",
+                    message: "Not built yet."
+                )
                 }
-                NavigationLink {
-                    FontSettingsView()
-                } label: {
-                    Label("Font", systemImage: "textformat.size")
-                }
-            }
-            Section("About") {
-                LabeledContent("Version", value: Bundle.main.appVersion)
-                LabeledContent("Hook gateway", value: "127.0.0.1:24543")
             }
         }
-        .navigationTitle("Settings")
+        .onAppear { followPendingRoute() }
+        .onChange(of: themes.pendingRoute) { followPendingRoute() }
     }
+
+    /// Pushes the theme screen when a link asked for it, and clears the request
+    /// so returning to Settings later does not re-open it.
+    private func followPendingRoute() {
+        guard let route = themes.pendingRoute else { return }
+        themes.pendingRoute = nil
+        path = NavigationPath()
+        path.append(route)
+    }
+
+    #if DEBUG
+    private var debugTab: String? {
+        guard let tab = ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] else { return nil }
+        switch tab {
+        case "theme", "font", "speech": return tab
+        default: return nil
+        }
+    }
+
+    @ViewBuilder
+    private func debugDestination(_ tab: String) -> some View {
+        switch tab {
+        case "theme": ThemeSettingsView()
+        case "font": FontSettingsView()
+        default: SpeechSettingsView()
+        }
+    }
+    #endif
 }
 
 private extension Bundle {
@@ -60,4 +110,5 @@ private extension Bundle {
 
 #Preview {
     NavigationStack { SettingsView() }
+        .environment(ThemeStore())
 }

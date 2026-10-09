@@ -4,6 +4,7 @@ import SwiftUI
 /// agent workflow. Everything is served by the host gateway over the SSH
 /// tunnel, so source never leaves the machine.
 struct CodePanelView: View {
+    @Environment(ThemeStore.self) private var themes
     @Environment(AgentConnection.self) private var connection
     @Environment(HostStore.self) private var store
 
@@ -198,7 +199,7 @@ struct CodePanelView: View {
                         }
                     } label: {
                         Label(entry.name, systemImage: entry.dir ? "folder" : "doc.text")
-                            .foregroundStyle(entry.dir ? Theme.accent : .primary)
+                            .foregroundStyle(entry.dir ? themes.current.accentColor : .primary)
                     }
                 }
             }
@@ -265,7 +266,7 @@ struct CodePanelView: View {
                         HStack(spacing: 6) {
                             Text(commit.short)
                                 .font(.system(.caption2, design: .monospaced))
-                                .foregroundStyle(Theme.accent)
+                                .foregroundStyle(themes.current.accentColor)
                             Text(commit.author).font(.caption2).foregroundStyle(.secondary)
                             Text(relative(commit.dateValue)).font(.caption2).foregroundStyle(.secondary)
                         }

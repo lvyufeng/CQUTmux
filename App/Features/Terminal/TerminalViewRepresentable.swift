@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import SwiftTerm
 import CQUTTransport
 import CQUTWhisper
 
@@ -25,6 +26,7 @@ struct TerminalScreen: View {
     @State private var pastedNotice: String?
     @State private var shortcuts = ShortcutStore()
     @State private var gestures = GestureStore()
+    @State private var cursor = CursorSettings()
     @State private var showShortcuts = false
     @State private var showGestures = false
     @State private var showJumpTo = false
@@ -42,7 +44,8 @@ struct TerminalScreen: View {
                 coordinator: coordinator,
                 theme: themes.current,
                 fonts: fonts,
-                gestures: gestures
+                gestures: gestures,
+                cursor: cursor
             )
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationTitle(host.displayName)
@@ -368,7 +371,7 @@ struct TerminalScreen: View {
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.roundedRectangle(radius: 6))
-        .tint(listening ? Theme.accent : nil)
+        .tint(listening ? themes.current.accentColor : nil)
         .disabled(dictation?.isReady == false)
         .accessibilityHint(dictation?.setupHint ?? "")
     }
@@ -429,6 +432,18 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
     let theme: TerminalTheme
     let fonts: TerminalFontStore
     let gestures: GestureStore
+    let cursor: CursorSettings
+
+    /// Remembers what the view was last painted with. A `UIViewRepresentable`
+    /// has no way to compare its own inputs between updates, and repainting the
+    /// terminal on every SwiftUI pass would also re-install the 16-colour
+    /// palette each time.
+    final class Coordinator {
+        var appliedTheme: String?
+        var appliedCursor: CursorStyle?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> CQUTTerminalView {
         let configuration = TransportConfiguration(
@@ -477,6 +492,9 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
             fonts.size = Double(size)
         }
         coordinator.terminal = view
+        context.coordinator.appliedTheme = theme.id
+        context.coordinator.appliedCursor = cursor.style
+        view.applyCursor(cursor)
         DispatchQueue.main.async { view.connect() }
         #if DEBUG
         // A simulator cannot be typed into from a test script without
@@ -497,7 +515,20 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: CQUTTerminalView, context: Context) {}
+    func updateUIView(_ uiView: CQUTTerminalView, context: Context) {
+        // The theme is a live setting: changing it while a session is open
+        // should repaint the terminal, not wait for the next connection. The
+        // font is handled by the store's own pinch callback, and reconnecting
+        // here would drop the session, so only the palette is pushed.
+        if context.coordinator.appliedTheme != theme.id {
+            context.coordinator.appliedTheme = theme.id
+            uiView.applyTheme(theme)
+        }
+        if context.coordinator.appliedCursor != cursor.style {
+            context.coordinator.appliedCursor = cursor.style
+            uiView.applyCursor(cursor)
+        }
+    }
 }
 
 private struct StatusBadge: View {
@@ -510,7 +541,7 @@ private struct StatusBadge: View {
         }
     }
 
-    private var color: Color {
+    private var color: SwiftUI.Color {
         switch status {
         case .connected: .green
         case .connecting: .yellow

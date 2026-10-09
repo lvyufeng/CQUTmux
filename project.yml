@@ -136,6 +136,29 @@ targets:
         # session, so allowing local networking here exposes nothing.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # Importing a theme by QR code. The camera is only opened from the
+        # import screen, when the user picks the Scan tab.
+        NSCameraUsageDescription: >-
+          Scan a theme's QR code to import it. The camera is used only while
+          this screen is open, and nothing is recorded.
+        # Alternate app icons are declared as loose files rather than in an
+        # asset catalog, because XcodeGen's asset support does not surface the
+        # alternate-icon set. The PrimaryIcon entry is not optional: without it
+        # iOS lists the alternate as the icon but cannot roll back to the
+        # default, leaving no way out of the choice.
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleIconFiles:
+              - AppIcon60x60
+        CFBundleAlternateIcons:
+          CQUTmuxNebula:
+            CFBundleIconFiles:
+              - Nebula60x60
+            UIPrerenderedIcon: false
+          CQUTmuxAurora:
+            CFBundleIconFiles:
+              - Aurora60x60
+            UIPrerenderedIcon: false
         # `cqutmux://tmux?session=…` opens straight onto a session. The scheme
         # is declared here rather than in App/Info.plist because XcodeGen
         # regenerates that file from these properties, so an edit made there is

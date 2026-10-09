@@ -1,20 +1,104 @@
 import SwiftUI
 
+/// The chosen theme, built-in or imported, plus the imported ones themselves.
+///
+/// Imported themes are stored whole rather than referenced by id: there is no
+/// gallery to re-fetch them from, and a theme the user pasted in should still be
+/// there after a restart even if its source has moved or gone.
 @Observable
 final class ThemeStore {
     private static let key = "cqutmux.theme"
+    private static let importedKey = "cqutmux.theme.imported"
 
-    var current: TerminalTheme {
-        didSet { UserDefaults.standard.set(current.id, forKey: Self.key) }
+    /// The selected theme. On first run this is Moshi, matching the app's own
+    /// green rather than whichever palette happened to be first in the list.
+    private(set) var current: TerminalTheme
+
+    /// Themes the user imported, newest first.
+    private(set) var imported: [TerminalTheme]
+
+    /// A screen the app was asked to open by a link. The settings list watches
+    /// this and pushes the route, which keeps the link from having to know how
+    /// the settings navigation is arranged.
+    var pendingRoute: SettingsView.Route?
+
+    /// A theme id to select at launch, so a UI run can see a light palette
+    /// without tapping through the list. Debug-only, like the other seeds.
+    static var seedKey: String? {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["CQUT_DEV_THEME"]
+        #else
+        nil
+        #endif
     }
 
-    init() {
-        current = TerminalTheme.named(UserDefaults.standard.string(forKey: Self.key))
+    init(defaults: UserDefaults = .standard) {
+        let stored = Self.seedKey ?? defaults.string(forKey: Self.key)
+        let saved = Self.readImported(from: defaults)
+        imported = saved
+
+        // The stored id may name an imported theme: `named` only knows the
+        // built-ins, so the list has to be searched too or an imported
+        // selection would reset to Moshi on every launch.
+        if let stored, let match = saved.first(where: { $0.id == stored }) {
+            current = match
+        } else {
+            current = TerminalTheme.named(stored)
+        }
+    }
+
+    /// Every theme the picker should show: the built-ins, then anything
+    /// imported.
+    var all: [TerminalTheme] { TerminalTheme.builtIn + imported }
+
+    func select(_ theme: TerminalTheme) {
+        current = theme
+        UserDefaults.standard.set(theme.id, forKey: Self.key)
+    }
+
+    /// Imports a theme, replacing one with the same id so re-importing a theme
+    /// the user has tweaked updates it rather than leaving two entries that
+    /// look identical.
+    @discardableResult
+    func importTheme(_ theme: TerminalTheme) -> Bool {
+        let isNew = !imported.contains { $0.id == theme.id }
+        imported.removeAll { $0.id == theme.id }
+        imported.insert(theme, at: 0)
+        writeImported()
+        select(theme)
+        return isNew
+    }
+
+    func delete(_ theme: TerminalTheme) {
+        imported.removeAll { $0.id == theme.id }
+        writeImported()
+        // A deleted theme cannot stay selected: the terminal would keep
+        // rendering colours that are no longer in the list, and the checkmark
+        // would be nowhere.
+        if current.id == theme.id { select(TerminalTheme.builtIn[0]) }
+    }
+
+    // MARK: - Persistence
+
+    private func writeImported() {
+        guard let data = try? JSONEncoder().encode(imported) else { return }
+        UserDefaults.standard.set(data, forKey: Self.importedKey)
+    }
+
+    private static func readImported(from defaults: UserDefaults) -> [TerminalTheme] {
+        guard let data = defaults.data(forKey: importedKey),
+              let themes = try? JSONDecoder().decode([TerminalTheme].self, from: data)
+        else { return [] }
+        return themes
     }
 }
 
 struct ThemeSettingsView: View {
     @Environment(ThemeStore.self) private var themes
+    @State private var importing = false
+    /// A theme that replaced one with the same id. Worth saying, because the
+    /// user's earlier version is gone and the screen looks unchanged otherwise.
+    @State private var updated: String?
 
     var body: some View {
         List {
@@ -24,15 +108,55 @@ struct ThemeSettingsView: View {
             Section("Light") {
                 ForEach(TerminalTheme.builtIn.filter { !$0.dark }) { row($0) }
             }
+            if !themes.imported.isEmpty {
+                Section {
+                    ForEach(themes.imported) { row($0) }
+                } header: {
+                    Text("Imported")
+                } footer: {
+                    Text("Swipe an imported theme to remove it.")
+                }
+            }
+            Section {
+                Button {
+                    importing = true
+                } label: {
+                    Label("Import theme…", systemImage: "square.and.arrow.down")
+                }
+            } footer: {
+                Text("Paste a theme copied from Moshi, open a `cqutmux://theme` link, or "
+                     + "scan its QR code.")
+            }
         }
         .navigationTitle("Theme")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            #if DEBUG
+            // The import sheet cannot be reached from a test script — there is
+            // no input injection here — so a debug run opens it directly. The
+            // sheet, its parse and its error path are all the real ones.
+            if ProcessInfo.processInfo.environment["CQUT_DEV_IMPORT"] == "1" { importing = true }
+            #endif
+        }
+        .sheet(isPresented: $importing) {
+            ThemeImportView { theme in
+                // `importTheme` reports whether it replaced an earlier import
+                // of the same name, which is the only case worth saying
+                // anything about — a new theme is visible as a new row.
+                if !themes.importTheme(theme) { updated = theme.name }
+            }
+        }
+        .alert("Replaced an earlier import", isPresented: .constant(updated != nil)) {
+            Button("OK") { updated = nil }
+        } message: {
+            Text("“\(updated ?? "")” was already imported, so this version replaced it.")
+        }
     }
 
     @ViewBuilder
     private func row(_ theme: TerminalTheme) -> some View {
         Button {
-            themes.current = theme
+            themes.select(theme)
         } label: {
             HStack {
                 Text(theme.name).foregroundStyle(.primary)
@@ -40,8 +164,13 @@ struct ThemeSettingsView: View {
                 swatches(theme)
                 if themes.current.id == theme.id {
                     Image(systemName: "checkmark")
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(themes.current.accentColor)
                 }
+            }
+        }
+        .swipeActions {
+            if theme.isImported {
+                Button("Delete", role: .destructive) { themes.delete(theme) }
             }
         }
     }

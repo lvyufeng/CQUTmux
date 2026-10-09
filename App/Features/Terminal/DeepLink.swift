@@ -10,6 +10,7 @@ import Foundation
 ///   cqutmux://zellij?session=<name>
 ///   cqutmux://herdr?workspace=<id>[&session=<name>]
 ///   cqutmux://host?host=<name-or-hostname>
+///   cqutmux://theme
 ///
 /// A host is optional and, when absent, resolves to the only saved host — a
 /// link from a notification usually does not need to name the machine, and the
@@ -21,6 +22,10 @@ struct DeepLink: Equatable {
         /// number — herdr uses a tab id like `w1:t2`.
         case session(mux: String, name: String, window: String?)
         case host(String)
+        /// Open the theme import screen. Moshi's `moshi://theme` exists so a
+        /// gallery page can hand a theme straight to the app rather than
+        /// making the user copy and paste it.
+        case theme
     }
 
     var target: Target
@@ -82,6 +87,9 @@ struct DeepLink: Equatable {
                 return .failure(.missingParameter("host"))
             }
             return .success(DeepLink(target: .host(name)))
+
+        case "theme":
+            return .success(DeepLink(target: .theme))
 
         default:
             return .failure(.unknownRoute(route))

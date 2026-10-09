@@ -8,6 +8,7 @@ import SwiftUI
 /// without a second shell. Attaching and jumping need a live terminal, so the
 /// view is given a `send` closure that types into the current session.
 struct SessionPickerView: View {
+    @Environment(ThemeStore.self) private var themes
     let client: HookClient
     /// Sends an attach or a window jump to the terminal.
     let send: (MuxAction) -> Void
@@ -74,7 +75,7 @@ struct SessionPickerView: View {
                                             if window.active {
                                                 Image(systemName: "checkmark")
                                                     .font(.caption.weight(.bold))
-                                                    .foregroundStyle(Theme.accent)
+                                                    .foregroundStyle(themes.current.accentColor)
                                             }
                                         }
                                     }
@@ -89,13 +90,13 @@ struct SessionPickerView: View {
                                     if let status = session.status, status != "unknown" {
                                         Text(status)
                                             .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(status == "blocked" ? .orange : Theme.accent)
+                                            .foregroundStyle(status == "blocked" ? .orange : themes.current.accentColor)
                                     }
                                     Spacer()
                                     if session.attached {
                                         Text("attached")
                                             .font(.caption2)
-                                            .foregroundStyle(Theme.accent)
+                                            .foregroundStyle(themes.current.accentColor)
                                     }
                                     Text("\(session.windows)w")
                                         .font(.caption2)

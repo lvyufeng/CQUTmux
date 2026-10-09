@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct HostsView: View {
+    @Environment(ThemeStore.self) private var themes
     /// A link that named a host or a session. Held by the shell rather than
     /// here because a link can arrive before this view exists.
     var pendingLink: DeepLink?
@@ -88,12 +89,13 @@ struct HostsView: View {
 }
 
 private struct HostRow: View {
+    @Environment(ThemeStore.self) private var themes
     let host: Host
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "terminal.fill")
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(themes.current.accentColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text(host.displayName).font(.body.weight(.medium))
                 // String(port) avoids SwiftUI's locale grouping ("2,222").
@@ -107,12 +109,13 @@ private struct HostRow: View {
 
 struct TerminalPlaceholderView: View {
     let host: Host
+    @Environment(ThemeStore.self) private var themes
 
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "terminal")
                 .font(.system(size: 44))
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(themes.current.accentColor)
             Text(host.target)
                 .font(.headline)
             Text("Terminal surface lands in Phase 1 (SSH + tmux + SwiftTerm).")
@@ -127,5 +130,7 @@ struct TerminalPlaceholderView: View {
 }
 
 #Preview {
-    NavigationStack { HostsView() }.environment(HostStore())
+    NavigationStack { HostsView() }
+        .environment(HostStore())
+        .environment(ThemeStore())
 }

@@ -7,7 +7,7 @@ import UIKit
 ///
 /// `TerminalView` is a UIKit view; the transport pings `onEvent` on the main
 /// queue, so every callback below already runs on the main thread.
-final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
+final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecognizerDelegate {
     enum Status: Equatable {
         case idle, connecting, connected
         case closed(Int?)
@@ -67,7 +67,7 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         terminalDelegate = self
         self.font = font
         baseFontSize = font.pointSize
-        theme.apply(to: self)
+        applyTheme(theme)
 
         // Links are underlined and tappable without a modifier key. The default
         // is `.hover`, which on a touch screen means a link is only clickable
@@ -80,6 +80,14 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         // also why nothing happens without that method.
         linkReporting = .implicit
         linkHighlightMode = .always
+
+        // Moshi's "scroll past the bottom dismisses the keyboard". This is
+        // UIKit's own mechanism for exactly that, and the reason it is set here
+        // rather than hand-rolled: the terminal's scroll geometry is managed
+        // inside SwiftTerm, and a second opinion about where the bottom is
+        // would fight it. `.interactive` releases the keyboard as the drag
+        // passes the end of the content, which is the gesture Moshi describes.
+        keyboardDismissMode = .interactive
 
         installGestures()
 
@@ -95,6 +103,27 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Applies a theme to a view that is already built.
+    ///
+    /// Separate from the initialiser because the cursor colour cannot be set
+    /// until SwiftTerm has created its caret subview, and because the user can
+    /// change theme while a session is open — the terminal should follow rather
+    /// than keep the palette it opened with.
+    func applyTheme(_ theme: TerminalTheme) {
+        theme.apply(to: self)
+        // Written through the property, so SwiftTerm's own `cursorColorIsDefault`
+        // flag is cleared and a program's later OSC 12 cursor-colour request is
+        // still honoured over ours — the theme is a default, not an override.
+        caretColor = theme.cursorColor.uiColor
+    }
+
+    /// Applies the user's cursor shape. Called once the terminal exists, and
+    /// again whenever the setting changes, because the caret is drawn by a
+    /// subview that only reads the style when it is told to.
+    func applyCursor(_ settings: CursorSettings) {
+        settings.apply(to: self)
+    }
 
     deinit {
         retryTask?.cancel()
@@ -139,6 +168,104 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
             swipe.accessibilityValue = gesture.rawValue
             addGestureRecognizer(swipe)
         }
+
+        addGestureRecognizer(wheel)
+        // SwiftTerm turns one-finger drags into mouse *drag* events, but nothing
+        // it installs ever sends a mouse *wheel* — so a program that only reads
+        // scroll wheel input, which is most of them (`less`, `htop`, Claude
+        // Code's own transcript view), cannot be scrolled from here at all. The
+        // two-finger pan above is that missing event, and it and the drag
+        // recogniser must not both fire for one gesture.
+        wheel.require(toFail: pinch)
+    }
+
+    /// Two-finger vertical drag → mouse wheel, when the program asked for mouse
+    /// reporting. Moshi documents this mapping; without it the gesture falls
+    /// through to ordinary scrollback, which is the right thing when the
+    /// program never asked for the mouse.
+    private lazy var wheel: UIPanGestureRecognizer = {
+        let gesture = UIPanGestureRecognizer(target: self, action: #selector(handleWheel(_:)))
+        gesture.minimumNumberOfTouches = 2
+        gesture.maximumNumberOfTouches = 2
+        gesture.delegate = self
+        return gesture
+    }()
+
+    /// Accumulated drag, in points. A wheel notch is sent per cell of travel,
+    /// so a slow drag sends nothing and a long one sends several — the same
+    /// feel as a trackpad.
+    private var wheelTravel: CGFloat = 0
+
+    /// The two-finger pan only exists while the program has asked for mouse
+    /// reporting. Letting it recognise otherwise would swallow the two-finger
+    /// scroll that reaches the terminal's own scrollback, which is what a user
+    /// expects when the program is not listening for a mouse.
+    override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        if gesture === wheel { return getTerminal().mouseMode != .off }
+        return true
+    }
+
+    /// SwiftTerm installs its own one-finger drag-to-mouse pan when a program
+    /// turns mouse reporting on, and both pans would claim a two-finger drag.
+    /// `super` runs first so the recogniser exists to be constrained: the drag
+    /// is held to a single touch, which leaves every two-finger drag to the
+    /// wheel above.
+    override func mouseModeChanged(source: Terminal) {
+        super.mouseModeChanged(source: source)
+        for recogniser in gestureRecognizers ?? [] where
+            recogniser is UIPanGestureRecognizer && recogniser !== wheel && recogniser !== pinch {
+            (recogniser as? UIPanGestureRecognizer)?.maximumNumberOfTouches = 1
+        }
+    }
+
+    @objc private func handleWheel(_ gesture: UIPanGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            wheelTravel = 0
+        case .changed:
+            wheelTravel += gesture.translation(in: self).y
+            gesture.setTranslation(.zero, in: self)
+            let pitch = max(cellSize.height, 1)
+            while abs(wheelTravel) >= pitch {
+                // Up is wheel-up: the wheel's own axes point the opposite way
+                // to the drag that produces them.
+                sendWheel(up: wheelTravel > 0, at: gesture.location(in: self))
+                wheelTravel -= wheelTravel > 0 ? pitch : -pitch
+            }
+        case .ended, .cancelled, .failed:
+            wheelTravel = 0
+        default:
+            break
+        }
+    }
+
+    /// One cell, in points.
+    ///
+    /// `cellDimension` is internal to SwiftTerm, so this goes through the
+    /// public `cellSizeInPixels` and divides by the display scale. The terminal
+    /// grid is laid out in points, and the row width is what a wheel notch is
+    /// measured against.
+    private var cellSize: CGSize {
+        guard let pixels = cellSizeInPixels(source: getTerminal()) else {
+            return CGSize(width: 8, height: 16)
+        }
+        let scale = max(traitCollection.displayScale, 1)
+        return CGSize(width: CGFloat(pixels.width) / scale, height: CGFloat(pixels.height) / scale)
+    }
+
+    /// One wheel notch at `point`.
+    ///
+    /// The row comes from SwiftTerm's own `accessibilityLineNumber`, which is
+    /// the view's public point-to-row conversion; the column is not, so it is
+    /// derived from the cell width. A wheel event carries the pointer position
+    /// because the protocol has nowhere else to put it — programs use it to
+    /// decide which pane is being scrolled.
+    private func sendWheel(up: Bool, at point: CGPoint) {
+        let row = accessibilityLineNumber(for: point)
+        let column = Int(floor(max(point.x, 0) / max(cellSize.width, 1)))
+        // Cb is 64 for wheel-up and 65 for wheel-down; SwiftTerm's `sendEvent`
+        // adds the 32 for the button bits itself.
+        getTerminal().sendEvent(buttonFlags: up ? 64 : 65, x: column, y: row)
     }
 
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
