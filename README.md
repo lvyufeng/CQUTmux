@@ -63,10 +63,11 @@ App/                    SwiftUI app (features grouped by domain)
   Features/Agents/      inbox board (Needs you / Working / Done), gateway client, notifications, Live Activity
   Features/Code/        files, diffs, git history, pasted files
   Features/Preview/     browser bridge and simulator preview
-  Features/Security/    Keychain, key management
+  Features/Security/    Keychain, key management (passphrase-protected OpenSSH keys)
   Features/Settings/    theme, font (+ custom font import), cursor, speech, iCloud sync, integrations, input
   Features/Voice/       dictation engines (Apple / Whisper / Parakeet / cloud)
-Packages/CQUTTransport/ local SwiftPM package: the SSH transport, agent forwarding
+Packages/CQUTTransport/ local SwiftPM package: the SSH transport, agent forwarding,
+                        OpenSSH key import (bcrypt_pbkdf + AES-CTR for encrypted keys)
 Packages/CQUTMosh/      the mosh↔Swift driver (C); see scripts/mosh-ios/
 Packages/CQUTET/        Eternal Terminal; see scripts/et-ios/
 Packages/CQUTWhisper/   whisper.cpp + Parakeet, via a C seam

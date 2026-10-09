@@ -79,22 +79,114 @@ do {
     check(false, "a trailing blank line does not change the key (\(error))")
 }
 
+// MARK: - Encrypted keys
+
+// The derivation is the whole of this feature, and it cannot be checked by
+// looking at it: `bcrypt_pbkdf` is a wall of wrapping arithmetic where every
+// constant and every rotation has to be exactly right, and a wrong one still
+// produces 32 plausible bytes. So it is pinned twice, from two directions.
+//
+// First against the published vector, which is the same one the `bcrypt`
+// Python package's own test suite uses (`bcrypt.kdf(b"password", b"salt", 32,
+// 4)`). That catches a broken derivation on its own, with no file involved.
+//
+// Then against a key ssh-keygen wrote with a passphrase, which is what catches
+// a derivation that is right in isolation but wired up wrong — the AES key and
+// IV swapped, the salt read from the wrong offset, the rounds treated as a byte
+// count. Only a real key exercises those, and only comparing the *public* half
+// catches them: a wrong passphrase and a wrong derivation both produce 32 bytes.
+
+let knownVector = "5bbf0cc293587f1c3635555c27796598d47e579071bf427e9d8fbe842aba34d9"
+do {
+    let derived = try BcryptPBKDF.derive(
+        passphrase: "password",
+        salt: Array("salt".utf8),
+        rounds: 4,
+        length: 32
+    )
+    let hex = derived.map { String(format: "%02x", $0) }.joined()
+    check(hex == knownVector, "bcrypt_pbkdf matches the published vector for password/salt/4 rounds")
+} catch {
+    check(false, "bcrypt_pbkdf matches the published vector (\(error))")
+}
+
+// A second vector at a different length, which is the only way to exercise the
+// output-scatter path: with 32 bytes the block count is one and the
+// interleaving is a no-op, so a reader that got it wrong would still agree with
+// the first vector.
+do {
+    let derived = try BcryptPBKDF.derive(
+        passphrase: "password",
+        salt: Array("salt".utf8),
+        rounds: 4,
+        length: 48
+    )
+    let hex = derived.map { String(format: "%02x", $0) }.joined()
+    // Note this does *not* start with the 32-byte vector: the reference
+    // deliberately scatters the blocks rather than concatenating them, so a
+    // longer output changes the earlier bytes too. An implementation that
+    // output the blocks in order would pass the first vector and fail this one.
+    check(hex == "5ba4bfc60c7ac272931458407f4c1c4936ea356c55125c5a279b791d65bf9842"
+                  + "d49d7e1b572a9052715ebfa9421e7e94",
+          "bcrypt_pbkdf still matches when the output crosses a block boundary")
+} catch {
+    check(false, "bcrypt_pbkdf still matches across a block boundary (\(error))")
+}
+
+// The encrypted fixture decrypts to the same key ssh-keygen wrote beside it.
+do {
+    let encrypted = read("id_ed25519_encrypted")
+    check(!encrypted.isEmpty, "the encrypted fixture was written")
+    let seed = try Ed25519OpenSSH.seed(fromOpenSSHPrivateKey: encrypted, passphrase: "a passphrase")
+    check(seed.count == 32, "a passphrase-protected key decrypts to 32 bytes of key material")
+
+    let derived = try Ed25519OpenSSH.publicKey(fromSeed: seed, comment: "fixture")
+    let derivedBody = derived.split(separator: " ").dropFirst().first.map(String.init) ?? ""
+    // ssh-keygen refuses to print the public key of an encrypted file without
+    // the passphrase, but it wrote the .pub beside it when the key was made —
+    // and that file is the authority on what the key is.
+    let expectedBody = read("id_ed25519_encrypted.pub")
+        .split(separator: " ").dropFirst().first.map(String.init) ?? ""
+    check(!expectedBody.isEmpty, "ssh-keygen wrote a public key for the encrypted fixture")
+    check(derivedBody == expectedBody,
+          "the decrypted seed derives exactly the public key ssh-keygen wrote beside it")
+} catch {
+    check(false, "a passphrase-protected key decrypts to 32 bytes (\(error))")
+    check(false, "and derives its public half")
+    check(false, "and a public key exists to compare against")
+    check(false, "and it matches")
+}
+
 // MARK: - What must be refused
 
-// The one that matters most: an encrypted key must *not* be read as if it were
+// An encrypted key with no passphrase must *not* be read as if it were
 // plaintext. Silently importing 32 bytes of ciphertext would store a key that
 // cannot authenticate, and the failure would surface as a server-side rejection
 // long after the import looked like it worked.
 do {
     let encrypted = read("id_ed25519_encrypted")
-    check(!encrypted.isEmpty, "the encrypted fixture was written")
     _ = try Ed25519OpenSSH.seed(fromOpenSSHPrivateKey: encrypted)
-    check(false, "an encrypted key is refused rather than read as ciphertext")
+    check(false, "an encrypted key with no passphrase is refused rather than read as ciphertext")
 } catch let error as Ed25519OpenSSH.KeyError {
-    check(String(describing: error).contains("encrypted"),
-          "an encrypted key is refused, and the message says why")
+    check(String(describing: error).lowercased().contains("passphrase"),
+          "an encrypted key is refused, and the message asks for the passphrase")
 } catch {
-    check(false, "an encrypted key is refused (\(error))")
+    check(false, "an encrypted key with no passphrase is refused (\(error))")
+}
+
+// A wrong passphrase has to be reported as one, not as a corrupt file. The two
+// look identical after decryption — the check integers are simply unequal — and
+// telling them apart is the difference between the user retyping and the user
+// giving up.
+do {
+    let encrypted = read("id_ed25519_encrypted")
+    _ = try Ed25519OpenSSH.seed(fromOpenSSHPrivateKey: encrypted, passphrase: "not the passphrase")
+    check(false, "a wrong passphrase is refused")
+} catch let error as Ed25519OpenSSH.KeyError {
+    check(String(describing: error).lowercased().contains("passphrase"),
+          "a wrong passphrase is reported as a passphrase problem")
+} catch {
+    check(false, "a wrong passphrase is refused (\(error))")
 }
 
 do {
@@ -188,6 +280,89 @@ do {
     check(back == seed, "a key with an empty comment still round-trips")
 } catch {
     check(false, "a key with an empty comment still round-trips (\(error))")
+}
+
+// MARK: - Encryption, verified by ssh-keygen
+
+// The check above proves the reader decrypts what OpenSSH writes. This proves
+// the writer produces something OpenSSH accepts — which is the other direction
+// of the same format, and the one a user hits when they export a key.
+//
+// It does not stop at "ssh-keygen read it". `ssh-keygen -p -P old -N new`
+// re-encrypts the file, and if OpenSSH decoded our encryption into the right
+// bytes it re-encrypts *those* bytes; the public half it prints then has to
+// match. A file we encrypted with a misplaced IV would decrypt under OpenSSH
+// into different pairs of check integers and be rejected much earlier, so this
+// is really a check that the whole container — cipher, kdf options, salt,
+// rounds, padding — is laid out the way the format says.
+do {
+    let (seed, _) = try Ed25519OpenSSH.generate()
+    let derived = try Ed25519OpenSSH.publicKey(fromSeed: seed, comment: "x")
+    let derivedBody = derived.split(separator: " ").dropFirst().first.map(String.init) ?? ""
+
+    // A fixed salt and round count, so a failure is reproducible and the check
+    // does not depend on the random salt this would otherwise use.
+    let pem = try Ed25519OpenSSH.openSSHPrivateKey(
+        fromSeed: seed,
+        comment: "encrypted-export",
+        passphrase: "hunter2",
+        salt: Data((0..<16).map { UInt8($0) }),
+        rounds: 16
+    )
+    check(pem.contains("BEGIN OPENSSH PRIVATE KEY"), "an encrypted export is an OpenSSH PEM")
+
+    let path = tmp + "/exported_encrypted"
+    try pem.write(toFile: path, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+
+    // `-y -P` decrypts with the passphrase and prints the public key. If the
+    // passphrase or the ciphertext is wrong it fails rather than printing
+    // anything, so termination status is most of the signal.
+    func sshKeygen(_ args: [String]) -> (status: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["ssh-keygen"] + args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try? process.run()
+        process.waitUntilExit()
+        return (process.terminationStatus,
+                String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+    }
+
+    let read = sshKeygen(["-y", "-P", "hunter2", "-f", path])
+    let readBody = read.output.split(separator: " ").dropFirst().first.map(String.init) ?? ""
+    check(read.status == 0, "ssh-keygen decrypts an exported encrypted key with its passphrase")
+    check(readBody == derivedBody, "and gets the same public key the app derived")
+
+    // The wrong passphrase must not decrypt it. This is the check that the
+    // encryption actually happened: a writer that quietly wrote plaintext
+    // would pass everything above and fail here.
+    let wrong = sshKeygen(["-y", "-P", "wrong", "-f", path])
+    check(wrong.status != 0, "ssh-keygen refuses the wrong passphrase on it")
+
+    // Changing the passphrase through OpenSSH round-trips our format through
+    // its writer and back through its reader.
+    let changed = sshKeygen(["-p", "-P", "hunter2", "-N", "second", "-f", path])
+    check(changed.status == 0, "ssh-keygen can change the passphrase on it")
+    let reread = sshKeygen(["-y", "-P", "second", "-f", path])
+    let rereadBody = reread.output.split(separator: " ").dropFirst().first.map(String.init) ?? ""
+    check(rereadBody == derivedBody, "and the key is unchanged after OpenSSH re-encrypts it")
+
+    // Finally the app reads back what OpenSSH re-encrypted, which is the loop
+    // closed in both directions.
+    let rewritten = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+    let back = try? Ed25519OpenSSH.seed(fromOpenSSHPrivateKey: rewritten, passphrase: "second")
+    check(back == seed, "the app reads back the file OpenSSH re-encrypted")
+} catch {
+    check(false, "an encrypted export is an OpenSSH PEM (\(error))")
+    check(false, "ssh-keygen decrypts it with its passphrase")
+    check(false, "and gets the same public key")
+    check(false, "ssh-keygen refuses the wrong passphrase on it")
+    check(false, "ssh-keygen can change the passphrase on it")
+    check(false, "and the key is unchanged after OpenSSH re-encrypts it")
+    check(false, "the app reads back the file OpenSSH re-encrypted")
 }
 
 // MARK: - Generation round-trips through the same reader

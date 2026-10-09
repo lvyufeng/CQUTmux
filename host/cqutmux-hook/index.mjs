@@ -1592,7 +1592,19 @@ function privateKeySeed(pem) {
   const cipher = readString()
   const kdf = readString()
   if (cipher.toString() !== 'none' || kdf.toString() !== 'none') {
-    throw new Error('the key has a passphrase; pairing needs an unencrypted key')
+    // Deliberately not decrypted here, even though the app can read encrypted
+    // keys. This command's whole output is a link carrying the *seed* in
+    // cleartext — it says so on the next-to-last line — so decrypting the file
+    // first would move the key from one plaintext container to another and
+    // change nothing about who can read it. What it would cost is a second
+    // bcrypt_pbkdf implementation, in a language whose stdlib does not have
+    // one, on the one path that already warns the user to treat its output as a
+    // secret. The key this command makes is generated with no passphrase for
+    // exactly this reason; this branch only fires for a key the user encrypted
+    // afterwards, and the fix is theirs to apply.
+    throw new Error('the key has a passphrase; pairing needs an unencrypted one — '
+      + 'run `ssh-keygen -p -N "" -f ' + pairKeyPath() + '` to remove it, or delete the '
+      + 'file to have a fresh one made')
   }
   readString() // kdf options
   blob.readUInt32BE(offset); offset += 4 // number of keys

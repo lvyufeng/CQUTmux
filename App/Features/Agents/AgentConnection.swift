@@ -27,7 +27,7 @@ final class AgentConnection {
         watch.activate()
 
         let credential: SSHCredential
-        if let seed = KeychainStore.load(account: host.keySeedAccount) {
+        if let seed = host.resolveSeed() {
             credential = .ed25519Seed(seed)
         } else if let data = KeychainStore.load(account: host.passwordAccount),
                   let text = String(data: data, encoding: .utf8) {

@@ -41,6 +41,7 @@
 | 模块 | 功能 | 阶段 |
 |---|---|---|
 | 连接 | SSH（密码 / 私钥 / jump host / agent forwarding） | P1 / P5b |
+| 连接 | **带口令的私钥**（`bcrypt_pbkdf` + `aes256-ctr` 解出被 `ssh-keygen -N` 加密的 `openssh-key-v1`；口令可记住在 Keychain，按主机存） | ✅ 规则实测（key-import 35 + passphrase 18）+ 真 sshd 端到端实测（服务器 `Accepted publickey`，指纹与 fixture 一致）+ 界面实测 |
 | 连接 | Mosh（UDP，抗漫游） | P2 |
 | 连接 | ET / Eternal Terminal（TCP 2022） | P2 ✅ 实测 |
 | 连接 | Auto 传输协商（mosh→ET→SSH） | P2 ✅ 实测 |

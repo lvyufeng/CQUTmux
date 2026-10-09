@@ -17,6 +17,14 @@ struct KeyManagementView: View {
     /// pasted key has no name, and a row that said "Imported" for two different
     /// sources would leave the user unsure which one they used.
     @State private var importedFrom: String?
+    /// The passphrase the user typed for an encrypted key. Held only in
+    /// memory until they tap Import, so a passphrase for a key they decide not
+    /// to import is never written anywhere.
+    @State private var importPassphrase = ""
+    /// Whether the key typed or chosen is encrypted. Set by a trial parse with
+    /// no passphrase, which is the only way to tell without asking the user to
+    /// declare it.
+    @State private var keyIsEncrypted = false
 
     var body: some View {
         Form {
@@ -65,10 +73,22 @@ struct KeyManagementView: View {
                         .frame(minHeight: 120)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Button("Paste a Private Key") { importKey(importedKey) }
+                        .onChange(of: importedKey) { _, text in
+                            keyIsEncrypted = Self.looksEncrypted(text)
+                        }
+                    if keyIsEncrypted {
+                        SecureField("Key passphrase", text: $importPassphrase)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Text("This key is encrypted. Its passphrase is stored in the Keychain "
+                             + "with it, so the key cannot be opened from an unlocked backup alone.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("Import Private Key") { importKey(importedKey, passphrase: importPassphrase) }
                         .disabled(importedKey.isEmpty)
-                    Text("An ed25519 key in OpenSSH format (BEGIN OPENSSH PRIVATE KEY). "
-                         + "Keys encrypted with a passphrase are not supported yet.")
+                    Text("An ed25519 key in OpenSSH format (BEGIN OPENSSH PRIVATE KEY), "
+                         + "encrypted with a passphrase or not.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } header: {
@@ -129,6 +149,9 @@ struct KeyManagementView: View {
         do {
             let (seed, line) = try Ed25519OpenSSH.generate()
             KeychainStore.save(seed, account: host.keySeedAccount)
+            // A generated key has no passphrase, so a stored one is now stale
+            // and would be offered up the next time this key is unlocked.
+            KeychainStore.delete(account: host.keyPassphraseAccount)
             publicKey = line
             error = nil
         } catch {
@@ -136,15 +159,54 @@ struct KeyManagementView: View {
         }
     }
 
-    private func importKey(_ pem: String) {
+    /// Whether a private key is encrypted, decided by trying it rather than by
+    /// reading its header.
+    ///
+    /// The header would say (`aes256-ctr`/`bcrypt`), but reaching into the
+    /// container to read two strings duplicates a parser that already exists,
+    /// and this way the answer is exactly "does a passphrase change the
+    /// outcome" — which is the question the UI is asking.
+    static func looksEncrypted(_ pem: String) -> Bool {
+        guard pem.contains("BEGIN OPENSSH PRIVATE KEY") else { return false }
         do {
-            let seed = try Ed25519OpenSSH.seed(fromOpenSSHPrivateKey: pem)
-            KeychainStore.save(seed, account: host.keySeedAccount)
+            _ = try Ed25519OpenSSH.seed(fromOpenSSHPrivateKey: pem, passphrase: "")
+            return false
+        } catch let error as Ed25519OpenSSH.KeyError {
+            return String(describing: error).lowercased().contains("passphrase")
+        } catch {
+            return false
+        }
+    }
+
+    /// Imports a key, storing it in the form it arrived in.
+    ///
+    /// An unencrypted key is reduced to its seed, as before: there is no
+    /// passphrase protecting it and keeping the PEM would only be a bigger
+    /// thing to store. An encrypted one is kept *encrypted*, with the
+    /// passphrase beside it in the Keychain, so the passphrase remains a real
+    /// second factor rather than a ceremony performed once at import.
+    private func importKey(_ pem: String, passphrase: String) {
+        do {
+            let seed = try Ed25519OpenSSH.seed(fromOpenSSHPrivateKey: pem, passphrase: passphrase)
+            if passphrase.isEmpty {
+                KeychainStore.save(seed, account: host.keySeedAccount)
+                KeychainStore.delete(account: host.keyPassphraseAccount)
+            } else {
+                KeychainStore.save(Data(pem.utf8), account: host.keySeedAccount)
+                KeychainStore.save(Data(passphrase.utf8), account: host.keyPassphraseAccount)
+            }
             publicKey = try Ed25519OpenSSH.publicKey(fromSeed: seed, comment: host.displayName)
             importedKey = ""
+            importPassphrase = ""
+            keyIsEncrypted = false
             importedFrom = nil
             error = nil
         } catch {
+            // A wrong passphrase and a corrupt key both land here. The parse
+            // error already distinguishes them — the reader reports "the
+            // passphrase did not decrypt this key" when the container was
+            // readable and the passphrase was wrong — so the message is passed
+            // through rather than replaced.
             self.error = "\(error)"
         }
     }
@@ -162,7 +224,19 @@ struct KeyManagementView: View {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let text = try String(contentsOf: url, encoding: .utf8)
-            importKey(text)
+            keyIsEncrypted = Self.looksEncrypted(text)
+            if keyIsEncrypted && importPassphrase.isEmpty {
+                // Put the key in the editor and stop, rather than importing and
+                // failing. A chosen file is the path most users take, and
+                // failing here would leave them with an error and no way to
+                // supply the passphrase — the file picker would have to be
+                // opened a second time for no reason.
+                importedKey = text
+                importedFrom = url.lastPathComponent
+                error = nil
+                return
+            }
+            importKey(text, passphrase: importPassphrase)
             // Only name the file as the source if the parse actually took:
             // "imported from id_ed25519" sitting under an error message is the
             // one combination that would make the user stop looking.

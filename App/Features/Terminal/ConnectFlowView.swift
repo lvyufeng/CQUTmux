@@ -14,6 +14,10 @@ struct ConnectFlowView: View {
     @State private var credential: SSHCredential?
     @State private var password = ""
     @State private var error: String?
+    /// Set when the stored key is an encrypted snapshot that needs its
+    /// passphrase before it can be used. See `resolveSeed`.
+    @State private var needsPassphrase = false
+    @State private var passphrase = ""
 
     var body: some View {
         Group {
@@ -51,6 +55,18 @@ struct ConnectFlowView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                    if needsPassphrase {
+                        SecureField("Key passphrase", text: $passphrase)
+                            .textContentType(.password)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Toggle("Remember in Keychain", isOn: $rememberPassphrase)
+                            .tint(themes.current.accentColor)
+                        Text("This key was imported while encrypted. The passphrase unlocks it "
+                             + "on this device; it is never sent anywhere.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             if let error {
@@ -67,6 +83,7 @@ struct ConnectFlowView: View {
     }
 
     @State private var remember = true
+    @State private var rememberPassphrase = true
 
     private func resolveStoredCredential() async {
         switch host.authMethod {
@@ -76,9 +93,40 @@ struct ConnectFlowView: View {
                 credential = .password(stored)
             }
         case .key:
-            if let seed = KeychainStore.load(account: host.keySeedAccount) {
-                await authenticateThen { credential = .ed25519Seed(seed) }
-            }
+            // The stored passphrase is read here rather than kept in state:
+            // `@State` survives longer than the screen, and a passphrase that
+            // outlives the prompt is one sitting in memory for no reason.
+            //
+            // Deliberately *not* preceded by a call to `KeyMaterial.requirement`:
+            // that would run the bcrypt derivation once to decide, and then
+            // `unlock` would run it again to actually open the key. Asking the
+            // question and acting on it are the same work here — `unlock` sets
+            // `needsPassphrase` on failure — so the decision is made by trying.
+            let stored = KeychainStore.load(account: host.keyPassphraseAccount)
+                .flatMap { String(data: $0, encoding: .utf8) }
+            await unlock(using: stored, interactive: false)
+        }
+    }
+
+    /// Opens the stored key and hands the seed to the terminal.
+    ///
+    /// `interactive` is false on the automatic path: there is nothing the user
+    /// typed on the first pass, so a failure only reveals the passphrase field
+    /// rather than reporting an error the user did not cause.
+    private func unlock(using available: String?, interactive: Bool) async {
+        let data = KeychainStore.load(account: host.keySeedAccount)
+        do {
+            let seed = try KeyMaterial.seed(from: data, passphrase: available)
+            needsPassphrase = false
+            await authenticateThen { credential = .ed25519Seed(seed) }
+        } catch {
+            // Not necessarily an error: needing to ask for a passphrase is the
+            // ordinary case and reaches here. `interactive` distinguishes it,
+            // because on the automatic pass a message would appear under a
+            // field the user has not been given yet.
+            needsPassphrase = true
+            credential = nil
+            if interactive { self.error = "\(error)" }
         }
     }
 
@@ -90,11 +138,21 @@ struct ConnectFlowView: View {
             }
             credential = .password(password)
         case .key:
-            guard let seed = KeychainStore.load(account: host.keySeedAccount) else {
-                error = "No key imported yet. Key import lands in a follow-up commit."
-                return
+            if needsPassphrase {
+                // Remembering is the whole point of the field: without it the
+                // prompt returns on every connect, which is fine for a key used
+                // once and unbearable for one used hourly.
+                if rememberPassphrase {
+                    KeychainStore.save(Data(passphrase.utf8), account: host.keyPassphraseAccount)
+                } else {
+                    KeychainStore.delete(account: host.keyPassphraseAccount)
+                }
+                await unlock(using: passphrase, interactive: true)
+            } else {
+                let stored = KeychainStore.load(account: host.keyPassphraseAccount)
+                    .flatMap { String(data: $0, encoding: .utf8) }
+                await unlock(using: stored, interactive: true)
             }
-            await authenticateThen { credential = .ed25519Seed(seed) }
         }
     }
 

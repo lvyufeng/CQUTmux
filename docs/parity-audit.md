@@ -479,3 +479,59 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   no part of this has run on a Windows host. The POSIX path is unchanged, and
   `scripts/herdr-test.sh` still passes against a real herdr server, which is
   what proves the refactor did not break the platform we can run.
+
+- **Passphrase-protected keys, and storing the passphrase.** The docs say an
+  optional passphrase can be saved with a connection and an encrypted private
+  key can be used; neither was true. Import accepted only unencrypted keys, the
+  parser threw "encrypted keys are not supported yet" on any non-`none`
+  cipher, and `Host` had nowhere to put a passphrase.
+
+  The reason this is more than a flag is that OpenSSH does not encrypt a key
+  with PBKDF2. It derives the AES key *and* IV from one `bcrypt_pbkdf` call — a
+  variant of bcrypt where the password and salt are each SHA-512'd, fed through
+  Blowfish, run for 64 rounds of key-schedule expansion against the magic text
+  `OxychromaticBlowfishSwatDynamite`, and then written to the output
+  *non-linearly* so no byte can be computed without computing all of them. There
+  is no shortcut and no "close enough": one wrong constant or a wrapping add
+  written as a trapping add yields 32 bytes that are simply not the key, and the
+  failure surfaces much later as the server rejecting a password. So this needed
+  a real Blowfish (`Blowfish.swift`, tables generated from the digits of π
+  rather than transcribed), the derivation (`BcryptPBKDF.swift`) and AES-CTR
+  (`AES.swift`, S-box derived from the field so it cannot be mistyped).
+
+  It is pinned against things outside this repo, because nothing inside it could
+  tell a correct derivation from a plausible one. `scripts/key-import-check.sh`
+  now checks two published `bcrypt_pbkdf` vectors — including one whose output
+  crosses a block boundary, which the natural mistake of writing blocks in
+  order passes the first vector and fails — decrypts a real `ssh-keygen -N`
+  fixture to exactly the `.pub` file `ssh-keygen` wrote beside it, and
+  round-trips an encrypted export through `ssh-keygen -y` and `ssh-keygen -p`.
+  Writing this found the bug the design invited: `bcrypt_hash`'s next salt is
+  the SHA-512 of the previous round's *raw* output, not of the running XOR
+  accumulator, and hashing the accumulator — which is what this first did —
+  matches nothing while looking entirely reasonable.
+
+  On the app side, `KeyMaterial.swift` (Foundation plus the transport package,
+  so `scripts/passphrase-check.sh` can build the shipped file rather than a
+  copy) decides what a stored key needs. An encrypted key is stored *as the
+  PEM*, with its passphrase in a second Keychain entry, rather than being
+  decrypted once at import and reduced to a seed. That keeps the passphrase a
+  real second factor — the key cannot be opened from the seed alone — and it is
+  what makes "remember the passphrase" a setting rather than a thing the import
+  silently discards. The connect flow prompts when it has to and remembers by
+  default; the key screen recognises an encrypted key by *trying* it with an
+  empty passphrase, so the field appears without the user having to declare it.
+
+  **Honest limit, and one deliberate divergence.** The host CLI's `pair` still
+  refuses an encrypted key. Its entire output is a link carrying the seed in
+  cleartext — it says so itself — so decrypting the file first would only move
+  the secret from one plaintext container to another, at the cost of a second
+  bcrypt implementation in a language whose stdlib does not have one. The
+  refusal now names the fix (`ssh-keygen -p -N ""`) instead of just failing.
+  Verified on the simulator against a real sshd: with the encrypted fixture's
+  public half in `authorized_keys`, the server logged `Accepted publickey …
+  SHA256:roc54/MThSvFLR19ftDCy5ByyCMb69ai+KMhnkn6BFE` — the fixture's own
+  fingerprint — and the connect screen shows the passphrase field with
+  "Remember in Keychain" on. The four resolve cases (correct passphrase,
+  wrong passphrase, none, bare seed) each report the expected
+  requirement and either the right public key or no seed at all.

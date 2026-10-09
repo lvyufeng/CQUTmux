@@ -27,3 +27,7 @@ host/cqutmux-hook/cqutmux-hook
 *.local
 # Watch-target derived data (scripts/watch-test.sh)
 build-watch/
+# Copied in by scripts/passphrase-check.sh so SwiftPM can compile the app's
+# KeyMaterial.swift against the transport package. The original is the source
+# of truth and the script overwrites this on every run.
+Packages/CQUTTransport/Tests/PassphraseChecks/KeyMaterial.swift

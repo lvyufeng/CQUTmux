@@ -37,7 +37,7 @@ final class GatewayProbe {
 
     func probe(_ host: Host) async {
         guard !probing.contains(host.id.uuidString) else { return }
-        guard let seed = KeychainStore.load(account: host.keySeedAccount) else {
+        guard let seed = host.resolveSeed() else {
             // No credentials means the probe cannot run at all, which is not
             // the same as the gateway being down. Leaving it unknown is honest;
             // guessing "not running" would send the user to fix the wrong thing.

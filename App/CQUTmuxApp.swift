@@ -69,6 +69,13 @@ struct CQUTmuxApp: App {
                     await syncStore()
                     #if DEBUG
                     DebugSeed.apply(to: hostStore)
+                    // The resolve probe runs here rather than in `RootView`'s
+                    // task, which is built in the same pass as the screen: that
+                    // one can run before this seeding has happened and see an
+                    // empty host list, which is exactly what it did. After
+                    // `apply` returns, the seeded host and its Keychain entries
+                    // are both in place.
+                    DebugSeed.resolveAndReport(hostStore)
                     // Runs off to the side: it loads a model and transcribes,
                     // which is seconds of work, and the notification prompt
                     // below should not wait behind it.

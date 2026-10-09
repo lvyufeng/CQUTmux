@@ -191,8 +191,8 @@ struct ExportKeysView: View {
     }
 
     private func export(for host: Host) {
-        guard let seed = KeychainStore.load(account: host.keySeedAccount) else {
-            failure = "No key is stored for \(host.displayName)."
+        guard let seed = host.resolveSeed() else {
+            failure = "No key is stored for \(host.displayName), or it needs its passphrase."
             return
         }
         do {

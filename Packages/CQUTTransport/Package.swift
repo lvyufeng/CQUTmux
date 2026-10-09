@@ -57,6 +57,18 @@ let package = Package(
             name: "KeyImportChecks",
             dependencies: ["CQUTTransport"],
             path: "Tests/KeyImportChecks"
+        ),
+        // The app-side decision layer for stored keys. Its source is *symlinked*
+        // from `App/Features/Security/KeyMaterial.swift` rather than copied, so
+        // there is one file and the check cannot drift from what ships. It
+        // lives in this package because that is what gives SwiftPM the
+        // dependency graph: `KeyMaterial` imports `CQUTTransport`, and building
+        // it by hand outside the package means re-deriving every include path
+        // the manifest already knows.
+        .executableTarget(
+            name: "PassphraseChecks",
+            dependencies: ["CQUTTransport"],
+            path: "Tests/PassphraseChecks"
         )
     ],
     swiftLanguageModes: [.v5]

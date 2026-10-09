@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import CQUTTransport
 
 /// Test-only seeding for UI runs: inject a host and an ed25519 seed through the
 /// launch environment so a simulator build can be exercised without hand entry.
@@ -32,6 +33,21 @@ enum DebugSeed {
 
         if let seedB64 = env["CQUT_DEV_KEY_SEED"], let seed = Data(base64Encoded: seedB64) {
             KeychainStore.save(seed, account: host.keySeedAccount)
+        }
+
+        // An encrypted key, stored the way the import path stores one: the PEM
+        // itself, with the passphrase in a second Keychain entry. This is the
+        // only way to reach the password-protected path from a simulator run,
+        // since the file picker needs a document on the device. Both halves are
+        // supplied so the run can exercise "passphrase already remembered"; set
+        // no passphrase to exercise the prompt instead.
+        if let pem = env["CQUT_DEV_KEY_PEM"], !pem.isEmpty {
+            KeychainStore.save(Data(pem.utf8), account: host.keySeedAccount)
+            if let passphrase = env["CQUT_DEV_KEY_PASSPHRASE"], !passphrase.isEmpty {
+                KeychainStore.save(Data(passphrase.utf8), account: host.keyPassphraseAccount)
+            } else {
+                KeychainStore.delete(account: host.keyPassphraseAccount)
+            }
         }
 
         if let token = env["CQUT_DEV_GATEWAY_TOKEN"], let data = token.data(using: .utf8) {
@@ -195,6 +211,49 @@ enum DebugSeed {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
             view.sendRaw(Data(bytes))
         }
+    }
+
+    /// Resolves a seeded host's key and reports what happened, for a UI run.
+    ///
+    /// This exercises the real path rather than the decision alone: it reads
+    /// the Keychain back — a stored PEM that came back truncated would pass
+    /// every in-process check and fail only here — and compares the public key
+    /// derived from the result against what `ssh-keygen` says, which is the
+    /// only comparison that catches a decryption that produced *a* key rather
+    /// than *the* key.
+    ///
+    /// Called from `CQUTmuxApp` right after `apply(to:)` rather than from a
+    /// view. A view's task is built in the same pass as the screen and can run
+    /// before the host list has been seeded, which is exactly what a first
+    /// attempt at this did — it reported an empty list.
+    ///
+    /// The result goes to a file as well as stderr: `simctl launch
+    /// --console-pty` only attaches to a process it starts, and a relaunch of
+    /// an app iOS has not fully torn down returns without the output.
+    static func resolveAndReport(_ store: HostStore) {
+        let env = ProcessInfo.processInfo.environment
+        guard let hostname = env["CQUT_DEV_RESOLVE_KEY"] else { return }
+        report("started hosts=\(store.hosts.map(\.hostname).joined(separator: ","))")
+        guard let host = store.hosts.first(where: { $0.hostname == hostname }) else {
+            report("no host named \(hostname)")
+            return
+        }
+        let stored = KeychainStore.load(account: host.keySeedAccount)
+        let requirement = KeyMaterial.requirement(for: stored, passphrase: host.keyPassphrase)
+        let size = stored.map { "\($0.count)B" } ?? "-"
+        guard let seed = host.resolveSeed() else {
+            report("\(requirement) stored=\(size) seed=nil")
+            return
+        }
+        let line = (try? Ed25519OpenSSH.publicKey(fromSeed: seed, comment: "x")) ?? "?"
+        let body = line.split(separator: " ").dropFirst().first.map(String.init) ?? "?"
+        report("\(requirement) stored=\(size) seed=\(seed.count)B pub=\(body)")
+    }
+
+    private static func report(_ outcome: String) {
+        print("CQUT_RESOLVE_KEY: \(outcome)")
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        try? outcome.write(to: docs.appendingPathComponent("resolve.txt"), atomically: true, encoding: .utf8)
     }
 }
 #endif
