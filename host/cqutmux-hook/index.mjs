@@ -205,9 +205,17 @@ function emit(event) {
   // two shapes for one record type. Clients should tolerate a missing field —
   // ours now does — but a gateway that emits a different shape depending on
   // which line called it is a bug in the gateway.
+  //
+  // `data` is in the same list for a subtler reason: it was stored on the way
+  // in but not read back out, so anything an agent put there — which agent
+  // spawned this event, which teammate sent it — reached /events as nothing.
+  // The one place that reads `data` is nested-agent suppression, and that runs
+  // on the *request* body before this, so the field was silently dropped for
+  // every consumer downstream of here.
   const record = {
     title: '',
     body: '',
+    data: null,
     id: nextId++,
     at: new Date().toISOString(),
     ...event,

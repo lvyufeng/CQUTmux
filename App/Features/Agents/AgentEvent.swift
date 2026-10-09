@@ -20,6 +20,30 @@ struct AgentEvent: Identifiable, Codable, Hashable {
     var title: String?
     var body: String?
     var decision: String?
+    /// Whatever the agent attached. Free-form on the wire, so it is typed here
+    /// as the few keys already in use rather than as a dictionary.
+    var data: Payload?
+
+    /// The keys agents send that this app reads. Decoding is lenient: an event
+    /// with keys not named here decodes to `nil` rather than failing, because a
+    /// newer agent hook must not be able to blank the Inbox.
+    struct Payload: Codable, Hashable {
+        /// Set by a teammate reporting its own message, rather than by the
+        /// agent the user is watching. See `isTeammateMessage`.
+        var teammate: String?
+    }
+
+    /// A message from an agent-team teammate rather than from the agent the
+    /// user is driving. Moshi surfaces these as their own cards in Chat View;
+    /// the difference matters because a teammate's message is not an approval
+    /// and not the main agent's output, and folding it into either is wrong.
+    var isTeammateMessage: Bool { data?.teammate?.isEmpty == false }
+
+    /// The teammate's name, for the card's label.
+    var teammateName: String? {
+        guard let name = data?.teammate, !name.isEmpty else { return nil }
+        return name
+    }
 
     var date: Date? { ISO8601DateFormatter().date(from: at) }
 

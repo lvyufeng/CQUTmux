@@ -135,7 +135,7 @@ private struct EventRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(event.displayTitle.isEmpty ? event.sourceLabel : event.displayTitle)
                         .font(.subheadline.weight(.medium))
-                    Text("\(event.sourceLabel) · \(relativeTime)")
+                    Text(trailingLabel)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -165,8 +165,20 @@ private struct EventRow: View {
         .padding(.vertical, 2)
     }
 
+    /// Who sent it and when. A teammate gets its own label — the name of the
+/// teammate, then the agent it is a teammate *of* — because "Claude Code ·
+/// 2m ago" on a message the main agent never wrote is the kind of wrong that
+/// reads as right.
+    private var trailingLabel: String {
+        if let teammate = event.teammateName {
+            return "Team \(teammate) · \(event.sourceLabel) · \(relativeTime)"
+        }
+        return "\(event.sourceLabel) · \(relativeTime)"
+    }
+
     private var icon: String {
-        switch event.kind {
+        guard !event.isTeammateMessage else { return "person.2" }
+        return switch event.kind {
         case .approval: "hand.raised"
         case .notice: "bell"
         }

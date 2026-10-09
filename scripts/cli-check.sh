@@ -219,6 +219,22 @@ echo "$TITLES" | grep -q '"top"' || fail "suppression also dropped a top-level e
 echo "$TITLES" | grep -q '"nested"' && fail "the suppressed event reached the log anyway"
 ok "suppression leaves top-level events alone"
 
+# `data` has to survive the round trip. It was stored on the way in and not
+# read back out, so everything an agent attached — which agent spawned this,
+# which teammate sent it — arrived at the app as nothing, and the only code
+# that reads the field runs on the request body, before the drop. Nothing
+# downstream could have noticed.
+post '{"source":"claude-code","kind":"notice","title":"teammate says hi","data":{"teammate":"scout"}}' > /dev/null
+curl -s "http://127.0.0.1:$CFG_PORT/events" | python3 -I -c "
+import json, sys
+events = json.load(sys.stdin)['events']
+match = [e for e in events if e.get('title') == 'teammate says hi']
+assert match, 'the event did not come back at all'
+assert match[0].get('data', {}).get('teammate') == 'scout', \
+    'data was dropped between POST and GET: ' + json.dumps(match[0])
+" || fail "an event's data does not survive POST -> GET"
+ok "an event's data survives POST -> GET"
+
 # The suppression must be off by default, or every existing install changes
 # behaviour on upgrade.
 DEFAULT_PORT=$((PORT + 4))
