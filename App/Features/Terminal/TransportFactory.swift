@@ -70,6 +70,7 @@ enum TransportFactory {
             sessionCommand: host.sessionCommand.isEmpty ? nil : host.sessionCommand
         )
         launcher.portRange = host.moshPortRange
+        launcher.serverPathOverride = host.moshServerPath
         let transport = MoshTransport()
         transport.launcher = launcher
         return transport

@@ -7,6 +7,7 @@ struct CodePanelView: View {
     @Environment(ThemeStore.self) private var themes
     @Environment(AgentConnection.self) private var connection
     @Environment(HostStore.self) private var store
+    @Environment(AppSettings.self) private var app
 
     @State private var mode: Mode = Self.initialMode
     @State private var listing: DirectoryListing?
@@ -22,6 +23,17 @@ struct CodePanelView: View {
     @State private var recents = RecentDirectoryStore()
 
     private enum Mode: String, CaseIterable { case files = "Files", changes = "Changes", history = "History", chat = "Chat" }
+
+    /// The modes the segmented control offers.
+    ///
+    /// Files is droppable because it is the one mode that duplicates something
+    /// the user already has elsewhere — a file tree on the host — while the
+    /// diff, the transcript and the chat have nowhere else to live. The mode
+    /// itself stays in the enum so a deep link or a debug variable that names it
+    /// still resolves; only the button goes.
+    private var modes: [Mode] {
+        Mode.allCases.filter { $0 != .files || !app.hidesFiles }
+    }
 
     private static var initialMode: Mode {
         #if DEBUG
@@ -151,7 +163,7 @@ struct CodePanelView: View {
     private func panel(_ client: HookClient) -> some View {
         VStack(spacing: 0) {
             Picker("Mode", selection: $mode) {
-                ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                ForEach(modes, id: \.self) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .padding()

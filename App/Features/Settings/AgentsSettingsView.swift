@@ -20,12 +20,14 @@ struct AgentsSettingsView: View {
 
             Section {
                 Toggle("Hide the Code tab", isOn: $app.hidesCodeTab)
+                Toggle("Hide the Files panel", isOn: $app.hidesFiles)
+                    .disabled(app.hidesCodeTab)
             } header: {
                 Label("Home screen", systemImage: "square.grid.2x2")
             } footer: {
-                Text("Takes the Code tab off the tab bar (and the sidebar). The Files, "
-                     + "Changes, History and Chat panels live there; if you never open "
-                     + "them, this gives the rest of the bar more room.")
+                Text("The first takes the Code tab off the tab bar entirely. The second "
+                     + "keeps the tab but drops its Files mode, for when the diff and the "
+                     + "transcript are useful and browsing the tree is not.")
             }
         }
         .navigationTitle("Agents")

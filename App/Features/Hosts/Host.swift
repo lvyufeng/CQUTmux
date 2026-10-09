@@ -46,6 +46,9 @@ struct Host: Identifiable, Codable, Hashable {
     var transport: TransportKind = .auto
     var jumpHost: String? = nil            // "user@host:22"
     var moshPortRange: String? = nil
+    /// Where `mosh-server` lives on this host, when the login shell cannot find
+    /// it. See `SSHMoshLauncher.serverPathOverride`.
+    var moshServerPath: String? = nil
     var etPort: Int? = nil                 // defaults to 2022
     var forwardAgent: Bool = false
     /// Bearer token required by `cqutmux-hook --token`, if the host sets one.

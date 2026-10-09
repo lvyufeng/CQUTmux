@@ -417,6 +417,43 @@ const DEV_PORT_HINTS = new Set([
   3000, 3001, 4200, 5000, 5173, 5174, 8000, 8001, 8080, 8081, 8443, 9000,
 ])
 
+/// Puts text on the host's clipboard, best effort.
+///
+/// Three tools, because there is no one of them everywhere: `pbcopy` on macOS,
+/// `wl-copy` on Wayland, `xclip` on X11. Which one is present is not something
+/// to ask about at startup — a host may gain or lose a display server under us
+/// — so each is tried in turn and the first that works wins.
+///
+/// Returns a description of what happened rather than throwing: the upload has
+/// already succeeded by the time this runs, and a missing clipboard tool is the
+/// normal state of a headless server.
+async function copyToHostClipboard(text, enabled = true) {
+  if (!enabled) return { copied: false, reason: 'disabled' }
+
+  // `-selection clipboard` rather than X11's PRIMARY: PRIMARY is the
+  // select-to-paste buffer, and a pasted path should land where Ctrl-V reads.
+  const tools = [
+    ['pbcopy', []],
+    ['wl-copy', []],
+    ['xclip', ['-selection', 'clipboard']],
+  ]
+  for (const [tool, args] of tools) {
+    try {
+      await new Promise((resolve, reject) => {
+        const child = spawn(tool, args)
+        child.on('error', reject)
+        child.on('close', code => (code === 0 ? resolve() : reject(new Error(`${tool} exited ${code}`))))
+        child.stdin.on('error', reject)
+        child.stdin.end(text)
+      })
+      return { copied: true, tool }
+    } catch {
+      // Try the next one.
+    }
+  }
+  return { copied: false, reason: 'no clipboard tool (pbcopy, wl-copy or xclip)' }
+}
+
 async function listeningPorts() {
   let stdout
   try {
@@ -971,7 +1008,15 @@ const server = createServer(async (req, res) => {
 
     const path = join(dir, name)
     process.stderr.write(`[hook] upload ${body.length} bytes -> ${path}\n`)
-    return json(res, 201, { path, bytes: body.length })
+
+    // Put the path on the host's clipboard, so the file can be pasted into a
+    // running program without retyping it — the app types it into the agent
+    // prompt, which is not what you want when the target is a `vim` already
+    // open in a pane. Best effort: a host with no clipboard tool is common
+    // (a bare server, a container), and the upload itself has already
+    // succeeded, so a failure here must not turn into a failed upload.
+    const clipboard = await copyToHostClipboard(path, req.headers['x-clipboard'] !== 'off')
+    return json(res, 201, { path, bytes: body.length, clipboard })
   }
 
   // What has been pasted, newest first. The paste directory is otherwise

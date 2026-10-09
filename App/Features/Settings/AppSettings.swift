@@ -10,6 +10,7 @@ import Observation
 final class AppSettings {
     private enum Key {
         static let hidesCodeTab = "cqutmux.home.hidesCodeTab"
+        static let hidesFiles = "cqutmux.code.hidesFiles"
         static let keepAwake = "cqutmux.agents.keepScreenOn"
     }
 
@@ -34,9 +35,21 @@ final class AppSettings {
         didSet { store.set(keepScreenOn, forKey: Key.keepAwake) }
     }
 
+    /// Whether the Files browser is kept out of the Code panel's modes.
+    ///
+    /// Separate from hiding the whole Code tab because they answer different
+    /// questions: that one is "I do not use this tab", this one is "I use the
+    /// diff and the transcript but browse files elsewhere". Named `hides…` for
+    /// the same reason as the other, so an existing install keeps every mode it
+    /// had until someone turns one off.
+    var hidesFiles: Bool {
+        didSet { store.set(hidesFiles, forKey: Key.hidesFiles) }
+    }
+
     init(store: UserDefaults = .standard) {
         self.store = store
         hidesCodeTab = store.bool(forKey: Key.hidesCodeTab)
+        hidesFiles = store.bool(forKey: Key.hidesFiles)
         keepScreenOn = store.bool(forKey: Key.keepAwake)
     }
 }

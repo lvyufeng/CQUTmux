@@ -412,6 +412,15 @@ final class HookClient {
 struct UploadResult: Codable {
     var path: String
     var bytes: Int
+    /// Whether the host put the path on its own clipboard. Present from the
+    /// gateway; `nil` against an older one, which is not an error.
+    var clipboard: ClipboardResult?
+
+    struct ClipboardResult: Codable {
+        var copied: Bool
+        var tool: String?
+        var reason: String?
+    }
 }
 
 struct UploadBoard: Codable {

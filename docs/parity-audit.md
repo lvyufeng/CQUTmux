@@ -238,3 +238,20 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   room for another key, and the keyboard button is the one that is about input,
   so that is where the dictation settings live from inside a session — without
   it, changing the engine means leaving the terminal you are dictating into.
+
+- **A custom `mosh-server` path.** The launcher normally asks the host's login
+  shell where the binary is, which handles a package manager or `~/.local` —
+  and cannot handle a host where that shell cannot find it either (another
+  user's install, a Nix profile, a container with no rc files setting PATH).
+  The failure mode is the bad one: mosh silently becomes plain SSH, which looks
+  like a preference being ignored. There is now a field on the connection form
+  that skips the search.
+- **The uploaded file's path goes on the host's clipboard.** Typing a path into
+  an agent's prompt is not what you want when the target is a `vim` already open
+  in a pane, so the upload route also puts the absolute path on the host's own
+  clipboard through `pbcopy`, `wl-copy` or `xclip` — whichever is present, which
+  is not knowable at startup. Best effort: a headless host has none, and the
+  upload has already succeeded by then, so a missing tool must not fail it.
+- **The Files panel can be hidden on its own.** Settings → Agents already hid
+  the whole Code tab; this drops just the Files mode, for when the diff and the
+  transcript are useful and browsing the host's tree is not.

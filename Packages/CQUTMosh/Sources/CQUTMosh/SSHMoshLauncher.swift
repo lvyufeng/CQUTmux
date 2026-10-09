@@ -23,6 +23,18 @@ public final class SSHMoshLauncher: MoshServerLauncher, @unchecked Sendable {
     /// UDP port the client needs is the one nothing opened.
     public var portRange: String?
 
+    /// Path to `mosh-server` on the host, when the user has set one.
+    ///
+    /// Resolution normally asks the host's login shell, which handles the
+    /// common case of a binary installed by a package manager or in `~/.local`.
+    /// What it cannot handle is a host where the *login shell* cannot find it
+    /// either — a different user's install, a Nix profile, a container where
+    /// `mosh-server` is not on any PATH the rc files set. `locate` then reports
+    /// it missing and mosh silently becomes plain SSH, which looks like a
+    /// preference being ignored rather than a failure. A path set here skips
+    /// the search entirely.
+    public var serverPathOverride: String?
+
     /// Command the mosh session runs. Defaults to the host's login shell.
     private var sessionCommand: String?
     /// Path to `mosh-server`, resolved once on the host.
@@ -40,7 +52,13 @@ public final class SSHMoshLauncher: MoshServerLauncher, @unchecked Sendable {
         // `mosh-server` is frequently in a directory the login shell only adds
         // to PATH via its rc files. Asking the host is the only reliable way.
         let path: String
-        if let cached = lock.withLock({ serverPath }) {
+        if let override = lock.withLock({ serverPathOverride }), !override.isEmpty {
+            // Used as written, without checking it exists: a file check would
+            // have to be another round trip, and a wrong path fails at the same
+            // place with the same message as a missing binary — which is the
+            // honest answer for a path the user typed.
+            path = override
+        } else if let cached = lock.withLock({ serverPath }) {
             path = cached
         } else {
             guard let found = await transport.locate("mosh-server"), !found.isEmpty else {

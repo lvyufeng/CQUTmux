@@ -97,6 +97,13 @@ struct HostEditView: View {
                         set: { host.moshPortRange = $0.isEmpty ? nil : $0 }
                     ))
                     .textInputAutocapitalization(.never)
+                    TextField("mosh-server path (optional)", text: Binding(
+                        get: { host.moshServerPath ?? "" },
+                        set: { host.moshServerPath = $0.isEmpty ? nil : $0 }
+                    ))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.system(.body, design: .monospaced))
                 }
 
                 if host.transport == .et {
