@@ -27,6 +27,10 @@ struct TerminalScreen: View {
     @State private var shortcuts = ShortcutStore()
     @State private var gestures = GestureStore()
     @State private var cursor = CursorSettings()
+    @State private var input = InputSettings()
+    /// Whether a hardware keyboard is attached, inferred from the software
+    /// keyboard's absence. See `InputSettings.showsBar`.
+    @State private var hardwareKeyboard = false
     @State private var showShortcuts = false
     @State private var showGestures = false
     @State private var showJumpTo = false
@@ -45,7 +49,8 @@ struct TerminalScreen: View {
                 theme: themes.current,
                 fonts: fonts,
                 gestures: gestures,
-                cursor: cursor
+                cursor: cursor,
+                input: input
             )
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationTitle(host.displayName)
@@ -101,7 +106,18 @@ struct TerminalScreen: View {
             }
             .sheet(item: $annotating) { pending in annotator(pending.image) }
             .overlay(alignment: .top) { pasteNotice }
-            .safeAreaInset(edge: .bottom, spacing: 0) { accessoryBar }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if InputSettings.showsBar(
+                    hideWithHardwareKeyboard: input.hideBarWithHardwareKeyboard,
+                    hardwareKeyboard: hardwareKeyboard
+                ) {
+                    accessoryBar
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+                guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+                hardwareKeyboard = InputSettings.isHardwareKeyboard(frameHeight: frame.height)
+            }
             // A linked session is attached on the same signal the rest of the
             // UI uses to mean "the shell is up", rather than after a guessed
             // delay — an attach command sent into a session that is not ready
@@ -198,18 +214,16 @@ struct TerminalScreen: View {
     private var accessoryBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                key("Ctrl", CtrlKey.control)
-                key("Esc", CtrlKey.escape)
-                key("Tab", CtrlKey.tab)
-                icon("arrow.up", CtrlKey.upArrow)
-                icon("arrow.down", CtrlKey.downArrow)
-                icon("arrow.left", CtrlKey.leftArrow)
-                icon("arrow.right", CtrlKey.rightArrow)
-                icon("doc.on.doc", CtrlKey.clipboard)
-                pasteImageButton
-                sessionsButton
-                dictationButton
-                customShortcutKeys
+                // Built from the user's arrangement rather than written out
+                // here, so reordering and hiding in Settings and the bar itself
+                // cannot disagree.
+                ForEach(input.items) { item in
+                    barItem(item)
+                }
+                // Dictation is not optional and not in the list: it is the one
+                // control with no key equivalent, and a bar the user emptied
+                // completely would leave no way to start it.
+                if !input.items.contains(.dictation) { dictationButton }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -376,6 +390,74 @@ struct TerminalScreen: View {
         .accessibilityHint(dictation?.setupHint ?? "")
     }
 
+    @ViewBuilder
+    private func barItem(_ item: InputSettings.Item) -> some View {
+        switch item {
+        case .control: key("Ctrl", CtrlKey.control)
+        case .escape: key("Esc", CtrlKey.escape)
+        case .tab: key("Tab", CtrlKey.tab)
+        case .arrows:
+            icon("arrow.up", CtrlKey.upArrow)
+            icon("arrow.down", CtrlKey.downArrow)
+            icon("arrow.left", CtrlKey.leftArrow)
+            icon("arrow.right", CtrlKey.rightArrow)
+        case .dpad: dpad
+        case .clipboard: icon("doc.on.doc", CtrlKey.clipboard)
+        case .pasteImage: pasteImageButton
+        case .sessions: sessionsButton
+        case .dictation: dictationButton
+        case .customKeys: customShortcutKeys
+        }
+    }
+
+    /// A four-way pad with the corner slots bindable to the keys a terminal
+    /// actually needs on a phone. The arrows alone leave no way to reach
+    /// Delete, Interrupt or a full-screen TUI's Escape without the Esc button.
+    ///
+    /// Corners are two user-chosen actions; the cross sends arrows. Only the
+    /// corners are configurable because the arrows are the part a finger aims
+    /// at and should not move.
+    private var dpad: some View {
+        VStack(spacing: 2) {
+            HStack(spacing: 2) {
+                cornerKey(.topLeading)
+                icon("arrow.up", CtrlKey.upArrow)
+                cornerKey(.topTrailing)
+            }
+            HStack(spacing: 2) {
+                icon("arrow.left", CtrlKey.leftArrow)
+                Image(systemName: "circle.fill").font(.system(size: 5)).foregroundStyle(.tertiary)
+                    .frame(width: 30, height: 30)
+                icon("arrow.right", CtrlKey.rightArrow)
+            }
+            HStack(spacing: 2) {
+                cornerKey(.bottomLeading)
+                icon("arrow.down", CtrlKey.downArrow)
+                cornerKey(.bottomTrailing)
+            }
+        }
+    }
+
+    private func cornerKey(_ slot: InputSettings.Corner) -> some View {
+        let action = input.corner(slot)
+        return Button {
+            switch action {
+            case .none: break
+            case .hideKeyboard: UIApplication.shared.sendAction(
+                #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            case .delete: coordinator.terminal?.sendDelete()
+            case .interrupt: coordinator.terminal?.sendInterrupt()
+            case .escape: coordinator.terminal?.sendEscape()
+            }
+        } label: {
+            Text(action.cornerLabel)
+                .font(.caption2)
+                .frame(width: 30, height: 30)
+        }
+        .buttonStyle(.bordered)
+        .disabled(action == .none)
+    }
+
     private func key(_ label: String, _ key: CtrlKey) -> some View {
         Button { coordinator.press(key) } label: {
             Text(label)
@@ -436,6 +518,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
     let fonts: TerminalFontStore
     let gestures: GestureStore
     let cursor: CursorSettings
+    let input: InputSettings
 
     /// Remembers what the view was last painted with. A `UIViewRepresentable`
     /// has no way to compare its own inputs between updates, and repainting the
@@ -497,6 +580,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
             transport: transport
         )
         view.gestures = gestures
+        view.optionIsMeta = input.optionIsMeta
         view.onStatus = { status in coordinator.status = status }
         // A pinch resizes the terminal and becomes the saved preference, so the
         // next session opens at the size the user settled on.
@@ -515,6 +599,12 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         // — through the same `send` the on-screen keyboard calls.
         if let phrase = ProcessInfo.processInfo.environment["CQUT_DEV_TYPE"] {
             DebugSeed.typeWhenConnected(view: view, phrase: phrase)
+        }
+        // Same path, but for the composed characters a keyboard hands over:
+        // `CQUT_DEV_TYPE` writes UTF-8 into the terminal, which cannot carry an
+        // Option press, so the Meta rewrite is exercised through this instead.
+        if let composed = ProcessInfo.processInfo.environment["CQUT_DEV_TYPE_COMPOSED"] {
+            DebugSeed.typeComposedWhenConnected(view: view, text: composed)
         }
         // Same idea for a custom shortcut: the bar cannot be tapped from a
         // script, so the binding is pressed for it and the bytes travel the
@@ -540,6 +630,9 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
             context.coordinator.appliedCursor = cursor.style
             uiView.applyCursor(cursor)
         }
+        // A live setting: flipping it should take effect on the next key, not
+        // on the next connection.
+        uiView.optionIsMeta = input.optionIsMeta
     }
 }
 

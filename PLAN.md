@@ -46,6 +46,7 @@
 | 连接 | Auto 传输协商（mosh→ET→SSH） | P2 ✅ 实测 |
 | 终端 | VT/xterm 仿真、滚动、选中、链接可点 | P1 |
 | 终端 | 自定义键盘附件栏 + 硬件键盘 ⌘K/⌘O/⌘1-9 | P1 |
+| 输入 | Option 当 Meta（`InputSettings.optionMeta`）、栏内按键增删排序、D-pad 四向 + 两角可绑定（Esc/Del/^C/收键盘）、接硬件键盘时自动收栏 | P5 ✅ 规则实测 + 端到端实测 |
 | 终端 | 手势：swipe 切窗口、pinch 缩放、双击 Tab | P3 |
 | 终端 | 主题 / 字体 / 图标、CJK 输入 | P4 ✅ 主题+字体+图标+CJK |
 | 外观 | 主题驱动整个 App（chrome/选中/强调色）、主题导入（粘贴/QR/深链）、光标形状与闪烁、CJK 字形回退、备选 App 图标 | P4 ✅ 实测 |
@@ -79,6 +80,25 @@ Diff / 文件浏览 / 浏览器预览 / 模拟器预览（`CodePanelView` + `Pre
 Live Activity 与灵动岛（`ActivityManager` + `AgentActivityAttributes`）、
 图片粘贴与标注上传（`ImageAnnotatorView`）、
 主题与字体持久化、iPad 侧栏、CJK 输入。
+
+**本轮新增：输入自定义（Settings → Input）**。`InputSettings` 三件事放进同一个 store，
+因为它们是同一个问题——栏里显示什么：① **Option 当 Meta**；② **栏内按键的增删与排序**
+（Ctrl/Esc/Tab/方向/粘贴/图片/会话/听写/自定义键）；③ **D-pad**（四向箭头 + 两个可绑定角，
+默认左上 Esc、右上 Del，另可选 ^C 与收键盘）。附 `showsBar(hideWithHardwareKeyboard:hardwareKeyboard:)`
+在接了硬件键盘时收起整条栏。
+
+**Option-as-Meta 的做法值得记一笔**：字节到达 `send(source:data:)` 时，键盘**早已把 Option+e 合成成 "é"**，
+所以 ESC 前缀不能加在按键上，只能从合成字符**反推**——走一遍 NFD，丢掉组合音标就得到用户按住
+Option 想修饰的那个字母。因此「含任何 ASCII 就整串放行」是刻意的：混了 ASCII 的字符串不是一次按键，
+而是一次粘贴，改一半会把它弄坏。这条规则也决定了怎么验：
+`CQUT_DEV_TYPE` 把整句 UTF-8 写进去，永远只走粘贴分支，**测不到 Meta**；
+故新增 `CQUT_DEV_TYPE_COMPOSED` 逐字符调用 delegate（键盘真实的调用形状），
+实测宿主 `cat -v` 打出 `^[e`——即线上确实是 ESC + e。
+`scripts/input-check.sh` 66 项覆盖以上全部规则（含「普通打字不会被改写」这条最要命的）。
+
+**顺带修掉一个测试自身的缺陷**：`InputSettings` 原本硬写 `UserDefaults.standard`，
+于是 `scripts/input-check.sh` 既会**改掉跑它的人的设置**，又会把上一次跑剩下的值读回来当输入，
+表现为两条随机失败。现 `init(store:)` 可注入，检查脚本用自己的 suite 且先清空——三次连跑结果一致。
 
 **本轮新增**：自定义快捷键（`ShortcutGrammar` + 编辑器 + 附件栏按键，26 项语法用例 + 端到端实测）、
 **手势绑定**（`GestureStore` + `GestureEditorView`：双击/三击/左滑/右滑可绑定，共 18 项用例 + 端到端实测）、

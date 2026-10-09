@@ -7,6 +7,7 @@ struct SettingsView: View {
     enum Route: Hashable {
         case theme, font, cursor, icon, speech, sessions, security, notifications, sync
         case integrations
+        case input
     }
 
     @Environment(ThemeStore.self) private var themes
@@ -63,6 +64,11 @@ struct SettingsView: View {
                         Label("Sessions layout", systemImage: "rectangle.grid.1x2")
                     }
                 }
+                Section("Input") {
+                    NavigationLink(value: Route.input) {
+                        Label("Keyboard & key bar", systemImage: "keyboard")
+                    }
+                }
                 Section("Integrations") {
                     NavigationLink(value: Route.integrations) {
                         Label("Shell", systemImage: "terminal")
@@ -86,6 +92,7 @@ struct SettingsView: View {
                 case .sync: SyncSettingsView()
                 case .speech: SpeechSettingsView()
                 case .integrations: IntegrationSettingsView()
+                case .input: InputSettingsView()
                 }
             }
         }
@@ -107,7 +114,7 @@ struct SettingsView: View {
         guard let tab = ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] else { return nil }
         switch tab {
         case "theme", "font", "speech", "cursor", "icon", "sessions", "security",
-             "notifications", "sync", "integrations":
+             "notifications", "sync", "integrations", "input":
             return tab
         default:
             return nil
@@ -126,6 +133,7 @@ struct SettingsView: View {
         case "notifications": NotificationSettingsView()
         case "sync": SyncSettingsView()
         case "integrations": IntegrationSettingsView()
+        case "input": InputSettingsView()
         default: SpeechSettingsView()
         }
     }

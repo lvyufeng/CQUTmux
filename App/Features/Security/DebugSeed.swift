@@ -100,6 +100,19 @@ enum DebugSeed {
     /// The binding under test is expected to end in a command the host runs;
     /// like the typed test above, the check is that the host's own expansion
     /// comes back, not that the terminal echoed what it was handed.
+    static func typeComposedWhenConnected(view: CQUTTerminalView, text: String, attempt: Int = 0) {
+        guard attempt < 60 else { return }
+        guard view.isLiveForTesting else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                typeComposedWhenConnected(view: view, text: text, attempt: attempt + 1)
+            }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            view.injectComposedForTesting(text)
+        }
+    }
+
     static func pressShortcutWhenConnected(
         view: CQUTTerminalView, bytes: [UInt8], attempt: Int = 0
     ) {

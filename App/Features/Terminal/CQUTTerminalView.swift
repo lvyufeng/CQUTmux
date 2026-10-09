@@ -37,6 +37,10 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// built-in behaviour, which is what a view built outside the SwiftUI
     /// screen (a preview, a test) gets.
     var gestures: GestureStore?
+    /// Send Option+key as ESC + key (Meta) rather than as the accented
+    /// character iOS would otherwise compose. Set from `InputSettings` when the
+    /// view is built and on every settings change.
+    var optionIsMeta = false
     /// Font size that pinch zoom scales from, captured when a pinch begins.
     private var baseFontSize: CGFloat = 12
 
@@ -468,6 +472,15 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
 
     func sendTab() { write(Data([0x09])) }
 
+    /// Delete sends DEL (0x7F), not Backspace (0x08). A terminal's "Delete"
+    /// key is DEL — that is what the hardware key sends and what readline and
+    /// every TUI expect for backward-delete-char. 0x08 is Ctrl-H.
+    func sendDelete() { write(Data([0x7F])) }
+
+    /// Ctrl-C. Named for what it does to a running process rather than for the
+    /// key, because that is the reason it has a button at all.
+    func sendInterrupt() { write(Data([0x03])) }
+
     func sendArrow(up: Bool, down: Bool, left: Bool, right: Bool) {
         let final: Character = up ? "A" : down ? "B" : right ? "C" : "D"
         write(Data("\u{1B}[\(final)".utf8))
@@ -566,16 +579,38 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
 
     /// Types into the live session exactly as the keyboard does. Test-only;
     /// see `DebugSeed.typeWhenConnected`.
+    ///
+    /// Goes through the delegate rather than `write`, because "exactly as the
+    /// keyboard does" includes the Option-as-Meta rewrite — the keyboard hands
+    /// the terminal composed characters and the delegate is where they are
+    /// turned back into escape sequences. Calling `write` here would skip that
+    /// and make the Meta path untestable from a script.
     func injectForTesting(_ text: String) {
         guard status.isLive else { return }
-        write(Data(text.utf8))
+        send(source: self, data: ArraySlice(Data(text.utf8)))
+    }
+
+    /// Types a string one character per delegate call, which is the shape the
+    /// keyboard actually delivers in. Test-only.
+    ///
+    /// The distinction is not cosmetic: `optionMeta` deliberately refuses to
+    /// rewrite a string that mixes an accented character with ASCII, because
+    /// that is what a paste looks like, and rewriting half of a paste would
+    /// corrupt it. A whole phrase in one call therefore exercises the paste
+    /// branch and can never exercise the Meta one. One keystroke at a time is
+    /// both the real shape and the only shape the rewrite applies to.
+    func injectComposedForTesting(_ text: String) {
+        guard status.isLive else { return }
+        for character in text {
+            send(source: self, data: ArraySlice(Data(String(character).utf8)))
+        }
     }
     #endif
 
     // MARK: - TerminalViewDelegate
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        transport.send(Data(data))
+        transport.send(InputSettings.optionMeta(Data(data), enabled: optionIsMeta))
     }
 
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {

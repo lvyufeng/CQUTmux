@@ -38,6 +38,15 @@ struct SyncPayload: Codable, Equatable {
     /// absent.
     var exportClientEnv: Bool?
 
+    /// The keyboard bar: whether Option is Meta, and whether the bar steps out
+    /// of the way for a hardware keyboard. The corner bindings are stored as
+    /// raw strings so an unrecognised action on the reading device is ignored
+    /// rather than making the whole payload fail to decode.
+    var optionIsMeta: Bool?
+    var hideBarWithHardwareKeyboard: Bool?
+    var barItems: [String]?
+    var dpadCorners: [String: String]?
+
     /// When this device last wrote the payload. Used only to decide which side
     /// is newer when both have changed; the clock is the device's, so a badly
     /// wrong clock loses that comparison. That is acceptable here because the

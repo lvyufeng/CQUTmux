@@ -25,6 +25,7 @@ struct SyncStores {
     let layout: SessionLayout
     let speech: SpeechSettings
     let integrations: IntegrationSettings
+    let input: InputSettings
 }
 
 extension SyncPayload {
@@ -43,6 +44,19 @@ extension SyncPayload {
         payload.sessionLayout = stores.layout.style.rawValue
         payload.speechEngine = stores.speech.engine.rawValue
         payload.exportClientEnv = stores.integrations.exportClientEnv
+
+        payload.optionIsMeta = stores.input.optionIsMeta
+        payload.hideBarWithHardwareKeyboard = stores.input.hideBarWithHardwareKeyboard
+        // Only a reordered or trimmed list is worth carrying; the default order
+        // is what an absent field already means on the other side.
+        if stores.input.items != InputSettings.defaultItems {
+            payload.barItems = stores.input.items.map(\.rawValue)
+        }
+        let corners = InputSettings.Corner.allCases.reduce(into: [String: String]()) { out, slot in
+            let action = stores.input.corner(slot)
+            if action != InputSettings.defaultCorner(slot) { out[slot.rawValue] = action.rawValue }
+        }
+        if !corners.isEmpty { payload.dpadCorners = corners }
         payload.updatedAt = Date()
         return payload
     }
@@ -86,5 +100,33 @@ extension SyncPayload {
         }
 
         if let exportClientEnv { stores.integrations.exportClientEnv = exportClientEnv }
+
+        if let optionIsMeta { stores.input.optionIsMeta = optionIsMeta }
+        if let hideBarWithHardwareKeyboard {
+            stores.input.hideBarWithHardwareKeyboard = hideBarWithHardwareKeyboard
+        }
+        // Absent means "this device never reordered the bar", and the honest
+        // response to that is to leave the local order alone rather than to
+        // import someone else's default over it.
+        //
+        // An array that arrives but parses to nothing — every raw value
+        // unrecognised, or empty — is ignored rather than applied, because
+        // `InputSettings` treats a bar with no items as "unset" (an empty bar
+        // is not a state anyone chose; it would come back looking broken). So
+        // the distinction is between an absent field and a present one, and the
+        // wire can carry a present-but-empty array all it likes: it cannot mean
+        // anything on this side, and imposing the local default on it would be
+        // a change the user did not ask for on either device.
+        if let barItems {
+            let restored = barItems.compactMap(InputSettings.Item.init(rawValue:))
+            if !restored.isEmpty { stores.input.items = restored }
+        }
+        if let dpadCorners {
+            for slot in InputSettings.Corner.allCases {
+                guard let raw = dpadCorners[slot.rawValue],
+                      let action = InputSettings.CornerAction(rawValue: raw) else { continue }
+                stores.input.setCorner(slot, to: action)
+            }
+        }
     }
 }

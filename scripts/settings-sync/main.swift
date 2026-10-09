@@ -212,6 +212,40 @@ check(
     "an unset marker is omitted rather than sent as false"
 )
 
+// MARK: - The input settings travel, and an absent field is not "off"
+
+// Same trap as the marker, in a worse form: these are three different shapes —
+// two flags and a list — and each one has a *meaningful* default. A device that
+// never touched its bar must not be told it removed every button, and a device
+// with Meta off must not be told it is on.
+var withInput = SyncPayload()
+withInput.optionIsMeta = true
+withInput.hideBarWithHardwareKeyboard = false
+withInput.barItems = ["control", "dpad"]
+withInput.dpadCorners = ["topLeading": "interrupt"]
+let inputJSON = String(data: try! JSONEncoder().encode(withInput), encoding: .utf8)!
+check(inputJSON.contains("optionIsMeta"), "the payload carries Option-as-Meta")
+check(inputJSON.contains("barItems"), "the payload carries the bar's item order")
+check(inputJSON.contains("dpadCorners"), "the payload carries the corner bindings")
+
+var untouched = SyncPayload()
+let untouchedJSON = String(data: try! JSONEncoder().encode(untouched), encoding: .utf8)!
+check(!untouchedJSON.contains("optionIsMeta"),
+      "an untouched Option setting is omitted, not sent as false")
+check(!untouchedJSON.contains("barItems"),
+      "an unmodified bar is omitted, so it cannot be read as an empty one")
+
+// The reason the omission matters: `nil` is not `[]` on the wire, so a payload
+// written before this field existed cannot be read as "this device removed
+// every button" — which, if it could, would import a bar with nothing on it
+// over a working one.
+var emptied = SyncPayload()
+emptied.barItems = []
+check(
+    String(data: try! JSONEncoder().encode(emptied), encoding: .utf8)!.contains("\"barItems\":[]"),
+    "an explicit empty list encodes differently from an omitted one"
+)
+
 // MARK: - Enable/disable
 
 let toggling = store("toggling")
