@@ -57,7 +57,7 @@
 | Agent 层 | Usages 看板（5h/7d 用量与 burn pace） | P4 |
 | 通知 | 本地/远程推送、webhook 告警 | P4 |
 | 系统 | Live Activity / Dynamic Island / Apple Watch | P4 / P6 ✅ 表盘实测 |
-| 语音 | 端侧听写（Apple Speech → whisper.cpp/parakeet） | P4 |
+| 语音 | 端侧听写（Apple Speech ✅ + whisper.cpp ✅ 已实测；cloud 引擎按 Moshi 是托管服务，不做） | P4 ✅ |
 | 输入 | 图片粘贴 / 裁剪 / 标注 / 发送 | P4 |
 | 安全 | SSH key 存 Keychain + Face ID 保护 | P1 |
 | 其他 | 远程剪贴板 OSC 52、Tailscale、iPad 分栏 | P5 |
@@ -98,9 +98,23 @@ Terminal 页 `connection.client == nil` 时连到当前主机；Code 页在**只
 而该 task 与「从磁盘读 HostStore」存在竞态；竞态输了时，**先进 Terminal 页会让会话选择器与图片粘贴按钮整场缺失**
 （Inbox 页自己会连，所以只在 Terminal 页暴露）。改为由需要这条隧道的 Terminal 页自己保证。
 
-**仍未做**：端侧听写只有 Apple Speech（无 whisper/parakeet 本地模型；
-且已改为**离线模型不可用即拒绝启动**，见下）；
-无原生 Windows、无 macOS 菜单栏 / Moshi Desktop（属另一产品）；
+**本轮新增：端侧 Whisper 听写**。此前端侧只有 Apple Speech，且它在语言没有装离线模型时
+会**静默上传音频**（已改为拒绝启动）。现按 `scripts/et-ios/` 的方式把 **whisper.cpp** 编成 iOS
+静态库并接到 App：`scripts/whisper-ios/build.sh` 交叉编译 whisper+ggml（Metal / BLAS / CPU 三个后端，
+Metal 着色器用 `GGML_METAL_EMBED_LIBRARY` 编进归档，App 不带 `.metal` 文件）；`driver/whisper_shim.c`
+是 C 缝，SwiftPM 只出 header（与 CQUTETC / CQUTMoshC 同构，SwiftPM 不允许 header search path 出包）；
+`WhisperDictation` 录音—转写，`WhisperModelStore` 按需下载模型（32 MB–574 MB，SHA-256 校验，
+可删除），`SpeechSettings` 在 Apple / Whisper 之间切换，设置页 `Speech` 管引擎与模型。
+**实测**：`scripts/whisper-ios/check.sh`（直接链归档，jfk.wav → 文本）与
+`scripts/whisper-ios/app-test.sh`（走 App 自身路径，同一段录音 → 容器内 transcript.txt）均通过，
+转写为 `And so my fellow Americans ask not what your country can do for you ask what you can do for your country.`
+**踩到的坑**：① 模拟器 Metal 能注册设备、能编译 kernel，但第一张图就 trap（`recommendedMaxWorkingSetSize = 0.00 MB`）——
+用同源码同参数编 macOS 版跑 Apple M4 的 Metal 路径**完全正确**，故判定是模拟器而非构建；App 在
+`#if targetEnvironment(simulator)` 下关 GPU，真机开。② 玩具模型贪婪解码会重复尾句，`single_segment` 才根治
+（听写本就是一句话，不需要 long-form）。③ `simctl spawn` 只能跑模拟器文件系统内的可执行文件，宿主机 `mktemp`
+路径会 dyld abort；且它会挑到第一个已启动设备——本机常常是 Apple Watch 模拟器。
+
+**仍未做**：无原生 Windows、无 macOS 菜单栏 / Moshi Desktop（属另一产品）；
 Tailscale 不需集成（Moshi 文档亦确认：它工作在系统层，用 100.x 地址直连即可）；
 SSH agent forwarding 与 APNs 投递受环境所限（见下表），非代码问题。
 
@@ -119,7 +133,7 @@ SSH agent forwarding 与 APNs 投递受环境所限（见下表），非代码�
 | ET | Eternal Terminal 客户端编为静态库 | 已实现：`scripts/et-ios/` 编出 `libetcore.a`（含自写 C 驱动器），App 侧 `CQUTET` 包接 `TerminalTransport` |
 | 宿主机 daemon | **Node.js**（`host/cqutmux-hook`） | 本机无 Go/Rust/C 工具链，Node 22 已就绪，单文件免编译 |
 | 密钥存储 | iOS Keychain + `LocalAuthentication` | 对齐"Face ID for Keys" |
-| 语音 | v1 `SFSpeechRecognizer`(on-device) → v2 whisper.cpp | 先快后精 |
+| 语音 | `SFSpeechRecognizer`(on-device) **与** whisper.cpp 双引擎，设置页可切 | 两者取舍不同：Apple 无下载但依赖系统离线模型（缺失时拒绝运行），whisper.cpp 需下载模型但语言/机型不受限 |
 | 项目生成 | **XcodeGen**（`project.yml` 为源） | 免手改 pbxproj，适合 agent 迭代 |
 | 依赖管理 | Swift Package Manager | 无 brew/CocoaPods 依赖 |
 
@@ -222,14 +236,14 @@ CJK 输入依赖 SwiftTerm 的
 
 | 项 | 原因 | 现状 |
 |---|---|---|
-| SSH agent forwarding | swift-nio-ssh 无 agent 通道——**已核到线级**：`SSHMessages.ChannelRequestMessage.RequestType` 只有 env/exec/exit-status/exit-signal/pty-req/shell/subsystem/window-change/xon-xoff/signal，没有 `auth-agent-req@openssh.com`，而 `ChannelRequestMessage` 是 internal，没有公开 API 能发出该请求。且 iOS 上也没有可转发的 agent socket | 打开开关时表单明确提示不可用 |
+| SSH agent forwarding | **此前把它归为"环境所限"是错的——它是 Moshi 真有的功能**。查 getmoshi.app/docs/connections：连接表单上有 "Forward SSH Agent" 开关，只在 Connection type = SSH 且密钥认证时出现，免费档可用，Mosh/ET/Auto 上隐藏（"Agent forwarding does not work over Mosh, ET, or Auto"）。关键在于它的语义：转发的是**这条连接自己存的那把私钥**（"Exactly one identity — the private key stored for that connection. Moshi is not a bridge to an external or hardware SSH agent"），即 App 自己当 agent，**不需要 iOS 上有 agent socket**——此前据此判定"不可能"是误判。<br>代码侧确认 `swift-nio-ssh` 确实没有该通道：`SSHMessages.ChannelRequestMessage.RequestType` 只有 env/exec/exit-status/exit-signal/pty-req/shell/subsystem/window-change/xon-xoff/signal，无 `auth-agent-req@openssh.com`，且 `ChannelRequestMessage` 是 internal，没有公开 API 能发出该请求，`grep -rn "auth-agent" Sources/` 为空。<br>**真正要做的**（尚未做）：① 发出 `auth-agent-req@openssh.com` 通道请求——要么给 `NIOSSH` 打补丁把 `ChannelRequestMessage` 与请求类型公开，要么在该通道上用 raw `SSHChannelData` 自己写；② 在 iOS 侧实现 ssh-agent 协议（`SSH2_AGENTC_REQUEST_IDENTITIES` / `SIGN_REQUEST`，经 `direct-tcpip` 通道接入），私钥取自 Keychain、用 `Crypto` 的 P256/Ed25519 签名。③ 已在 `Project.swift`/`project.yml` 的依赖里确认 `NIOSSH` 是 SPM 依赖，打补丁需改用 vendored fork。<br>**尚未实测**：Moshi 文档还说 "Moshi sends the request without waiting for a reply, so a server that refuses it fails quietly" —— 即失败是静默的，所以这条路要真机 + 真 `sshd` 的 `AllowAgentForwarding yes` 才验证得了 | App 里开关会明确提示尚不可用 |
 | herdr | **此前"无公开协议"的判断是错的**：herdr 是开源项目（`herdrdev/herdr`，Apache-2.0，Rust），有公开 CLI 与 socket API。**宿主侧已对接并实测**：`host/cqutmux-hook/herdr.mjs` 经 `herdr api snapshot` / `pane send-text` / `pane read`（走 SSH exec，无需转发——socket 是 Unix socket，`direct-tcpip` 到不了）暴露 `GET /herdr`、`GET /herdr/pane/:id`、`POST /herdr/approve/:id`。**App 侧已接入并实测**：herdr 的 workspace 折进既有的 `/sessions` 板（`mux: "herdr"`），会话选择器直接渲染，并显示 herdr 自己的 agent 状态；跳转走 `herdr tab focus <tab_id>`。上表已实测：对真实 herdr 0.9.3，选择器列出 `~ herdr blocked attached 2w` 与两个 tab；`herdr tab focus w1:t2` 使 `focused_tab_id` 实际变为 `w1:t2`。**踩到的真坑**：最初从 `agents` 数组反推 tab 列表，导致**没有 agent 的 tab 被静默丢掉**（实测 w1:t2 就消失了）；改为读 snapshot 自己的 `tabs` 数组。另：herdr 按 **tab id** 而非序号寻址 tab，因此窗口选择器从 `Int index` 改成字符串 `selector`（tmux/zellij 传序号字符串，herdr 传 `w1:t2`）。
 **Jump To 树已接并实测**：`GET /herdr` 多返回 tabs 及其 panes，App 侧 `JumpToView` 渲染 workspace→tab→pane 三级。
 **关键技术点**：`herdr pane focus` 是**方向性**的（`--direction left|right|up|down`），**无法指名**某个 pane，
 所以 Jump To 不能走 CLI。但 socket API 有 `pane.focus`，参数是 `PaneTarget{pane_id}`。
 网关本就跑在宿主上、紧挨着那个 Unix socket，于是直接说协议（`callHerdrSocket`，一行 JSON，`{id,method,params}` 信封，与 CLI 自身一致）。
 实测：`POST /herdr/focus/w1:p1` 后 herdr 自报 `focused_pane_id=w1:p1`，再 focus `w1:p2` 又变回 `w1:p2`——**确认焦点真的动了**，而不是返回 ok 却什么也没发生 |
-| 远程推送（APNs） | **两端代码已写全并已跑通到系统边界**：App 侧 `PushCoordinator`/`AppDelegate`（令牌注册、`CQUT_APPROVAL` 分类的锁屏 Allow/Deny、前后台推送回调）→ `POST /push/register` → 宿主 `push.mjs`（HTTP/2 + ES256 provider JWT，签名经 openssl 生成的测试密钥**验签通过**、64 字节裸 r‖s 编码正确）。**卡在签名**：模拟器日志 `Push registration with a nil environment`——无 `aps-environment` entitlement，而该 entitlement 必须有付费开发者账号的 provisioning profile。本地通知 + webhook 告警已覆盖同类场景 |
+| 远程推送（APNs） | **两端代码已写全并已跑通到系统边界**：App 侧 `PushCoordinator`/`AppDelegate`（令牌注册、`CQUT_APPROVAL` 分类的锁屏 Allow/Deny、前后台推送回调）→ `POST /push/register` → 宿主 `push.mjs`（HTTP/2 + ES256 provider JWT，签名经 openssl 生成的测试密钥**验签通过**、64 字节裸 r‖s 编码正确）。**卡在签名**：模拟器日志 `Push registration with a nil environment`——无 `aps-environment` entitlement，而该 entitlement 必须有付费开发者账号的 provisioning profile。本地通知 + webhook 告警已覆盖同类场景。<br>**查 Moshi 文档后的两点更正**：① 推送**不需要账号登录**，也不需要用户自备 Apple 开发者证书——Moshi 自己是发送方，走 `api.getmoshi.app` 再分发（Expo Push / APNs），文档只说 per-device "license join"，从未要求用户有开发者账号。也就是说，**如果要对齐，需要的不是用户掏钱，而是我们也得有一个托管推送服务**——这与 Moshi 自己声称的 "no session relay" 并不矛盾（它明确区分了会话中转与推送服务）。② 我们目前是**直接对 APNs 发**（provider JWT），所以确实需要付费账号；Moshi 的路线不需要。两条路都能到，只是前者要多一个自有服务。 |
 | Tailscale 网络探测 | **不需要**：Moshi 自己的文档写明它不做内置集成（"no built-in Tailscale host picker"，VPN 在系统层透明工作），用 `100.x.y.z` / MagicDNS 名当普通 SSH 目标即可 | 与 Moshi 一致；直连与隧道不受影响 |
 
 ## 5. 主要风险

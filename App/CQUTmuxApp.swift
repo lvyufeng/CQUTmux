@@ -21,6 +21,12 @@ struct CQUTmuxApp: App {
                 .task {
                     #if DEBUG
                     DebugSeed.apply(to: hostStore)
+                    // Runs off to the side: it loads a model and transcribes,
+                    // which is seconds of work, and the notification prompt
+                    // below should not wait behind it.
+                    if ProcessInfo.processInfo.environment["CQUT_DEV_TRANSCRIBE"] != nil {
+                        Task.detached { await SpeechDiagnostics.runIfRequested() }
+                    }
                     // UI runs can skip the permission prompt, which otherwise
                     // covers every screenshot taken in the first seconds.
                     if ProcessInfo.processInfo.environment["CQUT_DEV_NO_NOTIFS"] == "1" { return }

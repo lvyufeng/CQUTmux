@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import CQUTTransport
+import CQUTWhisper
 
 /// `sheet(item:)` needs an `Identifiable`; `UIImage` isn't one.
 struct PendingImage: Identifiable {
@@ -16,7 +17,9 @@ struct TerminalScreen: View {
     var link: DeepLink? = nil
 
     @State private var coordinator = TerminalCoordinator()
-    @State private var dictation = VoiceDictation()
+    @State private var settings = SpeechSettings()
+    @State private var speechModels = WhisperModelStore()
+    @State private var dictation: Dictation?
     @State private var showSessions = false
     @State private var annotating: PendingImage?
     @State private var pastedNotice: String?
@@ -126,15 +129,17 @@ struct TerminalScreen: View {
                 if connection.client == nil { connection.connect(to: host) }
             }
             .onAppear {
-                // Partial transcripts stream straight to the shell; a final
-                // one gets a newline so the agent receives the command.
-                dictation.onUpdate = { update in
-                    switch update {
-                    case .partial(let text): coordinator.setDictationPreview(text)
-                    case .final(let text):
-                        coordinator.setDictationPreview("")
-                        coordinator.terminal?.sendDictatedLine(text)
+                if dictation == nil {
+                    let engine = Dictation(settings: settings, models: speechModels)
+                    engine.onUpdate = { update in
+                        switch update {
+                        case .partial(let text): coordinator.setDictationPreview(text)
+                        case .final(let text):
+                            coordinator.setDictationPreview("")
+                            coordinator.terminal?.sendDictatedLine(text)
+                        }
                     }
+                    dictation = engine
                 }
                 #if DEBUG
                 if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "sessions" {
@@ -349,16 +354,23 @@ struct TerminalScreen: View {
     }
 
     private var dictationButton: some View {
-        Button {
-            dictation.toggle()
+        // The button reflects the selected engine's state, which is why this
+        // reads through `dictation` rather than owning a `VoiceDictation`: with
+        // whisper chosen, listening continues while the phrase is transcribed,
+        // and a button that claimed otherwise would invite a second press.
+        let listening = dictation?.isListening ?? false
+        return Button {
+            dictation?.toggle()
         } label: {
-            Image(systemName: dictation.isListening ? "waveform" : "mic")
-                .symbolEffect(.variableColor, isActive: dictation.isListening)
+            Image(systemName: listening ? "waveform" : "mic")
+                .symbolEffect(.variableColor, isActive: listening)
                 .frame(width: 40, height: 32)
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.roundedRectangle(radius: 6))
-        .tint(dictation.isListening ? Theme.accent : nil)
+        .tint(listening ? Theme.accent : nil)
+        .disabled(dictation?.isReady == false)
+        .accessibilityHint(dictation?.setupHint ?? "")
     }
 
     private func key(_ label: String, _ key: CtrlKey) -> some View {

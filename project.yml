@@ -26,6 +26,8 @@ packages:
     path: Packages/CQUTMosh
   CQUTET:
     path: Packages/CQUTET
+  CQUTWhisper:
+    path: Packages/CQUTWhisper
 
 targets:
   CQUTmuxWidgets:
@@ -85,6 +87,7 @@ targets:
       - package: CQUTTransport
       - package: CQUTMosh
       - package: CQUTET
+      - package: CQUTWhisper
       # libc++ and zlib: both drivers are C++, and mosh's compressor is zlib.
       # libresolv is ET's: ET's socket handler re-reads the resolver config
       # through res_9_init, which the other transports never touch.
@@ -115,7 +118,7 @@ targets:
         # define the same symbols — and the full one serves both, so mosh links
         # against ET's copy and its own -lite archive stays in Vendor/ unused.
         # libsodium is ET's handshake; nothing else in the app uses it.
-        OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/Vendor/moshclient/$(PLATFORM_NAME) -lmoshclient -L$(SRCROOT)/Vendor/etclient/$(PLATFORM_NAME) -letcore -lprotobuf -lsodium"
+        OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/Vendor/moshclient/$(PLATFORM_NAME) -lmoshclient -L$(SRCROOT)/Vendor/etclient/$(PLATFORM_NAME) -letcore -lprotobuf -lsodium -L$(SRCROOT)/Vendor/whisper/$(PLATFORM_NAME) -lwhisperclient -lwhisper -lggml -lggml-base -lggml-cpu -lggml-metal -lggml-blas -framework Metal -framework MetalKit -framework Accelerate -framework CoreML"
         CODE_SIGN_ENTITLEMENTS: App/CQUTmux.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -123,7 +126,7 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_NSFaceIDUsageDescription: "Unlock your SSH keys stored in the Keychain."
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Dictate commands into the terminal on-device."
-        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Transcribe your voice locally to send commands."
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Transcribe your voice locally to send commands. Apple's engine needs this even when it runs on-device."
     info:
       path: App/Info.plist
       properties:

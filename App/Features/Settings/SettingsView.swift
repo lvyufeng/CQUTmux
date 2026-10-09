@@ -9,6 +9,9 @@ struct SettingsView: View {
         if ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] == "font" {
             return AnyView(FontSettingsView())
         }
+        if ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] == "speech" {
+            return AnyView(SpeechSettingsView())
+        }
         #endif
         return AnyView(list)
     }
@@ -18,6 +21,13 @@ struct SettingsView: View {
             Section("Security") {
                 Label("SSH keys in Keychain", systemImage: "key.fill")
                 Label("Face ID unlock", systemImage: "faceid")
+            }
+            Section("Dictation") {
+                NavigationLink {
+                    SpeechSettingsView()
+                } label: {
+                    Label("Speech engine", systemImage: "waveform")
+                }
             }
             Section("Appearance") {
                 NavigationLink {
