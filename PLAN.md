@@ -214,13 +214,22 @@ Moshi 把两件事**分开**，设置同步（hosts/偏好）与**单独一个�
 一个改变"裸调用语义"的改动会直接弄坏现有安装。
 单个位置参数按 Moshi 的规则理解为**路径**（`cqutmux ~/src/api` 应是项目名，不能被当成拼错的命令）。
 
-**实测**：`scripts/cli-check.sh` **13 项**全绿，可重复运行（连跑两次均通过）。该检查抓到**三个真 bug**：
+**`install` 会替用户把 agent hook 写进配置**（对照 Moshi `moshi-hook install`："writes Moshi-owned entries
+into supported agent config files"，且**不动用户自己的 hook**）。我们此前只有一个 `claude-code-hook.sh`
+脚本，用户得**手改 `~/.claude/settings.json`**——这一步现在由 `install` 完成：
+按**命令字符串里是否含本脚本路径**识别自己的条目，于是用户自己的 hook 原样保留、我们的可原地更新而非叠加；
+写之前先留一份 `.cqutmux-backup`；**配置文件解析失败就拒绝写入并退出非零**（看不懂的文件是用户的，
+猜着改比不改更糟）；`--dry-run` 只打印不落盘。
+
+**实测**：`scripts/cli-check.sh` **18 项**全绿，可重复运行（连跑两次均通过）。该检查抓到**三个真 bug**：
 ① **`--port 24880` 的值被当成位置参数路径**——扫描位置参数时没有跳过带值标志的值，
    于是"裸调用"直接变成"打不开目录 /private/tmp/24880"；
 ② **`serve` 什么也不做就退出**——分派分支无条件 `process.exit(0)`，于是 `serve` 既没启动网关、
    又返回成功；现改为 `serve` 不进入分派、直接落到服务器代码；
 ③ 脚本自身的**端口争用**（后台 `node ... &` 记录的是子 shell 的 pid，`kill $!` 杀不掉 node），
    让 `status` 检查在上一轮残留的服务上"通过"——现按 pid 杀并让这个检查自带端口占用检测。
+**另实测**：把 `claude-code-hook.sh` 接在真实网关前，喂一份 Claude Code 的 PreToolUse 载荷，
+`GET /events` 确实拿到 `title: Write` / `kind: approval` / `data.session`（不是"脚本退出 0"就算数）。
 
 ## 2. 技术选型
 

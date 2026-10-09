@@ -22,7 +22,7 @@ cqutmux status      is a gateway running here, and what does it say
 cqutmux doctor      check tmux, git, ssh, the gateway and the token, in that order
 cqutmux logs [-f]   tail ~/.cqutmux/hook.log
 cqutmux serve       run the gateway, spelled out
-cqutmux install     how to keep the gateway running at login
+cqutmux install     write agent hooks + how to keep the gateway running
 cqutmux pair        host, address, port and token — what to enter in the app
 cqutmux help
 ```
@@ -31,6 +31,24 @@ A single argument is a **path**, not a subcommand, so `cqutmux ~/src/api` names
 a project rather than being read as a typo'd command. `scripts/cli-check.sh`
 covers this file's behaviour, including the one thing that must not change:
 that a bare invocation still starts the gateway.
+
+### What `install` writes
+
+`cqutmux install` adds our hook to `~/.claude/settings.json` for you, rather
+than leaving you to edit it by hand. The rules it follows:
+
+- **Your hooks are kept.** Ours are recognised by the bridge script's path, so
+  anything already in the file — other hooks, unrelated settings — survives.
+- **Re-running updates, it does not stack.** Run it twice and the file is the
+  same as after one run.
+- **It backs up first.** The original is copied to
+  `~/.claude/settings.json.cqutmux-backup` on the first write.
+- **A file it cannot parse is left alone.** If the JSON is invalid, it says so
+  and exits non-zero rather than rewriting something it does not understand.
+- **`--dry-run` prints what it would write** and touches nothing.
+
+Pass `CQUTMUX_PORT` to the bridge if the gateway is not on 24543; `install`
+writes the script path, which reads the port from the environment at run time.
 
 `--webhook` posts a small JSON alert to an external endpoint (Slack, ntfy, a
 phone Shortcut…) whenever an `approval` event arrives. Delivery is

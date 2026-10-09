@@ -21,8 +21,9 @@ import { createServer } from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { execFile, spawn } from 'node:child_process'
-import { readdir, readFile, stat, mkdir, writeFile, rm } from 'node:fs/promises'
-import { resolve, relative, isAbsolute, join } from 'node:path'
+import { readdir, readFile, stat, mkdir, writeFile, rm, chmod } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { resolve, relative, isAbsolute, join, dirname } from 'node:path'
 import { homedir, hostname, networkInterfaces, tmpdir } from 'node:os'
 import { createPushService } from './push.mjs'
 import { herdrStatus, herdrSnapshot, herdrApprove, herdrRead, herdrFocusPane } from './herdr.mjs'
@@ -843,7 +844,7 @@ async function runCommand(name, argv) {
     case 'logs':
       return logs(argv.includes('-f') || argv.includes('--follow'))
     case 'install':
-      return install()
+      return install(argv)
     case 'diff':
       return diff(argv)
   }
@@ -943,8 +944,70 @@ async function logs(follow) {
   child.on('exit', code => process.exit(code ?? 0))
 }
 
-function install() {
-  process.stdout.write(`Keep the gateway running at login.
+async function install(argv) {
+  const dryRun = argv.includes('--dry-run') || argv.includes('--print')
+
+  // 1. Agent hook config.
+  const bridge = join(import.meta.dirname, 'claude-code-hook.sh')
+  const target = join(homedir(), '.claude', 'settings.json')
+
+  const wanted = {
+    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `"${bridge}" approval` }] }],
+    Stop: [{ hooks: [{ type: 'command', command: `"${bridge}" notice` }] }],
+  }
+
+  let existing = {}
+  let raw = null
+  try {
+    raw = await readFile(target, 'utf8')
+    existing = JSON.parse(raw)
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      // A settings file that does not parse is the user's, and guessing at it
+      // risks throwing away their work. Report and stop rather than rewrite.
+      process.stderr.write(`cqutmux: ${target} is not valid JSON (${error.message})\n`)
+      process.stderr.write(`cqutmux: leaving it alone; nothing was written\n`)
+      process.exit(1)
+    }
+  }
+
+  // Merge without disturbing anything already there: Moshi's promise, and the
+  // right one — a hook installer that drops someone's existing hooks is worse
+  // than no installer. Our entries are recognised by the command string, so
+  // re-running updates them in place instead of stacking duplicates.
+  const merged = structuredClone(existing)
+  merged.hooks ??= {}
+  let changed = 0
+  for (const [event, additions] of Object.entries(wanted)) {
+    const current = Array.isArray(merged.hooks[event]) ? merged.hooks[event] : []
+    const mine = current.filter(group => isOurs(group, bridge))
+    const theirs = current.filter(group => !isOurs(group, bridge))
+    if (JSON.stringify(mine) !== JSON.stringify(additions)) changed++
+    merged.hooks[event] = [...theirs, ...additions]
+  }
+
+  if (dryRun) {
+    process.stdout.write(`would write ${target}:\n`)
+    process.stdout.write(JSON.stringify({ hooks: merged.hooks }, null, 2) + '\n')
+  } else {
+    await mkdir(dirname(target), { recursive: true })
+    if (raw !== null) {
+      // Keep a copy the first time, so a mistaken install is reversible.
+      const backup = `${target}.cqutmux-backup`
+      if (!existsSync(backup)) await writeFile(backup, raw)
+    }
+    await writeFile(target, JSON.stringify(merged, null, 2) + '\n')
+    await chmod(bridge, 0o755).catch(() => {})
+    process.stdout.write(
+      changed === 0
+        ? `hooks already installed in ${target}\n`
+        : `installed hooks in ${target}${raw !== null ? ` (backup: ${target}.cqutmux-backup)` : ''}\n`
+    )
+  }
+
+  // 2. Supervision.
+  process.stdout.write(`
+Keep the gateway running at login.
 
   macOS (launchd):
     cqutmux serve >> ~/.cqutmux/hook.log 2>&1 &
@@ -955,6 +1018,13 @@ function install() {
 The app reaches this port over the SSH session it already has, so there is no
 need to open a firewall port or expose it to the network. Bind stays loopback.
 `)
+}
+
+/// Whether a hook group belongs to us. Matched on the bridge script's path
+/// rather than on an index or a count, so a user's own hooks survive and ours
+/// can be updated without knowing where they ended up.
+function isOurs(group, bridge) {
+  return (group?.hooks ?? []).some(h => typeof h?.command === 'string' && h.command.includes(bridge))
 }
 
 /// Shows a repo's diff in the browser, on loopback only.

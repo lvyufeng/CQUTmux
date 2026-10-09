@@ -119,6 +119,67 @@ run install > "$OUT/install.txt" 2>&1 || fail "install exited non-zero"
 grep -q "loopback" "$OUT/install.txt" || fail "install does not say the port stays off the network"
 ok "install explains how to keep the gateway running"
 
+# MARK: - install wiring agent hooks
+#
+# Against a throwaway HOME: the real one belongs to whoever runs this, and an
+# installer that rewrites it is exactly what these checks are here to prevent.
+
+FAKE_HOME="$OUT/home"
+mkdir -p "$FAKE_HOME/.claude"
+cat > "$FAKE_HOME/.claude/settings.json" <<'JSON'
+{
+  "model": "opus",
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "/usr/local/bin/theirs.sh" }] }
+    ]
+  }
+}
+JSON
+
+HOME="$FAKE_HOME" run install --dry-run > "$OUT/dryrun.txt" 2>&1 || fail "install --dry-run exited non-zero"
+grep -q "would write" "$OUT/dryrun.txt" || fail "--dry-run did not say it was a rehearsal"
+grep -q "theirs.sh" "$OUT/dryrun.txt" || fail "--dry-run would drop the user's own hook"
+grep -q '"model": "opus"' "$FAKE_HOME/.claude/settings.json" || fail "--dry-run modified the file"
+ok "install --dry-run writes nothing"
+
+HOME="$FAKE_HOME" run install > "$OUT/install2.txt" 2>&1 || fail "install exited non-zero"
+python3 -I -c "
+import json, sys
+d = json.load(open('$FAKE_HOME/.claude/settings.json'))
+pre = d['hooks']['PreToolUse']
+assert d['model'] == 'opus', 'unrelated settings were dropped'
+assert any('theirs.sh' in h['command'] for g in pre for h in g['hooks']), 'the user hook was dropped'
+assert any('cqutmux' in h['command'] for g in pre for h in g['hooks']), 'our hook was not added'
+assert len(pre) == 2, f'expected 2 PreToolUse groups, got {len(pre)}'
+assert len(d['hooks']['Stop']) == 1, 'the Stop hook was not installed'
+" || fail "install did not merge cleanly into the user's config"
+ok "install adds its hooks and keeps the user's"
+
+[ -f "$FAKE_HOME/.claude/settings.json.cqutmux-backup" ] || fail "install left no backup"
+ok "install backs up the file it edits"
+
+HOME="$FAKE_HOME" run install > /dev/null 2>&1 || fail "a second install exited non-zero"
+python3 -I -c "
+import json
+d = json.load(open('$FAKE_HOME/.claude/settings.json'))
+pre = d['hooks']['PreToolUse']
+assert len(pre) == 2, f'installing twice duplicated the hooks: {len(pre)} groups'
+" || fail "install is not idempotent"
+ok "installing twice does not stack duplicate hooks"
+
+# A config that does not parse is the user's, and guessing at it risks losing
+# their work — so the only safe thing is to refuse and say why.
+BAD_HOME="$OUT/badhome"
+mkdir -p "$BAD_HOME/.claude"
+echo '{ broken' > "$BAD_HOME/.claude/settings.json"
+if HOME="$BAD_HOME" run install > "$OUT/bad.txt" 2>&1; then
+  fail "install succeeded against a file it could not parse"
+fi
+grep -q "not valid JSON" "$OUT/bad.txt" || fail "install did not explain the parse failure"
+[ "$(cat "$BAD_HOME/.claude/settings.json")" = '{ broken' ] || fail "install rewrote a file it could not parse"
+ok "install refuses a config it cannot parse, and leaves it alone"
+
 # MARK: - diff, from a repo and outside one
 
 run diff "$ROOT" > "$OUT/diff.txt" 2>&1 || fail "diff failed inside a repository"
