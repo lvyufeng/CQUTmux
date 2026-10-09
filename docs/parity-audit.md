@@ -104,3 +104,16 @@ has since been closed, with the check that pins it.
 - **Dictation language and auto-send** — a language picker (automatic or
   pinned) and a switch for submit-vs-review after dictating; both sync.
 - **Keep screen on; hide the Code tab** — Settings → Agents. Neither syncs.
+
+- **Host CLI subcommands** — `set` (read/write the `[gateway]` config, refusing
+  unknown keys and normalising `on`/`off` to booleans), `usage` (fetches the
+  gateway's `/usage`, since the event log is in the daemon's memory and a
+  standalone computation would print an empty board), `version`, and
+  `uninstall` (removes only the hooks this tool installed, matched by its own
+  bridge path so hand-written hooks survive).
+- **`usage-collection` / `always-on-discovery` actually do something now** —
+  both gate their endpoint on a fresh config read.
+
+Note on the last one: the config file is read once at daemon start, so
+`cqutmux set` on a running gateway takes effect on the next start, not
+immediately. Moshi's own hook-settings docs imply the same for its daemon.

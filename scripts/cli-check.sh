@@ -452,4 +452,48 @@ fi
 grep -q "no such directory" "$OUT/badpath.txt" || fail "a missing path gave the wrong error"
 ok "a missing path is refused, not mistaken for a command"
 
+# MARK: - version, set, uninstall
+
+# The gateway version and the app version have to be the same number — they
+# are released together, and a `cqutmux version` that disagrees with what the
+# app's Support screen shows is worse than not having the command.
+APP_VERSION="$(grep -m1 'MARKETING_VERSION' "$ROOT/project.yml" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+run version > "$OUT/version.txt" 2>&1 || fail "version failed"
+grep -q "$APP_VERSION" "$OUT/version.txt" \
+  || fail "version does not match project.yml ($APP_VERSION): $(cat "$OUT/version.txt")"
+ok "version matches the app's MARKETING_VERSION"
+
+# `set` writes the config file the reader parses, and `on`/`off` mean the
+# booleans — a quoted "off" would read back as a truthy string and turn the
+# setting *on*, which is the failure this check exists for.
+CFG="$(mktemp -d)/config.toml"
+CQUTMUX_CONFIG="$CFG" run set usage-collection off > /dev/null || fail "set failed"
+grep -q 'usage_collection = false' "$CFG" || fail "set did not write a boolean: $(cat "$CFG")"
+CQUTMUX_CONFIG="$CFG" run set usage-collection > "$OUT/get.txt" 2>&1
+grep -q 'false' "$OUT/get.txt" || fail "set did not read back what it wrote"
+ok "set writes a value the config reader reads back as a boolean"
+
+# An unknown key has to be refused rather than written and ignored: a typo that
+# silently does nothing is exactly what this command exists to prevent.
+if CQUTMUX_CONFIG="$CFG" run set not-a-setting 1 > "$OUT/badset.txt" 2>&1; then
+  fail "set accepted an unknown key"
+fi
+grep -q 'unknown setting' "$OUT/badset.txt" || fail "set gave the wrong error for an unknown key"
+ok "set refuses an unknown key"
+
+# A repeated write must not grow the file a blank line at a time.
+BEFORE="$(wc -c < "$CFG")"
+CQUTMUX_CONFIG="$CFG" run set usage-collection off > /dev/null
+CQUTMUX_CONFIG="$CFG" run set usage-collection off > /dev/null
+AFTER="$(wc -c < "$CFG")"
+[[ "$BEFORE" == "$AFTER" ]] || fail "repeated set grew the config file ($BEFORE -> $AFTER)"
+ok "setting the same value twice leaves the file unchanged"
+
+# `usage` needs a gateway — it says so rather than printing an empty board.
+if CQUT_CLI_UNUSED=1 run usage --port 24997 > "$OUT/usage.txt" 2>&1; then
+  fail "usage succeeded with no gateway"
+fi
+grep -q 'no gateway' "$OUT/usage.txt" || fail "usage blamed the wrong thing"
+ok "usage explains that it needs a running gateway"
+
 printf '\nCLI_CHECK_PASS  (%d checks)\n' "$PASS"

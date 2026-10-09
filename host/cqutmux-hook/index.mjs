@@ -22,7 +22,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { execFile, spawn } from 'node:child_process'
 import { readdir, readFile, stat, mkdir, writeFile, appendFile, rm, chmod } from 'node:fs/promises'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve, relative, isAbsolute, join, dirname } from 'node:path'
 import { homedir, hostname, networkInterfaces, tmpdir, userInfo } from 'node:os'
 import { createPushService } from './push.mjs'
@@ -1010,7 +1010,27 @@ const server = createServer(async (req, res) => {
 // the right one): `cqutmux ~/src/api` should name a project, never be mistaken
 // for a typo'd command.
 
-const COMMANDS = new Set(['pair', 'install', 'serve', 'status', 'doctor', 'logs', 'diff', 'help'])
+/// The version. Kept here rather than read from a package.json, because there
+/// is no package.json — this host ships as loose .mjs files — and inventing a
+/// `0.0.0` fallback would make `cqutmux version` print a number that is not the
+/// app's. `scripts/cli-check.sh` asserts this string matches `project.yml`'s
+/// MARKETING_VERSION, so the two cannot drift apart unnoticed.
+const VERSION = '0.1.0'
+
+/// `cqutmux set` — read, or write one key, of the config file.
+///
+/// Writes the file rather than a flag so the setting persists the way the
+/// parser expects to find it. Unknown keys are refused: the config file is
+/// parsed by a small hand-rolled reader, and a typo'd key that silently did
+/// nothing would be the exact failure this command exists to make visible.
+const SETTABLE = [
+  'always_on_discovery', 'usage_collection', 'suppress_nested_agent_push', 'scan_ports',
+]
+
+const COMMANDS = new Set([
+  'pair', 'install', 'uninstall', 'serve', 'status', 'doctor', 'logs', 'diff',
+  'set', 'usage', 'version', 'help',
+])
 
 function usage() {
   return `cqutmux — host side for the CQUTmux app
@@ -1022,7 +1042,11 @@ function usage() {
   cqutmux logs [-f]      tail the gateway log
   cqutmux serve          run the gateway (same as running with no arguments)
   cqutmux install        print how to keep the gateway running
+  cqutmux uninstall      remove the hooks this tool installed
+  cqutmux set            show the config settings, or change one
+  cqutmux usage          agent rate-limit windows, as the app shows them
   cqutmux pair           set up a phone: print a link and its QR code
+  cqutmux version        print the version
   cqutmux help           this text
 
 Options: --port N  --token S  --root DIR  --user U  --host H`
@@ -1052,7 +1076,10 @@ if (command === 'serve') {
   // the code below. Exiting here would start nothing and look like success.
 } else if (command) {
   await runCommand(command, argv)
-  process.exit(0)
+  // Honour an exit code a command set. `status` and `usage` signal "no
+  // gateway" that way, and forcing 0 here would make `cqutmux status` succeed
+  // in a script that just found no gateway.
+  process.exit(process.exitCode ?? 0)
 } else if (positional) {
   // A lone path means "take me to that project's session".
   await launchProjectSession(positional)
@@ -1101,9 +1128,209 @@ async function runCommand(name, argv) {
       return logs(argv.includes('-f') || argv.includes('--follow'))
     case 'install':
       return install(argv)
+    case 'uninstall':
+      return uninstall()
     case 'diff':
       return diff(argv)
+    case 'set':
+      return setCommand(positionals.slice(1))
+    case 'usage':
+      return usageCommand()
+    case 'version':
+      return versionCommand()
   }
+}
+
+/// `cqutmux version`. The app and the gateway are versioned together, so this
+/// is the same number the app's Support screen shows.
+function versionCommand() {
+  process.stdout.write(`cqutmux ${VERSION}\n`)
+}
+
+function setCommand(rest) {
+  const config = loadConfig()
+  if (rest.length === 0) {
+    process.stdout.write(`${config.path}\n`)
+    for (const key of SETTABLE) {
+      const value = config.values[`gateway.${key}`]
+      process.stdout.write(`  ${key} = ${value === undefined ? '(unset)' : JSON.stringify(value)}\n`)
+    }
+    return
+  }
+  const [key, raw] = rest
+  const name = key.replace(/-/g, '_')
+  if (!SETTABLE.includes(name)) {
+    process.stderr.write(`cqutmux: unknown setting "${key}". Known: ${SETTABLE.join(', ')}\n`)
+    process.exitCode = 1
+    return
+  }
+  if (raw === undefined) {
+    const value = config.values[`gateway.${name}`]
+    process.stdout.write(`${value === undefined ? '(unset)' : JSON.stringify(value)}\n`)
+    return
+  }
+  const value = parseSetting(raw)
+  writeConfigValue(config, name, value)
+  process.stdout.write(`[gateway] ${name} = ${JSON.stringify(value)}\n`)
+}
+
+/// Turns a command-line word into the value the config reader would produce.
+///
+/// The reader turns `true`/`false` into booleans and everything else into a
+/// string, and the gateway branches on `=== false` for these keys — so writing
+/// the quoted string `"off"` for `set usage-collection off` would persist a
+/// value that reads back as a truthy string and turns the setting *on*. Because
+/// of that, `on`/`off` are accepted here as spellings of the booleans, which is
+/// what a person types for a switch.
+function parseSetting(raw) {
+  const word = raw.trim()
+  if (word === 'true' || word === 'on' || word === 'yes') return true
+  if (word === 'false' || word === 'off' || word === 'no') return false
+  return parseValue(word)
+}
+
+/// Rewrites one `[gateway]` key, leaving every other line — comments included —
+/// untouched. A hand-rolled reader deserves a hand-rolled writer: rebuilding the
+/// file from the parsed object would silently drop the comments someone put
+/// there to explain their own settings.
+///
+/// The one comment that cannot survive is a trailing one on the line being
+/// changed, since the whole line is replaced. That is the right trade: a
+/// comment that says "keep me on" next to a value that now says `false` is
+/// worse than no comment at all.
+function writeConfigValue(config, key, value) {
+  let lines = []
+  try {
+    lines = readFileSync(config.path, 'utf8').split('\n')
+  } catch {
+    lines = []
+  }
+  const rendered = typeof value === 'string' ? `"${value}"` : JSON.stringify(value)
+  const assignment = `${key} = ${rendered}`
+
+  let sectionStart = -1
+  let sectionEnd = lines.length
+  let replaced = false
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/#.*$/, '').trim()
+    const header = line.match(/^\[([^\]]+)\]$/)
+    if (header) {
+      if (sectionStart !== -1) { sectionEnd = i; break }
+      if (header[1].trim() === 'gateway') sectionStart = i
+      continue
+    }
+    if (sectionStart !== -1 && i > sectionStart) {
+      const pair = line.match(/^([A-Za-z0-9_-]+)\s*=/)
+      if (pair && pair[1] === key) {
+        lines[i] = assignment
+        replaced = true
+      }
+    }
+  }
+
+  if (!replaced) {
+    if (sectionStart === -1) {
+      // No [gateway] section at all: append one, keeping any trailing newline
+      // from doubling up.
+      while (lines.length && lines[lines.length - 1].trim() === '') lines.pop()
+      if (lines.length) lines.push('')
+      lines.push('[gateway]', assignment, '')
+    } else {
+      // Insert after the section's last real line, not at its index boundary:
+      // appending at `sectionEnd` would land *after* a trailing blank line that
+      // belongs to the section, leaving the new key visually detached from the
+      // ones above it. Walk back over blanks to find where the section's
+      // content actually stops.
+      let at = sectionEnd
+      while (at > sectionStart + 1 && lines[at - 1].trim() === '') at--
+      lines.splice(at, 0, assignment)
+    }
+  } else {
+    // An edit that replaced a line has consumed no trailing newline; an edit
+    // that appended one has one to spare. Normalising to a single trailing
+    // newline keeps repeated `set` calls from growing the file a blank line at
+    // a time.
+    while (lines.length && lines[lines.length - 1].trim() === '') lines.pop()
+    lines.push('')
+  }
+
+  mkdirSync(dirname(config.path), { recursive: true })
+  writeFileSync(config.path, lines.join('\n'))
+}
+
+/// `cqutmux usage` — the same windows the app's Usages board shows.
+///
+/// Fetched from a running gateway rather than computed here, because the event
+/// log lives in the daemon's memory: a fresh process has seen no events, so a
+/// standalone computation would print an empty board and look like a broken
+/// feature. This reaches the gateway over the same loopback endpoint the app
+/// does, which also means it sees exactly what the app sees.
+async function usageCommand() {
+  const url = `http://127.0.0.1:${args.port}/usage`
+  let body
+  try {
+    const response = await fetch(url, { headers: authHeaders() })
+    if (!response.ok) {
+      process.stderr.write(`cqutmux: gateway answered ${response.status} on port ${args.port}\n`)
+      process.exit(1)
+    }
+    body = await response.json()
+  } catch (error) {
+    process.stderr.write(
+      `cqutmux: no gateway on 127.0.0.1:${args.port} (${error.message})\n` +
+      `Usage is counted from events the gateway has seen, so it needs one running.\n`
+    )
+    process.exit(1)
+  }
+  if (body.enabled === false) {
+    process.stdout.write('usage collection is off (cqutmux set usage-collection on)\n')
+    return
+  }
+  if (!body.entries || !body.entries.length) {
+    process.stdout.write('no agent events recorded yet\n')
+    return
+  }
+  for (const entry of body.entries) {
+    process.stdout.write(`${entry.label}\n`)
+    for (const window of entry.windows) {
+      const reset = window.resetIn ? `, resets in ${window.resetIn}` : ''
+      process.stdout.write(`  ${window.label.padEnd(3)} ${String(window.percent).padStart(5)}%${reset}\n`)
+    }
+    process.stdout.write(`  ${entry.pace}\n`)
+  }
+}
+
+/// `cqutmux uninstall` — remove the hooks `install` wrote.
+///
+/// Only the entries this tool added, matched by the bridge script path, so a
+/// hand-written hook of the user's own in the same file is left alone. The
+/// backup `install` made is deliberately not restored: it would also undo any
+/// hook the user added after installing, which is a bigger surprise than
+/// leaving a `.cqutmux-backup` file behind for them to inspect.
+async function uninstall() {
+  const target = join(homedir(), '.claude', 'settings.json')
+  let settings
+  try {
+    settings = JSON.parse(readFileSync(target, 'utf8'))
+  } catch {
+    process.stdout.write(`nothing to uninstall: no readable ${target}\n`)
+    return
+  }
+  const hooks = settings.hooks || {}
+  let removed = 0
+  for (const [event, entries] of Object.entries(hooks)) {
+    if (!Array.isArray(entries)) continue
+    const kept = entries.filter(entry => !JSON.stringify(entry).includes('claude-code-hook'))
+    removed += entries.length - kept.length
+    if (kept.length) hooks[event] = kept
+    else delete hooks[event]
+  }
+  if (!removed) {
+    process.stdout.write(`nothing to uninstall: no cqutmux hooks in ${target}\n`)
+    return
+  }
+  writeFileSync(target, JSON.stringify(settings, null, 2))
+  process.stdout.write(`removed ${removed} hook entr${removed === 1 ? 'y' : 'ies'} from ${target}\n`)
 }
 
 /// The address the phone should dial: the first non-loopback IPv4, or whatever
