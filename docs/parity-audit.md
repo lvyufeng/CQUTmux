@@ -299,3 +299,27 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   through the interpreter for the gesture logic and drives the zoom route
   against a live herdr, reading the result back from herdr's own layout rather
   than from the route's reply.
+
+- **Per-file diffs, and a diff viewer that stays where you left it.** The
+  Changes tab listed changed files but showed one flat diff of everything, in
+  the system's monospaced stack. It now lists files (name over directory, the
+  current one bookmarked) and opens each one's hunks on its own, narrowed on
+  the host by `GET /diff?file=` rather than filtered on the phone — re-sending a
+  whole working tree's diff to show one hunk is a megabyte of text the phone
+  already has. Every diff and source view renders in the terminal's own font and
+  line spacing, so the code you are reviewing is set in the same face as the
+  code you are writing; a review that changes typeface is a review where
+  alignment stops matching the terminal beside it. The remembered file and line
+  are persisted, because a review is not one sitting.
+
+  The check for this caught a real bug worth naming: `?file=/etc/passwd` was
+  being re-rooted by `path.join` *before* the root-confinement check, so the
+  check passed and git was handed a path outside the tree — answering 200 with
+  an empty diff, which reads as a clean file rather than a refused request.
+  Absolute and upward-escaping paths are now refused with 403, asserted for
+  three traversal spellings. `scripts/diff-check.sh` also covers the two
+  one-shot CLI flags Moshi documents: `--verbose`, whose diagnostics go to
+  stderr so a script parsing the command's output is unaffected, and
+  `--base-url`, a one-shot override of the loopback address for a gateway
+  reached through an SSH port-forward, where the port is right and the host is
+  not.

@@ -728,6 +728,23 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/diff') {
     const dir = safePath(url.searchParams.get('path') || '')
     if (!dir) return json(res, 403, { error: 'path outside root' })
+    // `?file=` narrows the diff to one path, which is what the app asks for
+    // when you open a changed file: the full-repo diff is still in the payload
+    // for the list, and re-sending it to show one file would be a megabyte of
+    // text the phone already has.
+    const file = url.searchParams.get('file')
+    if (file) {
+      // Refused rather than joined when absolute: `join` would quietly re-root
+      // `/etc/passwd` under the repo, so the check would *pass* and git would
+      // then be handed a path outside the tree — answering 200 with an empty
+      // diff, which looks like a clean file rather than a refused request.
+      // A path that escapes upward is refused the same way.
+      if (isAbsolute(file) || !safePath(join(dir, file))) {
+        return json(res, 403, { error: 'file outside root' })
+      }
+      // `--` so a filename that looks like a flag or a revision is a path.
+      return json(res, 200, await gitDiff(dir, ['--', file]))
+    }
     return json(res, 200, await gitDiff(dir))
   }
 
@@ -1139,7 +1156,7 @@ function usage() {
   cqutmux serve          run the gateway (same as running with no arguments)
   cqutmux install        print how to keep the gateway running
   cqutmux uninstall      remove the hooks this tool installed
-  cqutmux set            show the config settings, or change one
+  cqutmux set            show the config settings and their file, or change one
   cqutmux set --first-run  reopen the first-run prompt on the next install
   cqutmux update         re-wire the hooks and report the version
   cqutmux usage          agent rate-limit windows, as the app shows them
@@ -1147,7 +1164,9 @@ function usage() {
   cqutmux version        print the version
   cqutmux help           this text
 
-Options: --port N  --token S  --root DIR  --user U  --host H`
+Options: --port N  --token S  --root DIR  --user U  --host H
+         --base-url URL  talk to a forwarded gateway elsewhere
+         --verbose       show the requests, on stderr`
 }
 
 const argv = process.argv.slice(2)
@@ -1156,6 +1175,9 @@ const argv = process.argv.slice(2)
 const VALUED_FLAGS = new Set([
   '--port', '--token', '--root', '--webhook', '--push-key', '--push-key-id',
   '--push-team-id', '--push-topic', '--herdr', '--user', '--host',
+  // One-shot overrides for the commands that talk to a gateway: a different
+  // machine's port-forward, or the same command with its reasoning shown.
+  '--base-url',
 ])
 const positionals = []
 for (let i = 0; i < argv.length; i++) {
@@ -1250,7 +1272,10 @@ function versionCommand() {
 function setCommand(rest) {
   const config = loadConfig()
   if (rest.length === 0) {
+    // The path is the answer to "which file is in effect", and it goes to
+    // stdout because it is the command's output, not a diagnostic.
     process.stdout.write(`${config.path}\n`)
+    note(`${SETTABLE.length} setting(s); unset means the built-in default`)
     for (const key of SETTABLE) {
       const value = config.values[`gateway.${key}`]
       process.stdout.write(`  ${key} = ${value === undefined ? '(unset)' : JSON.stringify(value)}\n`)
@@ -1384,18 +1409,19 @@ function writeConfigValue(config, key, value) {
 /// feature. This reaches the gateway over the same loopback endpoint the app
 /// does, which also means it sees exactly what the app sees.
 async function usageCommand(sync = false) {
-  const url = `http://127.0.0.1:${args.port}/usage`
+  const url = `${baseUrl()}/usage`
+  note(`GET ${url}${sync ? '?sync=1' : ''}`)
   let body
   try {
     const response = await fetch(url, { headers: authHeaders() })
     if (!response.ok) {
-      process.stderr.write(`cqutmux: gateway answered ${response.status} on port ${args.port}\n`)
+      process.stderr.write(`cqutmux: gateway answered ${response.status} at ${baseUrl()}\n`)
       process.exit(1)
     }
     body = await response.json()
   } catch (error) {
     process.stderr.write(
-      `cqutmux: no gateway on 127.0.0.1:${args.port} (${error.message})\n` +
+      `cqutmux: no gateway at ${baseUrl()} (${error.message})\n` +
       `Usage is counted from events the gateway has seen, so it needs one running.\n`
     )
     process.exit(1)
@@ -1676,18 +1702,20 @@ if (existsSync(keyPath)) {
 /// health endpoint rather than trusting a pid file, because a stale pid file is
 /// exactly the thing this command exists to catch.
 async function status(asJson) {
-  const url = `http://127.0.0.1:${args.port}/health`
+  const url = `${baseUrl()}/health`
+  note(`GET ${url}${args.token ? ' (token set)' : ' (no token)'}`)
   try {
     const response = await fetch(url, { headers: authHeaders() })
     if (!response.ok) {
-      if (asJson) return emitStatusJson({ running: false, port: args.port, error: `HTTP ${response.status}` })
-      process.stderr.write(`cqutmux: gateway answered ${response.status} on port ${args.port}\n`)
+      if (asJson) return emitStatusJson({ running: false, url: baseUrl(), port: args.port, error: `HTTP ${response.status}` })
+      process.stderr.write(`cqutmux: gateway answered ${response.status} at ${baseUrl()}\n`)
       process.exit(1)
     }
     const body = await response.json()
     if (asJson) {
       return emitStatusJson({
         running: true,
+        url: baseUrl(),
         port: args.port,
         events: body.events,
         pendingApprovals: body.pendingApprovals,
@@ -1696,15 +1724,15 @@ async function status(asJson) {
         configPath: Object.keys(config.values).some(k => k.startsWith('gateway.')) ? config.path : null,
       })
     }
-    process.stdout.write(`running on 127.0.0.1:${args.port}\n`)
+    process.stdout.write(`running on ${baseUrl()}\n`)
     process.stdout.write(`events   ${body.events}\n`)
     process.stdout.write(`pending  ${body.pendingApprovals}\n`)
     process.stdout.write(`uptime   ${body.uptime}s\n`)
     process.stdout.write(`config   ${Object.keys(config.values).some(k => k.startsWith('gateway.'))
       ? config.path : 'defaults'}\n`)
   } catch (error) {
-    if (asJson) return emitStatusJson({ running: false, port: args.port, error: error.message })
-    process.stderr.write(`cqutmux: no gateway on 127.0.0.1:${args.port} (${error.message})\n`)
+    if (asJson) return emitStatusJson({ running: false, url: baseUrl(), port: args.port, error: error.message })
+    process.stderr.write(`cqutmux: no gateway at ${baseUrl()} (${error.message})\n`)
     process.exit(1)
   }
 }
@@ -1724,6 +1752,49 @@ function emitStatusJson(payload) {
 
 function authHeaders() {
   return args.token ? { authorization: `Bearer ${args.token}` } : {}
+}
+
+/// Where the gateway is, as the *client* commands see it.
+///
+/// Normally the loopback port the gateway runs on. `--base-url` overrides it
+/// for the case the loopback cannot express: the gateway is on another machine
+/// and reached through an SSH port-forward, so the port is right but the host
+/// is not. A one-shot flag rather than a config key because the forward is a
+/// property of the shell you are in, not of the host's configuration.
+function baseUrl() {
+  const override = flagValue('--base-url')
+  // A trailing slash is what a URL pasted out of a browser has, and joining it
+  // with `/health` would produce `//health`.
+  return (override || `http://127.0.0.1:${args.port}`).replace(/\/+$/, '')
+}
+
+/// Whether a one-shot flag was passed, and what it was given.
+function flagValue(name) {
+  const index = argv.indexOf(name)
+  if (index === -1) return null
+  const value = argv[index + 1]
+  // A flag at the end with nothing after it, or followed by another flag, is a
+  // mistake worth refusing rather than treating as an empty string.
+  if (value === undefined || value.startsWith('-')) {
+    process.stderr.write(`cqutmux: ${name} needs a value\n`)
+    process.exit(1)
+  }
+  return value
+}
+
+/// Whether `--verbose` was passed.
+///
+/// Gates the extra detail — the resolved base URL, the request that was made,
+/// the raw reply — that a person debugging a forward wants and that a script
+/// piping the output does not.
+function verbose() {
+  return argv.includes('--verbose') || argv.includes('-v')
+}
+
+/// Marks a line as diagnostic, so a caller filtering the command's real output
+/// can drop these by prefix.
+function note(message) {
+  if (verbose()) process.stderr.write(`cqutmux: ${message}\n`)
 }
 
 /// Checks the things that actually stop the app from working, in the order they
@@ -1747,10 +1818,10 @@ async function doctor(repair = false) {
   }
 
   try {
-    const response = await fetch(`http://127.0.0.1:${args.port}/health`, { headers: authHeaders() })
-    check(response.ok, 'gateway', `127.0.0.1:${args.port}`)
+    const response = await fetch(`${baseUrl()}/health`, { headers: authHeaders() })
+    check(response.ok, 'gateway', baseUrl())
   } catch {
-    check(false, 'gateway', `not running on ${args.port}; start it with \`cqutmux serve\``)
+    check(false, 'gateway', `not running on ${baseUrl()}; start it with \`cqutmux serve\``)
   }
 
   if (args.token) check(true, 'token', 'set')

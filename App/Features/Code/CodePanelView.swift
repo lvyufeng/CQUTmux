@@ -8,6 +8,7 @@ struct CodePanelView: View {
     @Environment(AgentConnection.self) private var connection
     @Environment(HostStore.self) private var store
     @Environment(AppSettings.self) private var app
+    @Environment(TerminalFontStore.self) private var fonts
 
     @State private var mode: Mode = Self.initialMode
     @State private var listing: DirectoryListing?
@@ -15,6 +16,14 @@ struct CodePanelView: View {
     @State private var log: LogResult?
     @State private var error: String?
     @State private var openFile: FileContents?
+    /// The changed file whose diff is open, if any.
+    @State private var openDiff: DiffResult.File?
+    /// Where the user was last looking in the diff viewer, restored when they
+    /// come back. Persisted because a review is not one sitting — you read a
+    /// hunk, go look at the source, come back — and being dropped at the top of
+    /// a thousand-line diff every time is the thing that makes a reviewer stop
+    /// using the phone for it.
+    @AppStorage("cqutmux.code.lastDiffFile") private var lastDiffFile = ""
     @State private var path = "."
     @State private var showPreview = false
     @State private var showSimulator = false
@@ -190,13 +199,27 @@ struct CodePanelView: View {
             await load(client)
             #if DEBUG
             if Self.previewInitiallyOpen { showPreview = true }
+            // Opens the per-file diff viewer on a named file, so a run can see
+            // it without a tap the script cannot make.
+            if let raw = ProcessInfo.processInfo.environment["CQUT_DEV_DIFF_FILE"], !raw.isEmpty,
+               let listed = diff?.files.first(where: { $0.path == raw }) {
+                lastDiffFile = listed.path
+                openDiff = listed
+            }
             if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "simulator" { showSimulator = true }
             if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "uploads" { showUploads = true }
             #endif
         }
         .sheet(item: $openFile) { (file: FileContents) in
             NavigationStack {
-                FileView(file: file)
+                FileView(file: file, font: fonts.uiFont(), spacing: fonts.lineSpacing)
+            }
+        }
+        .sheet(item: $openDiff) { file in
+            if let client = connection.client {
+                NavigationStack {
+                    FileDiffView(file: file, root: path, client: client, font: fonts.uiFont(), spacing: fonts.lineSpacing)
+                }
             }
         }
     }
@@ -254,17 +277,45 @@ struct CodePanelView: View {
                 List {
                     Section("\(diff.files.count) changed") {
                         ForEach(diff.files) { file in
-                            HStack {
-                                Text(file.status)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .foregroundStyle(.orange)
-                                    .frame(width: 24, alignment: .leading)
-                                Text(file.path).font(.system(.footnote, design: .monospaced))
+                            Button {
+                                lastDiffFile = file.path
+                                openDiff = file
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(file.status)
+                                        .font(.system(.caption, design: .monospaced))
+                                        .foregroundStyle(.orange)
+                                        .frame(width: 24, alignment: .leading)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(file.name).font(.system(.footnote, design: .monospaced))
+                                        // Only shown when it says something the
+                                        // name does not, so a flat directory
+                                        // does not double every row's height.
+                                        if !file.directory.isEmpty {
+                                            Text(file.directory)
+                                                .font(.system(.caption2, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                                .truncationMode(.head)
+                                        }
+                                    }
+                                    Spacer()
+                                    if lastDiffFile == file.path {
+                                        Image(systemName: "bookmark.fill")
+                                            .font(.caption2)
+                                            .foregroundStyle(themes.current.accentColor)
+                                    }
+                                }
+                                .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
                         }
                     }
-                    Section("Diff") {
-                        DiffText(diff.diff)
+                    // The whole-tree diff is still worth having under the list
+                    // — it is how you see the shape of a change across files —
+                    // so it stays, below what you would normally tap first.
+                    Section("All changes") {
+                        DiffText(diff.diff, font: fonts.uiFont(), spacing: fonts.lineSpacing)
                     }
                 }
             }
@@ -364,14 +415,25 @@ struct CodePanelView: View {
 /// Renders a unified diff with the usual red/green tinting.
 private struct DiffText: View {
     let text: String
+    /// The terminal's own font, so the code being reviewed is set in the same
+    /// face as the code being written. A review that switches typeface is a
+    /// review where column alignment stops lining up with the terminal beside
+    /// it — and the user picked that font for a reason.
+    var font: UIFont = .monospacedSystemFont(ofSize: 11, weight: .regular)
+    var spacing: Double = 1
 
-    init(_ text: String) { self.text = text }
+    init(_ text: String, font: UIFont = .monospacedSystemFont(ofSize: 11, weight: .regular), spacing: Double = 1) {
+        self.text = text
+        self.font = font
+        self.spacing = spacing
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
                 Text(String(line).isEmpty ? " " : String(line))
-                    .font(.system(.caption2, design: .monospaced))
+                    .font(Font(font))
+                    .lineSpacing(spacing)
                     .foregroundStyle(color(for: String(line)))
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -389,16 +451,141 @@ private struct DiffText: View {
 
 private struct FileView: View {
     let file: FileContents
+    var font: UIFont = .monospacedSystemFont(ofSize: 11, weight: .regular)
+    var spacing: Double = 1
 
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
             Text(file.content)
-                .font(.system(.caption, design: .monospaced))
+                .font(Font(font))
+                .lineSpacing(spacing)
                 .padding()
                 .textSelection(.enabled)
         }
         .navigationTitle((file.path as NSString).lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// One changed file's hunks, with the position kept.
+///
+/// A separate view from `FileView` because the two scroll differently: a whole
+/// file is read by scrolling to a line, while a diff is read by scrolling to a
+/// *hunk*. Remembering where the reader was is the difference between coming
+/// back to a review and re-finding your place in it.
+private struct FileDiffView: View {
+    let file: DiffResult.File
+    let root: String
+    let client: HookClient
+    var font: UIFont = .monospacedSystemFont(ofSize: 11, weight: .regular)
+    var spacing: Double = 1
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var diff: DiffResult?
+    @State private var error: String?
+    /// The remembered top line, restored once the diff has arrived.
+    @AppStorage("cqutmux.code.lastDiffLine") private var lastLine = 0
+    /// Bumped to scroll the restored position back from the top button.
+    @State private var scrollTarget = 0
+    /// The top line currently on screen, which is what gets remembered.
+    @State private var visibleRow: Int?
+
+    var body: some View {
+        Group {
+            if let error {
+                ContentUnavailableView {
+                    Label("Can't read the diff", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                }
+            } else if let diff {
+                ScrollViewReader { proxy in
+                    ScrollView([.horizontal, .vertical]) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(lines(diff.diff), id: \.number) { line in
+                                Text(line.text.isEmpty ? " " : line.text)
+                                    .font(Font(font))
+                                    .lineSpacing(spacing)
+                                    .foregroundStyle(DiffPalette.color(for: line.text))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .id(line.number)
+                            }
+                        }
+                        .padding()
+                    }
+                    // Restoring after layout: scrolling to an id before the
+                    // rows exist does nothing, which is how a restored
+                    // position silently resets to the top.
+                    .onAppear {
+                        scrollTarget = lastLine
+                        guard lastLine > 0 else { return }
+                        // After layout: scrolling to an id before the rows
+                        // exist does nothing, which is how a restored position
+                        // silently resets to the top.
+                        DispatchQueue.main.async { proxy.scrollTo(lastLine, anchor: .top) }
+                    }
+                    // Where the reader stopped, recorded as they scroll. A
+                    // plain `.onDisappear` would only fire on a clean dismissal,
+                    // and a swipe-back can leave the sheet without it.
+                    .scrollPosition(id: $visibleRow, anchor: .top)
+                    .onChange(of: visibleRow) { _, row in
+                        if let row { scrollTarget = row; lastLine = row }
+                    }
+                    .onChange(of: scrollTarget) { _, target in
+                        if target == 0 { withAnimation { proxy.scrollTo(0, anchor: .top) } }
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        // A visible way back to the top, since a long diff's
+                        // only affordance otherwise is a lot of dragging.
+                        if scrollTarget > 0 {
+                            Button {
+                                scrollTarget = 0
+                            } label: {
+                                Image(systemName: "arrow.up.to.line")
+                                    .padding(8)
+                                    .background(.thinMaterial, in: Circle())
+                            }
+                            .padding(12)
+                        }
+                    }
+                }
+            } else {
+                ProgressView().padding()
+            }
+        }
+        .navigationTitle(file.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+        .task {
+            do {
+                diff = try await client.gitDiff(path: root, file: file.path)
+            } catch {
+                self.error = "\(error)"
+            }
+        }
+    }
+
+    /// One entry per line, numbered so the scroll target survives.
+    private func lines(_ text: String) -> [(number: Int, text: String)] {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .enumerated()
+            .map { (number: $0.offset, text: String($0.element)) }
+    }
+}
+
+/// The usual red/green tinting, in one place so the list and the file view
+/// cannot drift apart about what a `@@` looks like.
+private enum DiffPalette {
+    static func color(for line: String) -> Color {
+        if line.hasPrefix("+") && !line.hasPrefix("+++") { return .green }
+        if line.hasPrefix("-") && !line.hasPrefix("---") { return .red }
+        if line.hasPrefix("@@") { return .cyan }
+        if line.hasPrefix("diff ") { return .secondary }
+        return .primary
     }
 }
 

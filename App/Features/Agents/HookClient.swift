@@ -287,6 +287,18 @@ final class HookClient {
         return try JSONDecoder().decode(DiffResult.self, from: payload.body)
     }
 
+    /// The diff for one file inside a directory.
+    ///
+    /// Narrowed on the host rather than filtered here: opening one file from a
+    /// list of forty would otherwise re-send the whole working tree's diff to
+    /// show a hunk the phone already has.
+    func gitDiff(path: String, file: String) async throws -> DiffResult {
+        let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        let encodedFile = file.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? file
+        let payload = try await request("GET", "/diff?path=\(encodedPath)&file=\(encodedFile)")
+        return try JSONDecoder().decode(DiffResult.self, from: payload.body)
+    }
+
     func gitLog(path: String, limit: Int = 40) async throws -> LogResult {
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
         let payload = try await request("GET", "/log?path=\(encoded)&limit=\(limit)")
@@ -703,10 +715,19 @@ struct FileContents: Codable {
 }
 
 struct DiffResult: Codable {
-    struct File: Codable, Identifiable {
+    struct File: Codable, Identifiable, Hashable {
         var status: String
         var path: String
         var id: String { path }
+
+        /// The last path component, which is what a reviewer scans for.
+        var name: String { (path as NSString).lastPathComponent }
+        /// Everything before it, so two files of the same name in different
+        /// directories are told apart without reading the whole path.
+        var directory: String {
+            let parent = (path as NSString).deletingLastPathComponent
+            return parent == path ? "" : parent
+        }
     }
     var isRepo: Bool
     var files: [File]
