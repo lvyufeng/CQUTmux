@@ -81,6 +81,16 @@ extension TerminalTheme {
               accent: defaultAccent, selection: nil,
               ansi: ["24292f", "cf222e", "116329", "4d2d00", "0969da", "8250df", "1b7c83", "6e7781",
                      "57606a", "a40e26", "1a7f37", "633c01", "218bff", "a475f9", "3192aa", "8c959f"]),
+        // Rosé Pine Dawn, the light half of the Rosé Pine pair. The palette is
+        // the published one — the same sixteen colours the upstream project
+        // ships for terminals — rather than an approximation from the
+        // background and accent, because a theme is recognisable by its whole
+        // ramp and a near-miss reads as the theme being wrong.
+        .init(id: "rose-pine-dawn", name: "Rosé Pine Dawn", dark: false,
+              background: "faf4ed", foreground: "575279", cursor: "575279",
+              accent: defaultAccent, selection: nil,
+              ansi: ["f2e9e1", "b4637a", "56949f", "ea9d34", "286983", "907aa9", "d7827e", "575279",
+                     "9893a5", "b4637a", "56949f", "ea9d34", "286983", "907aa9", "d7827e", "575279"]),
     ]
 
     static func named(_ id: String?) -> TerminalTheme {

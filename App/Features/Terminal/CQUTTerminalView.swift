@@ -41,6 +41,11 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// character iOS would otherwise compose. Set from `InputSettings` when the
     /// view is built and on every settings change.
     var optionIsMeta = false
+
+    /// Whether a program on the host may read this device's clipboard over
+    /// OSC 52. Off unless the user turns it on in Settings → Security; see
+    /// `SecuritySettings.allowsClipboardRead` for why it is not the default.
+    var allowsClipboardRead = false
     /// The tmux prefix the host is actually configured with. Jump-To and the
     /// keyboard window commands jump by *sending* this key, so it has to be the
     /// one `tmux.conf` binds — see `MuxSettings`, and `selectWindow` for why
@@ -649,7 +654,17 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         UIPasteboard.general.string = String(decoding: content, as: UTF8.self)
     }
 
-    func clipboardRead(source: TerminalView) -> Data? { nil }
+    /// OSC 52 read. Denied unless the user has allowed it, because the request
+    /// comes from the remote side with no gesture here — see
+    /// `SecuritySettings.allowsClipboardRead`. Denying returns nil, which
+    /// SwiftTerm reports to the remote as "not permitted" rather than as an
+    /// empty clipboard, so a program can tell the difference.
+    func clipboardRead(source: TerminalView) -> Data? {
+        guard allowsClipboardRead,
+              let text = UIPasteboard.general.string
+        else { return nil }
+        return Data(text.utf8)
+    }
 
     func setTerminalTitle(source: TerminalView, title: String) {}
 

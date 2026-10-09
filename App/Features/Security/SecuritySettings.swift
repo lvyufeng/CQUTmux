@@ -13,6 +13,26 @@ import Observation
 final class SecuritySettings {
     private enum Key {
         static let unlockOnResume = "cqutmux.security.unlockOnResume"
+        static let clipboardRead = "cqutmux.security.clipboardRead"
+    }
+
+    /// Whether a program running on the host may read this device's clipboard
+    /// through OSC 52.
+    ///
+    /// Off by default, and the default is the whole point. OSC 52 read is a
+    /// request that arrives *from the remote side* — an `ssh` session, a tmux,
+    /// an agent — with no gesture from the user on this end. Allowing it means
+    /// anything that ends up running in a session can ask for whatever was last
+    /// copied: a password, a 2FA code, a private message. The write direction
+    /// has none of that risk, which is why it is allowed and this is not.
+    ///
+    /// A biometric prompt per read would be better than a blanket switch, but
+    /// SwiftTerm's `clipboardRead` is a synchronous `Data? -> Data?` call with
+    /// no place to await a Face ID sheet. Rather than a prompt that cannot
+    /// exist, this is a deliberate, disclosed, off-by-default permission — and
+    /// the screen says what it costs.
+    var allowsClipboardRead: Bool {
+        didSet { defaults.set(allowsClipboardRead, forKey: Key.clipboardRead) }
     }
 
     /// Ask for biometrics when the app comes back to the foreground.
@@ -34,6 +54,10 @@ final class SecuritySettings {
         // would expect. On a device with nothing enrolled it defaults off and
         // the toggle says why it cannot be turned on.
         unlockOnResume = stored ?? Biometrics.isEnrolled
+        // Plain `bool(forKey:)` is right here: absent means off, and off is the
+        // safe answer. Unlike the case above there is no device-dependent
+        // default to preserve.
+        allowsClipboardRead = defaults.bool(forKey: Key.clipboardRead)
     }
 
     /// Whether the device can do this at all. Drives whether the toggle is

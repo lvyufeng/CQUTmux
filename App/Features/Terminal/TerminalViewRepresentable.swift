@@ -30,6 +30,10 @@ struct TerminalScreen: View {
     @State private var input = InputSettings()
     @State private var mux = MuxSettings()
     @State private var transcriptionHistory = TranscriptionHistory()
+    /// Whether a host program may read this device's clipboard (OSC 52 read).
+    /// Read from the environment so the Security screen's switch is the one
+    /// source of truth for it.
+    @Environment(SecuritySettings.self) private var security
     /// Whether a hardware keyboard is attached, inferred from the software
     /// keyboard's absence. See `InputSettings.showsBar`.
     @State private var hardwareKeyboard = false
@@ -55,7 +59,8 @@ struct TerminalScreen: View {
                 gestures: gestures,
                 cursor: cursor,
                 input: input,
-                mux: mux
+                mux: mux,
+                allowsClipboardRead: security.allowsClipboardRead
             )
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationTitle(host.displayName)
@@ -679,6 +684,10 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
     let cursor: CursorSettings
     let input: InputSettings
     let mux: MuxSettings
+    /// Whether a host program may read the clipboard. Passed in rather than
+    /// read from the environment because a `UIViewRepresentable`'s
+    /// `updateUIView` has no environment of its own.
+    let allowsClipboardRead: Bool
 
     /// Remembers what the view was last painted with. A `UIViewRepresentable`
     /// has no way to compare its own inputs between updates, and repainting the
@@ -741,6 +750,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         )
         view.gestures = gestures
         view.optionIsMeta = input.optionIsMeta
+        view.allowsClipboardRead = allowsClipboardRead
         view.muxPrefix = mux.tmuxPrefix
         view.onStatus = { status in coordinator.status = status }
         // A pinch resizes the terminal and becomes the saved preference, so the
@@ -799,6 +809,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         // A live setting: flipping it should take effect on the next key, not
         // on the next connection.
         uiView.optionIsMeta = input.optionIsMeta
+        uiView.allowsClipboardRead = allowsClipboardRead
         uiView.muxPrefix = mux.tmuxPrefix
     }
 }

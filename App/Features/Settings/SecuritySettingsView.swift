@@ -37,6 +37,19 @@ struct SecuritySettingsView: View {
             }
 
             Section {
+                Toggle("Let sessions read the clipboard", isOn: $security.allowsClipboardRead)
+            } header: {
+                Text("Clipboard")
+            } footer: {
+                Text("Programs on the host can always *write* to this device's clipboard "
+                     + "(OSC 52 copy). This allows the other direction: a program may ask "
+                     + "for whatever is on it. That request comes from the remote side with "
+                     + "no gesture here, so with it on, anything running in a session can "
+                     + "read a password or a code you copied. Off unless you are running "
+                     + "something that needs it.")
+            }
+
+            Section {
                 NavigationLink {
                     ExportKeysView()
                 } label: {

@@ -94,3 +94,13 @@ has since been closed, with the check that pins it.
   `Dictation.start()` that does not toggle.
 - **`usage-collection` and `always-on-discovery` did nothing** — both parsed
   from the config file and then never read. Wired to real behaviour.
+- **Rosé Pine Dawn** — added to the built-in themes with the published palette,
+  not an approximation from the background and accent.
+- **OSC 52 read** — was stubbed to `nil`, so the remote could never read the
+  clipboard. Now gated on an off-by-default Settings → Security switch. A
+  biometric prompt per read would be better, but SwiftTerm's `clipboardRead` is
+  synchronous with nowhere to await a Face ID sheet, so this is a deliberate,
+  disclosed permission instead of a prompt that cannot exist.
+- **Dictation language and auto-send** — a language picker (automatic or
+  pinned) and a switch for submit-vs-review after dictating; both sync.
+- **Keep screen on; hide the Code tab** — Settings → Agents. Neither syncs.
