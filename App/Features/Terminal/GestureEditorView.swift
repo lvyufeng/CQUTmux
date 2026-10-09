@@ -43,8 +43,8 @@ struct GestureEditorView: View {
                 }
                 .disabled(store.bindings.isEmpty)
             } footer: {
-                Text("Clears every binding above and restores the defaults. "
-                     + "Key-bar shortcuts and custom keys are reset on their own screen.")
+                Text("Clears every binding above and restores the defaults. Custom "
+                     + "keys are cleared from the Shortcuts screen, where they are listed.")
             }
         }
         .navigationTitle("Gestures")

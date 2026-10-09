@@ -59,6 +59,18 @@ struct ShortcutEditorView: View {
                         .font(.system(.body, design: .monospaced))
                 }
             }
+
+            Section {
+                Button("Remove all custom keys", role: .destructive) {
+                    store.resetAll()
+                }
+                .disabled(store.shortcuts.isEmpty)
+            } footer: {
+                Text("The counterpart to \"Reset all gestures\": that screen clears "
+                     + "the gestures, this one clears the keys, and between them "
+                     + "nothing a user configured is left behind.")
+                    .font(.caption)
+            }
         }
         .navigationTitle("Shortcuts")
         .toolbar {

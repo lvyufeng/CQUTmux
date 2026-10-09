@@ -46,6 +46,17 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto"),
             ],
             path: "Tests/AgentForwardingChecks"
+        ),
+        // Needs no server: the fixtures are keys ssh-keygen makes, so this
+        // checks the file reader rather than a connection. What it pins is
+        // that the seed read out of a PEM derives the same public key
+        // ssh-keygen wrote beside it — a reader that returned the wrong bytes
+        // would still produce a plausible-looking key, and only that
+        // comparison catches it.
+        .executableTarget(
+            name: "KeyImportChecks",
+            dependencies: ["CQUTTransport"],
+            path: "Tests/KeyImportChecks"
         )
     ],
     swiftLanguageModes: [.v5]

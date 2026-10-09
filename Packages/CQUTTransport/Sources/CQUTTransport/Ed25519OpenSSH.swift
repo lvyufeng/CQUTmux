@@ -81,6 +81,68 @@ public enum Ed25519OpenSSH {
         return privateKey.prefix(32)
     }
 
+    /// Writes a seed back out as an unencrypted `openssh-key-v1` PEM.
+    ///
+    /// The exact inverse of `seed(fromOpenSSHPrivateKey:)`, and deliberately
+    /// unencrypted: the app holds a bare 32-byte seed and has no passphrase to
+    /// encrypt with. That makes this a *portability* export — it lets a key
+    /// leave for a machine that cannot scan a QR code — and the caller is
+    /// expected to gate it behind a biometric prompt, because what it produces
+    /// is a private key in a text field.
+    ///
+    /// The check integers must match each other or `ssh-keygen` rejects the
+    /// file as corrupt; the padding is the block size the format requires.
+    public static func openSSHPrivateKey(fromSeed seed: Data, comment: String = "cqutmux") throws -> String {
+        var privateBlob = Data()
+        // Two equal check integers. Derived from the seed rather than random
+        // so the output is deterministic, which is what makes it diffable in
+        // the check script.
+        let check = UInt32(bigEndian: seed.prefix(4).withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) })
+        privateBlob.append(uint32(check))
+        privateBlob.append(uint32(check))
+        privateBlob.append(sshString(Data("ssh-ed25519".utf8)))
+        let publicBytes = try publicKeyBytes(fromSeed: seed)
+        privateBlob.append(sshString(publicBytes))
+        privateBlob.append(sshString(seed + publicBytes))
+        privateBlob.append(sshString(Data(comment.utf8)))
+        // Pad to the cipher block size with 1, 2, 3, … The format requires it
+        // even for `none`, and a reader that ignores it still needs the length
+        // to be a multiple of eight.
+        var pad: UInt8 = 1
+        while privateBlob.count % 8 != 0 {
+            privateBlob.append(pad)
+            pad += 1
+        }
+
+        var blob = Data("openssh-key-v1\u{0}".utf8)
+        blob.append(sshString(Data("none".utf8)))   // cipher
+        blob.append(sshString(Data("none".utf8)))   // kdf
+        blob.append(sshString(Data()))              // kdf options: empty for none
+        blob.append(uint32(1))                      // one key
+        // The outer field is the whole `ssh-ed25519` blob — algorithm name
+        // *and* key — not the 32 raw bytes. The copy inside the private half is
+        // the raw key alone, so the two are not interchangeable, and writing
+        // the raw bytes here produces a file ssh-keygen rejects as "invalid
+        // format" while the app's own reader happily reads it back.
+        var publicBlob = Data()
+        publicBlob.append(sshString(Data("ssh-ed25519".utf8)))
+        publicBlob.append(sshString(publicBytes))
+        blob.append(sshString(publicBlob))
+        blob.append(sshString(privateBlob))
+
+        let body = blob.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
+        return "-----BEGIN OPENSSH PRIVATE KEY-----\n\(body)\n-----END OPENSSH PRIVATE KEY-----\n"
+    }
+
+    /// The 32-byte ed25519 public key, raw.
+    public static func publicKeyBytes(fromSeed seed: Data) throws -> Data {
+        do {
+            return try Curve25519.Signing.PrivateKey(rawRepresentation: seed).publicKey.rawRepresentation
+        } catch {
+            throw KeyError.malformed("seed must be 32 bytes of ed25519 key material")
+        }
+    }
+
     // MARK: - Wire helpers
 
     /// SSH `string`: a uint32 length prefix followed by the raw bytes.
@@ -90,6 +152,11 @@ public enum Ed25519OpenSSH {
         withUnsafeBytes(of: &length) { out.append(contentsOf: $0) }
         out.append(data)
         return out
+    }
+
+    private static func uint32(_ value: UInt32) -> Data {
+        var big = value.bigEndian
+        return withUnsafeBytes(of: &big) { Data($0) }
     }
 
     private struct Reader {

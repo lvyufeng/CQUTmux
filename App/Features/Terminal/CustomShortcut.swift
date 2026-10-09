@@ -93,6 +93,16 @@ final class ShortcutStore {
         save()
     }
 
+    /// Drops every custom key.
+    ///
+    /// The counterpart to `GestureStore.resetAll`, and it exists for the same
+    /// reason: "reset all" that leaves one of the two stores populated is a
+    /// button that lies about what it did.
+    func resetAll() {
+        shortcuts.removeAll()
+        save()
+    }
+
     private func load() {
         guard let data = defaults.data(forKey: Self.key),
               let decoded = try? JSONDecoder().decode([CustomShortcut].self, from: data)

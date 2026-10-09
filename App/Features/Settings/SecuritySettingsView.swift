@@ -1,4 +1,6 @@
 import SwiftUI
+import LocalAuthentication
+import CQUTTransport
 
 /// What protects the key material, and what happens when the app reopens.
 ///
@@ -64,21 +66,142 @@ struct SecuritySettingsView: View {
     }
 }
 
-/// Where exported key material would be listed.
+/// Copying a private key back out of the app.
 ///
-/// Kept as an explicit, explained gap rather than a hidden one: Moshi's export
-/// requires biometric confirmation, and until that path exists the honest thing
-/// is to say so on the screen that claims to be about key safety.
+/// Held shut until a biometric prompt passes, and the prompt is the point
+/// rather than a formality: an unlocked phone in someone else's hand should not
+/// be enough to walk off with the key that reaches every host.
+///
+/// The export is the app's own created/imported key, re-emitted as an
+/// unencrypted `openssh-key-v1` PEM. It is deliberately unencrypted — the app
+/// holds a bare seed and has no passphrase to encrypt with — so this is a
+/// portability escape hatch, and the screen says so instead of implying the
+/// output is protected.
 struct ExportKeysView: View {
+    @Environment(HostStore.self) private var hosts
+
+    @State private var unlocked = false
+    @State private var busy = false
+    @State private var failure: String?
+    @State private var exported: (host: Host, pem: String)?
+    @State private var copied = false
+
+    /// Only hosts that actually have a key. A host seen but never connected to
+    /// has nothing to export, and listing it would produce an empty PEM.
+    private var keyed: [Host] {
+        hosts.hosts.filter { KeychainStore.load(account: $0.keySeedAccount) != nil }
+    }
+
     var body: some View {
-        ContentUnavailableView {
-            Label("Nothing exported", systemImage: "key.slash")
-        } description: {
-            Text("Importing a key puts it in the Keychain and keeps it there. There is no "
-                 + "path yet that copies one back out, so there is nothing to list.")
+        List {
+            if !Biometrics.isEnrolled {
+                Section {
+                    ContentUnavailableView {
+                        Label("Biometrics are not set up", systemImage: "faceid")
+                    } description: {
+                        Text("Exporting a private key needs \(Biometrics.label). "
+                             + "Enroll in Settings → Face ID & Passcode, then come back.")
+                    }
+                }
+            } else if keyed.isEmpty {
+                Section {
+                    ContentUnavailableView {
+                        Label("No keys to export", systemImage: "key.slash")
+                    } description: {
+                        Text("A host gets a key when you generate or import one from "
+                             + "its SSH Key screen.")
+                    }
+                }
+            } else if !unlocked {
+                Section {
+                    Button {
+                        Task { await unlock() }
+                    } label: {
+                        Label(busy ? "Waiting for \(Biometrics.label)…" : "Unlock to export",
+                              systemImage: "faceid")
+                    }
+                    .disabled(busy)
+                } footer: {
+                    Text("Nothing can be copied out until \(Biometrics.label) confirms it is you.")
+                }
+            } else if let exported {
+                Section {
+                    Text(exported.pem)
+                        .font(.system(.caption2, design: .monospaced))
+                        .textSelection(.enabled)
+                    Button {
+                        UIPasteboard.general.string = exported.pem
+                        copied = true
+                    } label: {
+                        Label(copied ? "Copied" : "Copy key", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    }
+                    Button("Hide", role: .destructive) {
+                        self.exported = nil
+                        copied = false
+                    }
+                } header: {
+                    Text("\(exported.host.displayName) — private key")
+                } footer: {
+                    Text("Unencrypted. Anything holding this text can log in as this key, "
+                         + "so put it somewhere safe and clear the clipboard when done.")
+                }
+            } else {
+                Section {
+                    ForEach(keyed) { host in
+                        Button {
+                            export(for: host)
+                        } label: {
+                            HStack {
+                                Label(host.displayName, systemImage: "key.horizontal")
+                                Spacer()
+                                Image(systemName: "square.and.arrow.up")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } footer: {
+                    Text("Unencrypted OpenSSH format, for a machine that cannot scan a QR code.")
+                        .font(.caption)
+                }
+            }
+
+            if let failure {
+                Section { Text(failure).foregroundStyle(.red).font(.footnote) }
+            }
         }
         .navigationTitle("Exported keys")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func unlock() async {
+        busy = true
+        defer { busy = false }
+        let context = LAContext()
+        do {
+            let ok = try await context.evaluatePolicy(
+                .deviceOwnerAuthenticationWithBiometrics,
+                localizedReason: "Export a private SSH key"
+            )
+            if ok { unlocked = true; failure = nil }
+        } catch {
+            // A cancelled or failed read is not an error to shout about — the
+            // button is still there and the user can press it again.
+            failure = nil
+        }
+    }
+
+    private func export(for host: Host) {
+        guard let seed = KeychainStore.load(account: host.keySeedAccount) else {
+            failure = "No key is stored for \(host.displayName)."
+            return
+        }
+        do {
+            let pem = try Ed25519OpenSSH.openSSHPrivateKey(fromSeed: seed, comment: host.displayName)
+            exported = (host, pem)
+            failure = nil
+        } catch {
+            failure = "Could not write the key: \(error)"
+        }
     }
 }
 

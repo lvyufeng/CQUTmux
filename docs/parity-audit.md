@@ -170,3 +170,31 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   is the user asking. A tapped command is typed into the line editor and not
   run: it is one keystroke away from running something chosen from a list the
   host assembled, so it is left to be read first.
+
+- **A private key can be imported from a file**, not only pasted. The picker
+  accepts `~/.ssh/id_ed25519` and any other file (the private key is often
+  extension-less), and the read happens inside the security-scoped window the
+  URL is only valid for. The reader itself is now checked against keys
+  `ssh-keygen` makes: the seed from the file must derive *exactly* the public
+  key written beside it, because a reader that returned the wrong 32 bytes
+  would still produce a plausible-looking key and only fail later as
+  "permission denied (publickey)". An encrypted key is refused with a message
+  saying why rather than imported as ciphertext.
+- **Reset-all now clears both stores.** "Reset all gestures" cleared the
+  gestures and left the custom keys, and the footer pointing at "their own
+  screen" was pointing at a screen with no reset button. Each store now has a
+  reset on the screen that lists what it clears.
+
+- **A private key can be exported, behind biometrics.** Settings → Security →
+  Exported keys holds the key list shut until a Face ID prompt passes — an
+  unlocked phone in someone else's hand should not be enough to walk off with
+  the key that reaches every host. The export is the app's own ed25519 seed
+  re-emitted as an `openssh-key-v1` PEM, and it is deliberately *unencrypted*:
+  the app holds a bare seed and has no passphrase to encrypt with, so the screen
+  says so rather than implying the output is protected. Writing a PEM is the
+  part that looks easy and is not — the check hands the exported file to
+  `ssh-keygen -y` and compares the public key it derives, which caught a real
+  bug: the outer public-key field takes the whole `ssh-ed25519` blob, not the 32
+  raw bytes that go inside the private half, and writing the raw ones there
+  yields a file ssh-keygen rejects as "invalid format" while this app's own
+  reader reads it back perfectly happily.
