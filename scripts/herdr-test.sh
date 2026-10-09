@@ -107,6 +107,50 @@ else
     || { echo "FAIL: focused tab is $FOCUSED, not $TAB"; exit 1; }
 fi
 
+echo "==> checking that the focus route moves the focused pane"
+# `herdr pane focus` is directional and cannot name a pane, so Jump To goes
+# through the socket API instead. A route that answers ok but leaves focus
+# where it was would be worse than no route at all, so both panes are focused
+# in turn and the server's own idea of the focused pane is read back.
+python3 - "$GATEWAY_PORT" "$TOKEN" <<'PY'
+import json, subprocess, sys, urllib.request
+
+port, token = sys.argv[1], sys.argv[2]
+HERDR = "/private/tmp/herdr-install/bin/herdr"
+
+
+def focused():
+    out = subprocess.run([HERDR, "api", "snapshot"], capture_output=True, text=True).stdout
+    return json.loads(out)["result"]["snapshot"].get("focused_pane_id")
+
+
+def focus(pane_id):
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/herdr/focus/{urllib.parse.quote(pane_id, safe='')}",
+        method="POST",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    return json.load(urllib.request.urlopen(request))
+
+
+snapshot = json.load(open("/tmp/cqutmux_herdr_snapshot.json"))["result"]["snapshot"]
+pane_ids = [p["pane_id"] for p in snapshot.get("panes", [])]
+if len(pane_ids) < 2:
+    print("SKIP: need two panes to prove focus moved")
+    raise SystemExit(0)
+
+for pane_id in pane_ids[:2]:
+    result = focus(pane_id)
+    if not result.get("ok"):
+        print(f"FAIL: focusing {pane_id} was refused: {result}")
+        raise SystemExit(1)
+    now = focused()
+    if now != pane_id:
+        print(f"FAIL: asked for {pane_id}, herdr says {now}")
+        raise SystemExit(1)
+print(f"PASS: the focus route moves the focused pane ({' → '.join(pane_ids[:2])})")
+PY
+
 echo "==> launching the app on the Sessions sheet"
 DEVICE="${DEVICE:-iPhone 17}"
 UDID="$(xcrun simctl list devices available | grep -m1 "$DEVICE (" | grep -oE '[0-9A-F-]{36}')"

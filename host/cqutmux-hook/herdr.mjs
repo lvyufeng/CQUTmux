@@ -21,6 +21,9 @@
 
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { connect } from 'node:net'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 const run = promisify(execFile)
 
@@ -35,6 +38,77 @@ const SNAPSHOT_TIMEOUT_MS = 8000
 
 function binary(args) {
   return args.herdrPath || DEFAULT_BIN
+}
+
+/**
+ * A raw request over herdr's Unix socket.
+ *
+ * The CLI is enough for most of what the app needs, but it has a real gap:
+ * `herdr pane focus` is *directional* — it moves to a neighbour and cannot name
+ * a pane — so nothing in the CLI can jump to a pane the user picked from a
+ * list. The socket API can: `pane.focus` takes a `pane_id`. The gateway runs on
+ * the host, next to the socket, so it can speak it directly.
+ *
+ * One request per connection, newline-delimited, matching the CLI's own
+ * envelope (`{id, method, params}`).
+ */
+export function callHerdrSocket(args, method, params, timeoutMs = 5000) {
+  const socketPath = args.herdrSocket || join(homedir(), '.config', 'herdr', 'herdr.sock')
+  return new Promise(resolve => {
+    const id = `cqutmux:${method}`
+    let buffer = ''
+    let settled = false
+    const finish = value => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      client.destroy()
+      resolve(value)
+    }
+
+    const client = connect(socketPath)
+    const timer = setTimeout(
+      () => finish({ ok: false, reason: 'timeout', message: `${method} did not answer in time` }),
+      timeoutMs
+    )
+
+    client.on('connect', () => client.write(JSON.stringify({ id, method, params }) + '\n'))
+    client.on('data', chunk => { buffer += chunk })
+    client.on('error', error =>
+      finish({ ok: false, reason: 'socket', message: String(error.message || error) })
+    )
+    // The server may hold the connection open; the first newline-terminated
+    // reply is the whole answer.
+    client.on('data', () => {
+      const newline = buffer.indexOf('\n')
+      if (newline === -1) return
+      const line = buffer.slice(0, newline)
+      try {
+        const parsed = JSON.parse(line)
+        finish(parsed?.error
+          ? { ok: false, reason: 'api', message: parsed.error.message || JSON.stringify(parsed.error) }
+          : { ok: true, result: parsed?.result })
+      } catch (error) {
+        finish({ ok: false, reason: 'json', message: `could not parse the reply: ${line.slice(0, 200)}` })
+      }
+    })
+    client.on('close', () => finish({ ok: false, reason: 'closed', message: 'socket closed before a reply' }))
+  })
+}
+
+/**
+ * Focuses a pane by id, so a jump from the app lands exactly where it was
+ * asked to. Uses the socket because the CLI cannot express this.
+ */
+export async function herdrFocusPane(args, paneId) {
+  if (!paneId || typeof paneId !== 'string') {
+    return { ok: false, error: 'pane_id is required' }
+  }
+  const result = await callHerdrSocket(args, 'pane.focus', { pane_id: paneId })
+  if (!result.ok) {
+    return { ok: false, error: result.message || result.reason }
+  }
+  return { ok: true, paneId }
 }
 
 async function callHerdr(args, argv, timeout = SNAPSHOT_TIMEOUT_MS) {
@@ -120,6 +194,20 @@ export async function herdrSnapshot(args) {
       label: t.label || t.tab_id,
       workspace: label.get(t.workspace_id) || t.workspace_id || '',
       focused: Boolean(t.focused),
+      panes: (Array.isArray(snapshot?.panes) ? snapshot.panes : [])
+        .filter(p => p.tab_id === t.tab_id)
+        .map(p => ({
+          // The pane's own label falls back to its position in the tab, which
+          // is what herdr shows when a pane has not been renamed.
+          paneId: p.pane_id,
+          label: p.label || p.pane_id,
+          tab: t.label || t.tab_id,
+          workspace: label.get(p.workspace_id) || p.workspace_id || '',
+          agent: p.agent || '',
+          status: p.agent_status || 'unknown',
+          cwd: p.foreground_cwd || p.cwd || '',
+          focused: Boolean(p.focused),
+        })),
     })),
     agents: agents.map(a => ({
       paneId: a.pane_id,

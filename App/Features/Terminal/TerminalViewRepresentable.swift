@@ -24,6 +24,7 @@ struct TerminalScreen: View {
     @State private var gestures = GestureStore()
     @State private var showShortcuts = false
     @State private var showGestures = false
+    @State private var showJumpTo = false
     /// Set once the link's attach command has been sent, so a reconnect — which
     /// also reaches `.connected` — does not attach a second time.
     @State private var didFollowLink = false
@@ -65,6 +66,16 @@ struct TerminalScreen: View {
                         } label: {
                             Label("Gestures", systemImage: "hand.tap")
                         }
+                        // Only herdr can be addressed by pane, so offering
+                        // Jump To without a gateway connection would be a menu
+                        // item that can only fail.
+                        if connection.client != nil {
+                            Button {
+                                showJumpTo = true
+                            } label: {
+                                Label("Jump To", systemImage: "arrow.turn.down.right")
+                            }
+                        }
                     } label: {
                         Label("More", systemImage: "ellipsis.circle")
                     }
@@ -76,6 +87,11 @@ struct TerminalScreen: View {
             }
             .sheet(isPresented: $showGestures) {
                 NavigationStack { GestureEditorView(store: gestures) }
+            }
+            .sheet(isPresented: $showJumpTo) {
+                if let client = connection.client {
+                    JumpToView(client: client) {}
+                }
             }
             .sheet(item: $annotating) { pending in annotator(pending.image) }
             .overlay(alignment: .top) { pasteNotice }
@@ -136,6 +152,9 @@ struct TerminalScreen: View {
                 }
                 if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "gestures" {
                     showGestures = true
+                }
+                if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "jumpto" {
+                    showJumpTo = true
                 }
                 // A binding cannot be swiped from a script any more than a key
                 // can be tapped, so a run declares the gesture and the bytes

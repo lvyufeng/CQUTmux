@@ -25,7 +25,7 @@ import { readdir, readFile, stat, mkdir, writeFile, rm } from 'node:fs/promises'
 import { resolve, relative, isAbsolute, join } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { createPushService } from './push.mjs'
-import { herdrStatus, herdrSnapshot, herdrApprove, herdrRead } from './herdr.mjs'
+import { herdrStatus, herdrSnapshot, herdrApprove, herdrRead, herdrFocusPane } from './herdr.mjs'
 
 const run = promisify(execFile)
 
@@ -667,6 +667,14 @@ const server = createServer(async (req, res) => {
   const herdrPaneRoute = url.pathname.match(/^\/herdr\/pane\/([^/]+)$/)
   if (req.method === 'GET' && herdrPaneRoute) {
     const result = await herdrRead(args, decodeURIComponent(herdrPaneRoute[1]))
+    return json(res, result.ok ? 200 : 502, result)
+  }
+
+  // Jump To: focus a pane the user picked. This one needs the socket rather
+  // than the CLI — `herdr pane focus` is directional and cannot name a pane.
+  const herdrFocusRoute = url.pathname.match(/^\/herdr\/focus\/([^/]+)$/)
+  if (req.method === 'POST' && herdrFocusRoute) {
+    const result = await herdrFocusPane(args, decodeURIComponent(herdrFocusRoute[1]))
     return json(res, result.ok ? 200 : 502, result)
   }
 

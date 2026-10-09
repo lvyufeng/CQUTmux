@@ -257,6 +257,22 @@ final class HookClient {
         return try JSONDecoder().decode(SessionBoard.self, from: payload.body)
     }
 
+    /// Herdr's own tree: workspaces, tabs and the panes inside them. Separate
+    /// from `/sessions` because it is a deeper shape than a session list —
+    /// what it is for is jumping to a pane, which tmux and zellij cannot
+    /// address by name at all.
+    func herdrTree() async throws -> HerdrTree {
+        let payload = try await request("GET", "/herdr")
+        return try JSONDecoder().decode(HerdrTree.self, from: payload.body)
+    }
+
+    /// Focuses a pane by id. Goes through the socket API on the host, since
+    /// `herdr pane focus` on the command line is directional only.
+    func focusHerdrPane(_ paneId: String) async throws {
+        let encoded = paneId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? paneId
+        _ = try await request("POST", "/herdr/focus/\(encoded)")
+    }
+
     // MARK: - Dev-server ports
 
     func ports() async throws -> PortBoard {
@@ -357,6 +373,56 @@ struct SessionBoard: Codable {
 struct UsageBoard: Codable {
     var generatedAt: String?
     var entries: [UsageEntry]
+}
+
+/// Herdr's session tree, as the host flattens it: workspaces contain tabs,
+/// tabs contain panes, and an agent's status rides on the pane it runs in.
+struct HerdrTree: Codable {
+    struct Workspace: Codable, Identifiable {
+        var id: String
+        var label: String
+        var focused: Bool
+        var paneCount: Int
+        var tabCount: Int
+        var status: String
+    }
+
+    struct Pane: Codable, Identifiable {
+        var paneId: String
+        /// Optional because the host reports panes twice: nested under their
+        /// tab, where a label is worked out, and in the flat `agents` list,
+        /// where herdr's raw record has none.
+        var label: String?
+        var tab: String
+        var workspace: String
+        var agent: String
+        var status: String
+        var cwd: String
+        var focused: Bool
+        var id: String { paneId }
+
+        var displayLabel: String { label ?? paneId }
+    }
+
+    struct Tab: Codable, Identifiable {
+        var id: String
+        var label: String
+        var workspace: String
+        var focused: Bool
+        var panes: [Pane]
+    }
+
+    var installed: Bool
+    var version: String?
+    var focusedPaneId: String?
+    var workspaces: [Workspace]
+    var tabs: [Tab]
+    var agents: [Pane]
+
+    /// Tabs under the workspace they belong to, in herdr's own order.
+    func tabs(in workspace: Workspace) -> [Tab] {
+        tabs.filter { $0.workspace == workspace.label }
+    }
 }
 
 struct UsageEntry: Codable, Identifiable {
