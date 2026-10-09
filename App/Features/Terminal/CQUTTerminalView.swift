@@ -464,7 +464,7 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
 
     @objc private func hardwareWindow(_ sender: UIKeyCommand) {
         guard let input = sender.input, let index = Int(input) else { return }
-        selectWindow(mux: "tmux", session: "", selector: String(index), tmuxPrefix: muxPrefix)
+        selectWindow(mux: "tmux", session: "", selector: String(index))
     }
 
     // MARK: - Key injection (used by the accessory bar)
@@ -540,20 +540,11 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// tmux rather than typed into a pane that may be busy running an agent —
     /// falling back to the command prompt past index 9. zellij has no prefix
     /// port; it gets a `go-to-tab` action instead.
+    /// The prefix comes from the view's own `muxPrefix`, set from the setting,
+    /// rather than from a parameter: a caller that could pass a prefix could
+    /// pass the wrong one, and this is exactly the code path where that failure
+    /// is silent. Reading it here means `MuxSettings` has one consumer.
     func selectWindow(mux: String, session: String, selector: String) {
-        selectWindow(mux: mux, session: session, selector: selector,
-                     tmuxPrefix: .controlB)
-    }
-
-    /// The same jump, with the prefix the user's `tmux.conf` actually binds.
-    ///
-    /// Split from the convenience overload so the default is one value in one
-    /// place rather than a literal repeated at every call site, and so a caller
-    /// that has the setting can pass it without the rest of the method knowing
-    /// where it came from.
-    func selectWindow(
-        mux: String, session: String, selector: String, tmuxPrefix: MuxSettings.Prefix
-    ) {
         switch mux {
         case "zellij":
             guard let index = Int(selector) else { return }
@@ -564,7 +555,7 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         default:
             guard let index = Int(selector) else { return }
             // The user's prefix, not ours: this keystroke is tmux's to read.
-            write(Data(tmuxPrefix.bytes))
+            write(Data(muxPrefix.bytes))
             if (0...9).contains(index) {
                 write(Data(String(index).utf8))
             } else {
@@ -629,7 +620,7 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// see `DebugSeed.jumpWindowWhenConnected`.
     func selectWindowForTesting(mux: String, session: String, selector: String) {
         guard status.isLive else { return }
-        selectWindow(mux: mux, session: session, selector: selector, tmuxPrefix: muxPrefix)
+        selectWindow(mux: mux, session: session, selector: selector)
     }
     #endif
 

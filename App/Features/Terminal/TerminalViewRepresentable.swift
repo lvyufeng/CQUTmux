@@ -135,8 +135,7 @@ struct TerminalScreen: View {
                     // shell the attach is still replacing.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                         coordinator.terminal?.selectWindow(
-                            mux: session.mux, session: session.name, selector: window,
-                            tmuxPrefix: mux.tmuxPrefix
+                            mux: session.mux, session: session.name, selector: window
                         )
                     }
                 }
@@ -368,8 +367,7 @@ struct TerminalScreen: View {
                     coordinator.terminal?.attachSession(mux: mux, name: name)
                 case .window(let mux, let session, let selector):
                     coordinator.terminal?.selectWindow(
-                        mux: mux, session: session, selector: selector,
-                        tmuxPrefix: self.mux.tmuxPrefix
+                        mux: mux, session: session, selector: selector
                     )
                 }
             }
