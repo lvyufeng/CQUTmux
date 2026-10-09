@@ -180,6 +180,84 @@ grep -q "not valid JSON" "$OUT/bad.txt" || fail "install did not explain the par
 [ "$(cat "$BAD_HOME/.claude/settings.json")" = '{ broken' ] || fail "install rewrote a file it could not parse"
 ok "install refuses a config it cannot parse, and leaves it alone"
 
+# MARK: - The config file
+
+# A throwaway HOME so the real ~/.config is never involved.
+CFG_HOME="$OUT/cfghome"
+mkdir -p "$CFG_HOME/.config/cqutmux"
+CFG_PORT=$((PORT + 3))
+cat > "$CFG_HOME/.config/cqutmux/config.toml" <<'TOML'
+# comment, ignored
+[gateway]
+suppress_nested_agent_push = true
+scan_ports = [3000, "5173", "8000-8010"]
+usage_collection = false
+TOML
+
+HOME="$CFG_HOME" node "$CLI" --port "$CFG_PORT" > "$OUT/cfg.log" 2>&1 &
+CFG_PID=$!
+for _ in $(seq 1 20); do
+  grep -q listening "$OUT/cfg.log" 2>/dev/null && break
+  sleep 0.25
+done
+grep -q "listening" "$OUT/cfg.log" || fail "the config file stopped the gateway from starting"
+ok "the gateway starts with a config file present"
+
+post() {
+  curl -s -X POST -H 'content-type: application/json' \
+    -d "$1" "http://127.0.0.1:$CFG_PORT/events"
+}
+
+# Nested-agent suppression: the whole event goes, not just the banner.
+post '{"source":"x","kind":"approval","title":"nested","data":{"parent_session_id":"p"}}' > "$OUT/nested.txt"
+grep -q '"suppressed":true' "$OUT/nested.txt" || fail "a nested-agent event was accepted with suppression on"
+ok "suppress_nested_agent_push drops a nested agent's event"
+
+post '{"source":"x","kind":"approval","title":"top"}' > /dev/null
+TITLES="$(curl -s "http://127.0.0.1:$CFG_PORT/events")"
+echo "$TITLES" | grep -q '"top"' || fail "suppression also dropped a top-level event"
+echo "$TITLES" | grep -q '"nested"' && fail "the suppressed event reached the log anyway"
+ok "suppression leaves top-level events alone"
+
+# The suppression must be off by default, or every existing install changes
+# behaviour on upgrade.
+DEFAULT_PORT=$((PORT + 4))
+node "$CLI" --port "$DEFAULT_PORT" > "$OUT/default.log" 2>&1 &
+DEFAULT_PID=$!
+for _ in $(seq 1 20); do
+  grep -q listening "$OUT/default.log" 2>/dev/null && break
+  sleep 0.25
+done
+curl -s -X POST -H 'content-type: application/json' \
+  -d '{"source":"x","kind":"notice","title":"nested","data":{"parent_session_id":"p"}}' \
+  "http://127.0.0.1:$DEFAULT_PORT/events" > "$OUT/defaultnested.txt"
+grep -q '"suppressed"' "$OUT/defaultnested.txt" && fail "suppression is on without being configured"
+ok "nested suppression is off unless configured"
+
+# scan_ports: an entry means the same thing alone or inside a list. The range
+# in the array is the case that was silently dropped.
+listen_on() {
+  python3 -I -c "
+import socket, time, sys
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(('127.0.0.1', int(sys.argv[1]))); s.listen(); time.sleep(12)
+" "$1" &
+}
+listen_on 8005
+listen_on 9999
+sleep 1.5
+PORTS="$(curl -s "http://127.0.0.1:$CFG_PORT/ports")"
+echo "$PORTS" | python3 -I -c "
+import json, sys
+ports = json.load(sys.stdin)['ports']
+assert 8005 in ports, 'a port inside the configured range was filtered out: ' + str(ports)
+assert 9999 not in ports, 'a port outside scan_ports was not filtered'
+" || fail "scan_ports did not filter as configured"
+ok "scan_ports honours a range written inside a list"
+
+kill "$CFG_PID" "$DEFAULT_PID" 2>/dev/null || true
+pkill -f "bind(('127.0.0.1', 8005))" 2>/dev/null || true
+
 # MARK: - diff, from a repo and outside one
 
 run diff "$ROOT" > "$OUT/diff.txt" 2>&1 || fail "diff failed inside a repository"

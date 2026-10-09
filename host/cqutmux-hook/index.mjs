@@ -22,7 +22,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { execFile, spawn } from 'node:child_process'
 import { readdir, readFile, stat, mkdir, writeFile, rm, chmod } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve, relative, isAbsolute, join, dirname } from 'node:path'
 import { homedir, hostname, networkInterfaces, tmpdir } from 'node:os'
 import { createPushService } from './push.mjs'
@@ -46,6 +46,13 @@ function parseArgs(argv) {
     pushTopic: process.env.CQUTMUX_PUSH_TOPIC || '',
     pushSandbox: false,
     herdrPath: process.env.CQUTMUX_HERDR || '',
+    // Defaults, overridden by ~/.config/cqutmux/config.toml. The `pick` in
+    // applyConfig compares against these, so changing one here changes the
+    // default the file has to beat.
+    alwaysOnDiscovery: true,
+    usageCollection: true,
+    suppressNestedAgentPush: false,
+    scanPorts: 'all',
   }
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port') args.port = Number(argv[++i])
@@ -63,6 +70,125 @@ function parseArgs(argv) {
 }
 
 const args = parseArgs(process.argv.slice(2))
+
+// Persistent gateway settings, from `~/.config/cqutmux/config.toml`.
+//
+// Flags win over the file, which is the only order that makes an override an
+// override. The file is parsed rather than required, so a host without one
+// behaves exactly as before — this adds options, it does not make them
+// mandatory.
+//
+// A deliberately small TOML reader: sections, `key = value`, strings, numbers,
+// booleans, and arrays. Comments and unknown keys are ignored. It is not a
+// general TOML parser and does not claim to be one; the five keys below are the
+// whole surface, and a dependency-free gateway is worth more than generality
+// here.
+function loadConfig() {
+  const path = process.env.CQUTMUX_CONFIG || join(homedir(), '.config', 'cqutmux', 'config.toml')
+  let text
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch {
+    return { path, values: {} }
+  }
+  const values = {}
+  let section = ''
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.replace(/#.*$/, '').trim()
+    if (!line) continue
+    const header = line.match(/^\[([^\]]+)\]$/)
+    if (header) {
+      section = header[1].trim()
+      continue
+    }
+    const pair = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(.+)$/)
+    if (!pair) continue
+    const key = section ? `${section}.${pair[1]}` : pair[1]
+    values[key] = parseValue(pair[2].trim())
+  }
+  return { path, values }
+}
+
+function parseValue(raw) {
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  if (/^-?\d+$/.test(raw)) return Number(raw)
+  const quoted = raw.match(/^"(.*)"$/) || raw.match(/^'(.*)'$/)
+  if (quoted) return quoted[1]
+  const array = raw.match(/^\[(.*)\]$/)
+  if (array) {
+    return array[1]
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean)
+      .map(parseValue)
+  }
+  return raw
+}
+
+/// Applies the file to `args`, without overwriting anything a flag set.
+function applyConfig(args, config) {
+  const gateway = key => config.values[`gateway.${key}`]
+  const flag = key => config.values[`gateway.${key.replace(/_/g, '-')}`]
+
+  const pick = (key, current, fallback) => {
+    if (current !== fallback) return current // a flag set it
+    const value = gateway(key) ?? flag(key)
+    return value === undefined ? current : value
+  }
+
+  args.alwaysOnDiscovery = pick('always_on_discovery', args.alwaysOnDiscovery, true)
+  args.usageCollection = pick('usage_collection', args.usageCollection, true)
+  args.suppressNestedAgentPush = pick('suppress_nested_agent_push', args.suppressNestedAgentPush, false)
+  args.scanPorts = pick('scan_ports', args.scanPorts, 'all')
+  return args
+}
+
+// Only the loopback-reachable listeners are eligible, whatever the setting
+// says: a port bound to a public interface is not something this app should be
+// probing, and `none` is a legitimate choice.
+function scanPortAllowed(port) {
+    const setting = args.scanPorts
+    if (setting === undefined || setting === null || setting === 'all') return true
+    if (setting === 'none') return false
+    // A single entry means the same thing whether it stands alone or sits in a
+    // list, so one matcher handles both. Nested arrays are flattened, since
+    // `[3000, "8000-8010"]` is a range in a list and nothing else reads it.
+    const entries = (Array.isArray(setting) ? setting.flat(Infinity) : [setting])
+      .map(entry => (typeof entry === 'string' ? entry.trim() : entry))
+      .filter(entry => entry !== '')
+
+    for (const entry of entries) {
+      if (entry === 'all') return true
+      if (typeof entry === 'number') {
+        if (entry === port) return true
+        continue
+      }
+      const range = String(entry).match(/^(\d+)\s*-\s*(\d+)$/)
+      if (range) {
+        if (port >= Number(range[1]) && port <= Number(range[2])) return true
+        continue
+      }
+      if (String(entry).split(',').map(p => Number(p.trim())).includes(port)) return true
+    }
+    return false
+  }
+
+/// Fields worth keeping when `suppress-nested-agent-push` is on. Claude Code
+/// marks a sub-agent's event with a parent session; the exact key has changed
+/// between versions, so this checks the plausible spellings rather than one.
+function isNestedAgent(parsed) {
+  const data = parsed.data
+  if (!data || typeof data !== 'object') return false
+  return Boolean(
+    data.parent_session || data.parentSession ||
+    data.parent_session_id || data.parentSessionId ||
+    data.parent_tool_use_id || data.subagent
+  )
+}
+
+const config = loadConfig()
+applyConfig(args, config)
 
 const push = createPushService(args)
 
@@ -299,7 +425,7 @@ async function listeningPorts() {
     const match = line.match(/:(\d+)\s+\(LISTEN\)/)
     if (match) ports.add(Number(match[1]))
   }
-  const all = [...ports].sort((a, b) => a - b)
+  const all = [...ports].sort((a, b) => a - b).filter(scanPortAllowed)
   // Dev-looking ports first, then anything else, so the common case is on top.
   const hinted = all.filter(p => DEV_PORT_HINTS.has(p))
   const rest = all.filter(p => !DEV_PORT_HINTS.has(p))
@@ -628,6 +754,15 @@ const server = createServer(async (req, res) => {
     }
     if (!parsed || typeof parsed !== 'object') return json(res, 400, { error: 'expected an object' })
 
+    // An event from an agent spawned by another agent is dropped whole, not just
+// silenced: Moshi's setting suppresses the event and its approvals, so a parent
+// agent's own approval is the only one that ever reaches the phone. Off by
+// default, because a nested agent can genuinely be waiting for an answer.
+    if (args.suppressNestedAgentPush && isNestedAgent(parsed)) {
+      process.stderr.write(`[hook] suppressed nested-agent event from ${parsed.source || 'agent'}\n`)
+      return json(res, 202, { suppressed: true })
+    }
+
     const kind = parsed.kind === 'approval' ? 'approval' : 'notice'
     if (kind === 'approval') pendingApprovals++
     const record = emit({
@@ -937,6 +1072,8 @@ async function status() {
     process.stdout.write(`events   ${body.events}\n`)
     process.stdout.write(`pending  ${body.pendingApprovals}\n`)
     process.stdout.write(`uptime   ${body.uptime}s\n`)
+    process.stdout.write(`config   ${Object.keys(config.values).some(k => k.startsWith('gateway.'))
+      ? config.path : 'defaults'}\n`)
   } catch (error) {
     process.stderr.write(`cqutmux: no gateway on 127.0.0.1:${args.port} (${error.message})\n`)
     process.exit(1)
@@ -984,6 +1121,19 @@ async function doctor() {
     } catch (error) {
       check(false, 'herdr', String(error.message || error))
     }
+  }
+
+  // The config file is a setting someone deliberately wrote, so doctor reports
+  // which one is in effect rather than leaving them to guess whether it was
+  // read. A file that exists but yields nothing parsed is the case worth
+  // catching: it looks configured and is not.
+  const configured = Object.keys(config.values).filter(k => k.startsWith('gateway.')).length
+  if (configured > 0) {
+    check(true, 'config', `${config.path} (${configured} setting(s))`)
+  } else if (existsSync(config.path)) {
+    check(false, 'config', `${config.path} has no [gateway] settings this build understands`)
+  } else {
+    check(true, 'config', 'defaults (no config file)')
   }
 
   process.stdout.write(failures === 0 ? '\nready\n' : `\n${failures} thing(s) to fix\n`)

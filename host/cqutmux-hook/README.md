@@ -55,6 +55,32 @@ phone Shortcut…) whenever an `approval` event arrives. Delivery is
 fire-and-forget with a 5s timeout; a failing webhook never blocks or crashes
 the gateway. `CQUTMUX_WEBHOOK` sets the same thing.
 
+## Config file
+
+Persistent settings live in `~/.config/cqutmux/config.toml` (override with
+`CQUTMUX_CONFIG`). Flags win over the file. Defaults are the built-in behaviour,
+so a host without a file is unaffected.
+
+```toml
+[gateway]
+always_on_discovery        = true      # scan for dev servers without the app attached
+usage_collection           = true      # poll agent rate-limit data
+suppress_nested_agent_push = false     # drop events from agents spawned by agents
+scan_ports                 = "all"     # all | none | 3000 | "3000-3010" | [3000, "5173"]
+```
+
+Only `[gateway]` is read today, and `doctor` says whether the file was found and
+how many settings it understood — a file that exists but parses to nothing is
+the case worth catching, since it looks configured and is not. `suppress_nested_agent_push`
+drops the whole event, approvals included, not just the notification: an agent
+that is genuinely waiting for an answer would otherwise be silenced while the
+app still showed a pending approval. `scan_ports` narrows what Browser Preview
+probes; a port outside it is filtered out of `/ports` entirely.
+
+The reader handles sections, `key = value`, strings, numbers, booleans and
+arrays — not general TOML. It is a hand-rolled parser on purpose: the gateway
+has no dependencies, and five keys do not justify one.
+
 ## Why loopback
 
 The listener binds to `127.0.0.1` only. The phone reaches it through the SSH
