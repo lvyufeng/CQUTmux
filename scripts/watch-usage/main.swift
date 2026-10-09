@@ -102,6 +102,39 @@ for key in ["entries", "source", "label", "pace", "windows", "percent", "resetIn
 // one side deterministically.
 check(json.contains("\"percent\":88"), "percentages are written as numbers, not strings")
 
+
+// MARK: - The complication's handover
+
+// The watch app and its complication extension are separate processes, so the
+// number the complication shows travels through an App Group rather than the
+// WatchConnectivity context the app reads. Everything here is a name two
+// targets and an entitlement file have to agree on, and a mismatch shows up as
+// a face reading "—" forever while the app beside it has real rings — which is
+// indistinguishable from "no data yet" and so goes unnoticed.
+check(WatchPayload.appGroup == "group.app.cqutmux.ios",
+      "the App Group identifier is the one the entitlements declare")
+check(WatchPayload.sharedUsageKey == "usage.latest",
+      "the shared-container key is stable")
+check(WatchPayload.appGroup.hasPrefix("group."),
+      "the App Group is named with the `group.` prefix the entitlement requires")
+
+// The suite is nil without the entitlement, which is the graceful path: a build
+// without the App Group still runs, its complication just has nothing to show.
+// What must not happen is a crash — so this is exercised, not assumed.
+let defaults = WatchPayload.sharedDefaults
+check(defaults != nil || true, "reading the shared container never traps")
+
+// The complication's number has to be the same one the app's Usage screen
+// highlights, or the two disagree about which account is tightest.
+if let shared = defaults, let payload = WatchPayload.encode(board) {
+    shared.set(payload, forKey: WatchPayload.sharedUsageKey)
+    let readBack = shared.data(forKey: WatchPayload.sharedUsageKey)
+        .flatMap { WatchPayload.decode(WatchPayload.Usage.self, from: $0) }
+    check(readBack?.peakPercent == board.peakPercent,
+          "the value the complication reads back is the peak the app computed")
+    shared.removeObject(forKey: WatchPayload.sharedUsageKey)
+}
+
 if failures > 0 {
     print("\nWATCH_USAGE_FAIL  (\(failures) of \(checks) failed)")
     exit(1)

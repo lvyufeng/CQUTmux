@@ -10,12 +10,13 @@
 # Why not `simctl openurl`
 # ------------------------
 # iOS confirms a custom-scheme launch from outside the app with an "Open in
-# CQUTmux?" dialog, and nothing here can tap it: this Xcode has no Simulator.app
-# and neither `cliclick` nor `idb` is installed (`simctl` itself has no input
-# injection). The URL is therefore handed over through `CQUT_DEV_OPEN_URL`,
-# which calls the very `onOpenURL` handler the system would. Only the OS's own
-# delivery is stood in for — parsing, tab switch, host resolution, navigation
-# and attach-on-connect are all the real ones.
+# CQUTmux?" dialog. That alert *can* now be tapped — see
+# host/cqutmux-hook/simtouch/ — but going through it would make every link here
+# depend on where the alert happened to be drawn, and it is the OS's delivery
+# being stood in for, not the app's handling. The URL is handed over through
+# `CQUT_DEV_OPEN_URL`, which calls the very `onOpenURL` handler the system
+# would; parsing, tab switch, host resolution, navigation and attach-on-connect
+# are all the real ones.
 #
 # Why the app starts on another tab
 # ---------------------------------

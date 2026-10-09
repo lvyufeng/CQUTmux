@@ -1,5 +1,6 @@
 import SwiftUI
 import WatchConnectivity
+import WidgetKit
 
 /// The watch's whole job: show what the agent is waiting on and let the wearer
 /// answer without reaching for the phone.
@@ -200,5 +201,14 @@ extension WatchLink: WCSessionDelegate {
               let decoded = WatchPayload.decode(WatchPayload.Usage.self, from: data)
         else { return }
         usage = decoded
+        // Mirror it into the App Group so the complication extension can read
+        // it: that extension is a separate process with its own container and
+        // no access to the WatchConnectivity context. A copy rather than the
+        // only store, so the app keeps working when the App Group entitlement
+        // is absent.
+        if let defaults = WatchPayload.sharedDefaults, let encoded = WatchPayload.encode(decoded) {
+            defaults.set(encoded, forKey: WatchPayload.sharedUsageKey)
+            WidgetCenter.shared.reloadAllTimelines()
+        }
     }
 }

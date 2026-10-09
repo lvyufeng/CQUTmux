@@ -68,11 +68,12 @@ struct RootView: View {
         .task {
             #if DEBUG
             // iOS puts a "Open in CQUTmux?" confirmation in front of a custom
-            // scheme launched from outside the app, and nothing in `simctl`
-            // can tap it — there is no Simulator.app in this Xcode and no
-            // input-injection tool. Announcing the URL through the environment
-            // reaches the same `onOpenURL` handler with the same `URL`, so
-            // everything after the OS's own delivery can still be tested.
+            // scheme launched from outside the app, and reaching `onOpenURL`
+            // would mean tapping that confirmation for every link a run wants
+            // to test. Announcing the URL through the environment reaches the
+            // same `onOpenURL` handler with the same `URL`, so everything after
+            // the OS's own delivery is still tested — and it is deterministic,
+            // where a tap depends on where the alert happens to be drawn.
             if let raw = ProcessInfo.processInfo.environment["CQUT_DEV_OPEN_URL"],
                let url = URL(string: raw) {
                 handle(url)
@@ -116,6 +117,7 @@ struct RootView: View {
             // anything for the terminal to do.
             if handleTheme(link) { return }
             if handleInbox(link) { return }
+            if handleUsage(link) { return }
             selection = .terminal
             pendingLink = link
         case .failure(let error):
@@ -147,6 +149,19 @@ struct RootView: View {
         // opens the app; it just leaves the tab where it was.
         guard AgentActivitySettings.opensInboxOnTap() else { return true }
         selection = .inbox
+        return true
+    }
+
+    /// `cqutmux://usage`, which is where the watch complication's tap lands.
+    ///
+    /// The complication shows one rate-limit number, so a tap that left the app
+    /// on the last-used tab would send the wearer looking for the screen the
+    /// number came from. No setting gates this: unlike the Inbox link, which
+    /// answers a preference about Live Activities, there is only one thing this
+    /// link can mean.
+    private func handleUsage(_ link: DeepLink) -> Bool {
+        guard case .usage = link.target else { return false }
+        selection = .usages
         return true
     }
 

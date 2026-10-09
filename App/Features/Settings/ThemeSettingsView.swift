@@ -146,9 +146,10 @@ struct ThemeSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             #if DEBUG
-            // The import sheet cannot be reached from a test script — there is
-            // no input injection here — so a debug run opens it directly. The
-            // sheet, its parse and its error path are all the real ones.
+            // Opening the import sheet from a script would mean tapping a button
+            // whose position a run would then depend on, so a debug run opens it
+            // directly. The sheet, its parse and its error path are all real;
+            // only the tap is stood in for.
             if ProcessInfo.processInfo.environment["CQUT_DEV_IMPORT"] == "1" { importing = true }
             #endif
         }

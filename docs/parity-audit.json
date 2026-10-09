@@ -494,9 +494,9 @@
     {
       "page": "apple-watch",
       "claim": "A usage complication for the watch face, plus Smart-card Live Activities sitting on the watch face, both tappable to open the matching screen.",
-      "status": "missing",
-      "evidence": "The data half exists — App/Shared/WatchPayload.swift:100 computes `peakPercent` ('the most-pressed rate-limit window') — but grep of Watch/ for `complication|CLKComplication|WidgetKit` returns nothing, and the only widget target is iOS (`project.yml:34-45`, CQUTmuxWidgets, platform iOS, TARGETED_DEVICE_FAMILY \"1,2\"). AgentActivityAttributes has no supplementalActivityFamilies, so the Live Activity is not surfaced on watchOS. No watch-face complication or watch Live Activity view exists.",
-      "verification": "Searched the whole repo (sources, project.yml, all Info.plists, git history, all branches) and found no counterpart. The only watch target, CQUTmuxWatch (project.yml:47-63), is a plain watchOS application with two app tabs (Watch/WatchRootView.swift) — no complication/WidgetKit extension descriptor and no ClockKit code. The only widget extension is CQUTmuxWidgets, platform iOS, TARGETED_DEVICE_FAMILY \"1,2\" (project.yml:30-45), and it exposes a single ActivityConfiguration (Live Activity) in Widgets/CQUTmuxWidgets.swift:12-14, which cannot appear on a watch face. App/Shared/AgentActivityAttributes.swift has no supplementalActivityFamilies, so the Live Activity is not surfaced on watchOS, and there is no widgetURL/onOpenURL/deep-link plumbing in Widgets/ or Watch/. Every other \"complication\" hit is aspirational comment prose (App/Shared/WatchPayload.swift:82,96; scripts/watch-usage/main.swift:3,7,52,67) describing the number a complication would show, with no implementation. \"Smart-card\" appears nowhere in the repo (grep returns zero). git log --all shows no WatchKit/WidgetKit watch surface ever added. PLAN.md documents only the two on-wrist tabs and the phone->watch data push, and records no decision to deliberately omit a watch-face surface. The claim's conceded data half (peakPercent) exists, but the required tappable watch-face complication plus watch-surface Live Activity has no implementation anywhere, so the gap is real."
+      "status": "closed",
+      "evidence": "Data half: App/Shared/WatchPayload.swift computes the rate-limit percentages. Surface half now: WatchWidgets/CQUTmuxWatchWidgets.swift is a watchOS WidgetKit extension (StaticConfiguration(kind: \"CQUTmuxUsage\"), supportedFamilies [.accessoryCircular, .accessoryCorner, .accessoryRectangular, .accessoryInline], .widgetURL cqutmux://usage); Widgets/CQUTmuxWidgets.swift's AgentActivityView carries .supplementalActivityFamilies([.small, .medium]) with @Environment(\\.activityFamily) so the Live Activity is offered to the watch's Smart Stack; both watch processes declare the App Group group.app.cqutmux.ios (Watch/CQUTmuxWatch.entitlements, WatchWidgets/CQUTmuxWatchWidgets.entitlements) and Watch/ApprovalListView.applyUsage mirrors the payload into it, calling WidgetCenter.shared.reloadAllTimelines().",
+      "verification": "Re-verified 2026-10-10: closed. The complication extension is a real target (project.yml: CQUTmuxWatchWidgets, app-extension/watchOS, NSExtensionPointIdentifier com.apple.widgetkit-extension) embedded in the watch app and, through it, inside the phone bundle — both confirmed in the built products. scripts/watch-complication-check.sh asserts the kind, the four accessory families, the cqutmux://usage link, supplementalActivityFamilies, both entitlements declaring the group, the code reading the group the entitlements declare, and the appex's NSExtensionPointIdentifier; scripts/watch-usage-check.sh (27 checks) runs the shared-container round trip. The link was verified live on both devices: cqutmux://usage landed the iPhone on the Usages tab and the watch app on its Usage tab (screenshots). Honest limit: whether a complication is *placed on a face* is a user action on the face itself and cannot be observed headlessly, so the check verifies the extension's target, families, App Group and embedding rather than claiming the face shows it; likewise the Live Activity reaches the Smart Stack, which is where supplementalActivityFamilies puts it, not the face. The simulator also drops App Group entitlements under '-' signing, so the shared container is nil there — WatchPayload.sharedDefaults returns nil rather than trapping, and the complication renders \"—\" instead of a zero."
     },
     {
       "page": "image-paste",
@@ -683,9 +683,9 @@
     }
   ],
   "counters": {
-    "closed": 39,
+    "closed": 40,
     "partial": 31,
     "deliberate-divergence": 4,
-    "missing": 2
+    "missing": 1
   }
 }

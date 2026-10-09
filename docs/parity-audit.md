@@ -621,3 +621,37 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   against a real sshd: phase 1 sends a gesture via the view's own `send`, and
   phase 2 puts a real touch on the phone's preview so the recognisers and the
   mapping are exercised. Both pass.
+
+- **The watch face: a usage complication, and the Live Activity on the Smart
+  Stack.** The docs promise a complication for the face and a Smart-card Live
+  Activity, both tapping through to the matching screen. The data half already
+  existed — `WatchPayload` computes the rate-limit percentages — but nothing on
+  watchOS consumed it: the only widget extension was iOS and the Live Activity
+  had no `supplementalActivityFamilies`, so nothing of ours could reach a face
+  or the Smart Stack.
+
+  A `CQUTmuxWatchWidgets` app-extension target now sits inside the watch app
+  (and so, through it, inside the phone bundle). It is a plain WidgetKit widget
+  — `StaticConfiguration(kind: "CQUTmuxUsage")` offering the four watch
+  accessory families, `widgetURL` on `cqutmux://usage`. That link was added as
+  a third deep-link target beside the tmux and inbox ones, and was followed on
+  both devices: it lands the iPhone on Usages and the watch app on its Usage
+  tab. On the Live Activity side, `AgentActivityView` gained
+  `supplementalActivityFamilies([.small, .medium])` and branches on
+  `@Environment(\.activityFamily)`, so the same activity that shows as a lock
+  screen banner renders as a watch card.
+
+  The container between the two watch processes is an App Group, because
+  `WCSession`'s application context is not available to a widget extension.
+  `Watch/ApprovalListView` mirrors each payload into it and reloads timelines.
+  **The honest limits, since neither is visible from here:** whether a
+  complication is *placed on a face* is a user action on the face itself and
+  cannot be observed headlessly, so `scripts/watch-complication-check.sh`
+  verifies what a build can get wrong — the kind, the four accessory families,
+  the link, the entitlement on both targets, the code reading the group the
+  entitlements declare, and the appex's `NSExtensionPointIdentifier` — rather
+  than claiming the face shows it. And the simulator drops App Group
+  entitlements under `-` signing, so the shared container is nil there; the
+  read returns nil instead of trapping and the complication draws `—` rather
+  than a false zero. `scripts/watch-usage-check.sh` (27 checks) covers the
+  shared-container round trip that the simulator cannot.

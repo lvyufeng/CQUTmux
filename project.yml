@@ -48,6 +48,25 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.cqutmux.ios.widgets
         TARGETED_DEVICE_FAMILY: "1,2"
 
+  CQUTmuxWatchWidgets:
+    type: app-extension
+    platform: watchOS
+    deploymentTarget: "11.0"
+    sources:
+      - path: WatchWidgets
+      - path: App/Shared/WatchPayload.swift
+    info:
+      path: WatchWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: CQUTmux
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.cqutmux.ios.watchkitapp.widgets
+        TARGETED_DEVICE_FAMILY: "4"
+        CODE_SIGN_ENTITLEMENTS: WatchWidgets/CQUTmuxWatchWidgets.entitlements
+
   CQUTmuxWatch:
     type: application
     platform: watchOS
@@ -55,11 +74,15 @@ targets:
     sources:
       - path: Watch
       - path: App/Shared/WatchPayload.swift
+    dependencies:
+      - target: CQUTmuxWatchWidgets
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.cqutmux.ios.watchkitapp
         TARGETED_DEVICE_FAMILY: "4"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: Watch/CQUTmuxWatch.entitlements
     info:
       path: Watch/Info.plist
       properties:

@@ -7,6 +7,31 @@ import Foundation
 /// by `AgentEvent` — instead of being re-declared as dictionaries on the watch
 /// side and drifting from the phone's model.
 enum WatchPayload {
+    /// The app-group container the watch app and its complication extension
+    /// share.
+    ///
+    /// An App Group rather than the WatchConnectivity application context the
+    /// watch app reads: a WidgetKit extension is a separate process with its
+    /// own container, and `WCSession.receivedApplicationContext` is not
+    /// available there at all, so the complication would always render "no
+    /// data" while the app beside it showed real rings. The watch app writes
+    /// what it receives into this container; the extension reads it.
+    ///
+    /// Named with the `group.` prefix because that is what the entitlement
+    /// requires; the identifier must match `application-groups` on both the
+    /// watch app and its extension, and be registered on the developer account.
+    static let appGroup = "group.app.cqutmux.ios"
+
+    /// The `UserDefaults` suite the complication reads. Nil when the
+    /// entitlement is missing — a build without the App Group still runs, its
+    /// complication just has nothing to show, which is the honest result rather
+    /// than a crash in a widget process.
+    static var sharedDefaults: UserDefaults? {
+        UserDefaults(suiteName: appGroup)
+    }
+
+    /// The key the latest usage is stored under, in the shared container.
+    static let sharedUsageKey = "usage.latest"
     /// `applicationContext` key: the phone's list of pending approvals.
     static let pendingKey = "pending"
     /// `applicationContext` key: per-account rate-limit usage.

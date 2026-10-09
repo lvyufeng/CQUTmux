@@ -7,8 +7,13 @@ import SwiftUI
 struct WatchRootView: View {
     @State private var tab: Tab = Self.initialTab
 
-    /// A simulator cannot tap the toolbar to switch tabs (and this Xcode has no
-    /// Simulator.app at all), so a run declares which one it wants. DEBUG-only.
+    /// Which tab a run should start on. DEBUG-only.
+    ///
+    /// Read from the environment rather than tapped, so a run that wants the
+    /// Usage screen gets a stated reason if it fails rather than a tap that
+    /// depended on where the toolbar drew the button. It is also where the
+    /// complication's link and this variable converge: both end in the same
+    /// `tab` assignment below.
     private static var initialTab: Tab {
         #if DEBUG
         if let raw = ProcessInfo.processInfo.environment["CQUT_DEV_WATCH_TAB"],
@@ -71,6 +76,24 @@ struct WatchRootView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
                 }
+            }
+            // The complication's tap lands here. A `cqutmux://usage` link is
+            // the only one the watch understands: the face shows one rate-limit
+            // number, so the wearer pressed it to see the screen that number
+            // came from, and opening the inbox instead would be opening the
+            // wrong tab on a 45mm screen.
+            .onOpenURL { url in
+                if url.host?.lowercased() == "usage" { tab = .usage }
+            }
+            .task {
+                #if DEBUG
+                // The widget's `widgetURL` cannot be fired from a script, so a
+                // run hands the same URL to the same handler.
+                if let raw = ProcessInfo.processInfo.environment["CQUT_DEV_WATCH_URL"],
+                   let url = URL(string: raw) {
+                    if url.host?.lowercased() == "usage" { tab = .usage }
+                }
+                #endif
             }
         }
     }

@@ -18,11 +18,15 @@
 #
 # Why CQUT_DEV_WATCH_APPROVE
 # --------------------------
-# There is no command-line way to tap the watch's Allow button (and no
-# Simulator.app in this Xcode at all), so the decision is injected by the watch
-# app itself when that env var names an approval id. It calls the same `decide`
-# the button calls, so everything after the tap — WatchLink.send, the phone's
-# delegate, HookClient.resolve, the gateway — is the real path.
+# There is no command-line way to tap the watch's Allow button, so the decision
+# is injected by the watch app itself when that env var names an approval id. It
+# calls the same `decide` the button calls, so everything after the tap —
+# WatchLink.send, the phone's delegate, HookClient.resolve, the gateway — is the
+# real path.
+#
+# (Touches *can* be injected — see host/cqutmux-hook/simtouch/ — but a tap on a
+# button also depends on where the layout drew it, so the env hook stays for
+# this: it fails for one reason, not two.)
 set -euo pipefail
 
 PHONE_NAME="${1:-iPhone 17}"

@@ -12,6 +12,7 @@ import Foundation
 ///   cqutmux://host?host=<name-or-hostname>
 ///   cqutmux://theme
 ///   cqutmux://inbox
+///   cqutmux://usage
 ///
 /// A host is optional and, when absent, resolves to the only saved host — a
 /// link from a notification usually does not need to name the machine, and the
@@ -32,6 +33,11 @@ struct DeepLink: Equatable {
         /// the Inbox, so a tap that opened the app on whatever tab was last
         /// used would be a tap that made the user navigate.
         case inbox
+        /// Open the Usages tab. What the watch complication's tap target uses:
+        /// the complication shows one rate-limit number, so a tap that opened
+        /// the app on the last-used tab would be a tap that made the wearer go
+        /// looking for the screen the number came from.
+        case usage
     }
 
     var target: Target
@@ -99,6 +105,9 @@ struct DeepLink: Equatable {
 
         case "inbox":
             return .success(DeepLink(target: .inbox))
+
+        case "usage":
+            return .success(DeepLink(target: .usage))
 
         default:
             return .failure(.unknownRoute(route))
