@@ -29,12 +29,14 @@ struct TerminalScreen: View {
     @State private var cursor = CursorSettings()
     @State private var input = InputSettings()
     @State private var mux = MuxSettings()
+    @State private var transcriptionHistory = TranscriptionHistory()
     /// Whether a hardware keyboard is attached, inferred from the software
     /// keyboard's absence. See `InputSettings.showsBar`.
     @State private var hardwareKeyboard = false
     @State private var showShortcuts = false
     @State private var showGestures = false
     @State private var showJumpTo = false
+    @State private var showHistory = false
     /// Set once the link's attach command has been sent, so a reconnect — which
     /// also reaches `.connected` — does not attach a second time.
     @State private var didFollowLink = false
@@ -79,6 +81,11 @@ struct TerminalScreen: View {
                         } label: {
                             Label("Gestures", systemImage: "hand.tap")
                         }
+                        Button {
+                            showHistory = true
+                        } label: {
+                            Label("Dictation History", systemImage: "waveform")
+                        }
                         // Only herdr can be addressed by pane, so offering
                         // Jump To without a gateway connection would be a menu
                         // item that can only fail.
@@ -100,6 +107,14 @@ struct TerminalScreen: View {
             }
             .sheet(isPresented: $showGestures) {
                 NavigationStack { GestureEditorView(store: gestures) }
+            }
+            .sheet(isPresented: $showHistory) {
+                NavigationStack {
+                    TranscriptionHistoryView { text in
+                        coordinator.terminal?.sendDictatedLine(text)
+                    }
+                }
+                .environment(transcriptionHistory)
             }
             .sheet(isPresented: $showJumpTo) {
                 if let client = connection.client {
@@ -160,6 +175,11 @@ struct TerminalScreen: View {
                         case .partial(let text): coordinator.setDictationPreview(text)
                         case .final(let text):
                             coordinator.setDictationPreview("")
+                            // Recorded here rather than on the way into the
+                            // terminal: this is the only point that sees
+                            // dictated text and not typed or pasted text, which
+                            // is what keeps a password out of the history.
+                            transcriptionHistory.record(text)
                             coordinator.terminal?.sendDictatedLine(text)
                         }
                     }
@@ -184,6 +204,16 @@ struct TerminalScreen: View {
                 }
                 if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "jumpto" {
                     showJumpTo = true
+                }
+                if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "history" {
+                    showHistory = true
+                }
+                // Seeds the history sheet from the outside, so the screen can
+                // be checked without a working microphone and a working voice.
+                if let seed = ProcessInfo.processInfo.environment["CQUT_DEV_HISTORY"] {
+                    for line in seed.split(separator: "|") {
+                        transcriptionHistory.record(String(line))
+                    }
                 }
                 // A binding cannot be swiped from a script any more than a key
                 // can be tapped, so a run declares the gesture and the bytes

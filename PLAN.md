@@ -62,6 +62,7 @@
 | Agent 层 | Usages 看板（5h/7d 用量与 burn pace） | P4 |
 | 通知 | 本地/远程推送、webhook 告警 | P4 |
 | 系统 | Live Activity / Dynamic Island / Apple Watch | P4 / P6 ✅ 表盘实测 |
+| 语音 | **听写历史**（TranscriptionHistory，最近 20 条，可重新发送/复制/删除；**只记听写，不记键入或粘贴**，故 sudo 密码不会进列表） | P4 ✅ 规则实测 + 界面实测 |
 | 语音 | 听写四引擎（**Parakeet ✅ + Apple Speech ✅ + whisper.cpp ✅ 端侧三引擎实测**；**Cloud ✅ 指向用户自填端点，已对真实 HTTP 服务端到端实测**——Moshi 的托管端点本身是服务不是代码，故按"机制对齐"实现） | P4 ✅ |
 | 输入 | 图片粘贴 / 裁剪 / 标注 / 发送 | P4 |
 | 安全 | SSH key 存 Keychain + Face ID 保护 | P1 |
@@ -112,6 +113,12 @@ Option 想修饰的那个字母。因此「含任何 ASCII 就整串放行」是
 `zellij attach -c cqutmux`——会话名里带 tmux**，于是每个 zellij 宿主都会拿到一排 tmux 按键。
 改成按"命令行首/分隔符后的词"匹配（并剥掉路径），`scripts/mux-check.sh` 里 17 项专门覆盖这个判定，
 包括拿**我们自己的三条默认命令**去测。模拟器实测：tmux 宿主显示、zellij 宿主隐藏。
+
+**听写历史**：Moshi 的 `/docs/voice` 明确有「transcription history」。实现为 `TranscriptionHistory`（上限 20 条、
+连续重复折叠、重复旧条目上移而非再存一份）。关键取舍是**喂数据的入口**：只在 `Dictation.onUpdate` 的 `.final`
+里记录，**不挂在终端输入通路上**——后者会把用户在 `sudo` 提示符下键入的密码也收进去，而没有人要"听写历史"时
+期望是这个。`scripts/history-check.sh` 24 项覆盖上限（含"正好等于上限时不丢"）、折叠、重启往返、以及
+**存储损坏时退化为空而不是崩溃**。
 
 **顺带修掉一个测试自身的缺陷**：`InputSettings` 原本硬写 `UserDefaults.standard`，
 于是 `scripts/input-check.sh` 既会**改掉跑它的人的设置**，又会把上一次跑剩下的值读回来当输入，
