@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// How the terminal renders text: family, size and leading. Persisted in
 /// `UserDefaults` so a session picks up where the last one left off.
@@ -10,6 +11,7 @@ final class TerminalFontStore {
         static let size = "cqutmux.font.size"
         static let lineSpacing = "cqutmux.font.lineSpacing"
         static let cjk = "cqutmux.font.cjk"
+        static let customFont = "cqutmux.font.customFont"
     }
 
     /// Pinch-to-zoom clamps to this too, so the two ways of resizing the
@@ -35,17 +37,50 @@ final class TerminalFontStore {
         didSet { UserDefaults.standard.set(cjk.rawValue, forKey: Key.cjk) }
     }
 
+    /// Which imported font is in use, when `family` is `.custom`.
+    var customFontID: String? {
+        didSet { UserDefaults.standard.set(customFontID, forKey: Key.customFont) }
+    }
+
     init() {
         let defaults = UserDefaults.standard
         family = TerminalFontFamily.named(defaults.string(forKey: Key.family))
         size = defaults.object(forKey: Key.size) as? Double ?? 12
         lineSpacing = defaults.object(forKey: Key.lineSpacing) as? Double ?? 1
         cjk = defaults.string(forKey: Key.cjk).flatMap(CJKFallback.init(rawValue:)) ?? .none
+        customFontID = defaults.string(forKey: Key.customFont)
     }
 
+    /// The imported fonts, injected rather than read from a singleton so this
+    /// store stays independent of the one that owns the files. Set by the app
+    /// at launch.
+    @ObservationIgnored var customFonts: CustomFontStore?
+
     func uiFont() -> UIFont {
-        let base = family.font(ofSize: size)
+        let base = resolveBase()
         return cjk.applied(to: base, size: size)
+    }
+
+    /// The chosen family's font, falling back through the custom font and then
+    /// to the system's.
+    ///
+    /// The fallback chain is the point: a user who imported a font and later
+    /// removed it would otherwise get a blank terminal, because `family` would
+    /// still say `.custom` and there would be nothing to resolve. Landing on the
+    /// system mono is legible, and it is obviously not their font, which is the
+    /// honest way to report that it is gone.
+    private func resolveBase() -> UIFont {
+        switch family {
+        case .custom:
+            if let id = customFontID,
+               let name = customFonts?.postScriptName(for: id),
+               let font = UIFont(name: name, size: size) {
+                return font
+            }
+            return UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        default:
+            return family.font(ofSize: size)
+        }
     }
 }
 
@@ -106,6 +141,10 @@ enum CJKFallback: String, CaseIterable, Identifiable {
 /// a font picker whose entries silently render as the system font.
 enum TerminalFontFamily: String, CaseIterable, Identifiable {
     case system, menlo, courier, andale
+    /// A font the user imported. Not a family of its own — which one it is
+    /// lives in `CustomFontStore` — but a distinct choice so the picker can
+    /// offer "whatever I imported" without the enum having to know the list.
+    case custom
 
     var id: String { rawValue }
 
@@ -115,6 +154,7 @@ enum TerminalFontFamily: String, CaseIterable, Identifiable {
         case .menlo: "Menlo"
         case .courier: "Courier"
         case .andale: "Andale Mono"
+        case .custom: "Imported"
         }
     }
 
@@ -125,6 +165,7 @@ enum TerminalFontFamily: String, CaseIterable, Identifiable {
         case .menlo: "Menlo-Regular"
         case .courier: "Courier"
         case .andale: "AndaleMono"
+        case .custom: nil
         }
     }
 
@@ -135,6 +176,12 @@ enum TerminalFontFamily: String, CaseIterable, Identifiable {
         return UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
+    /// The built-in families, without `custom`. Used to keep the custom case
+    /// out of the loop that writes the PostScript names, where it has none.
+    static var builtIn: [TerminalFontFamily] {
+        allCases.filter { $0 != .custom }
+    }
+
     static func named(_ id: String?) -> TerminalFontFamily {
         id.flatMap(TerminalFontFamily.init(rawValue:)) ?? .system
     }
@@ -142,14 +189,50 @@ enum TerminalFontFamily: String, CaseIterable, Identifiable {
 
 struct FontSettingsView: View {
     @Environment(TerminalFontStore.self) private var fonts
+    @Environment(CustomFontStore.self) private var customFonts
+
+    @State private var importing = false
 
     var body: some View {
         @Bindable var fonts = fonts
         List {
             Section("Family") {
                 Picker("Font", selection: $fonts.family) {
-                    ForEach(TerminalFontFamily.allCases) { Text($0.label).tag($0) }
+                    ForEach(TerminalFontFamily.builtIn) { Text($0.label).tag($0) }
+                    // Offered only once something has been imported: a picker
+                    // entry that resolves to the system font would look like the
+                    // import had silently failed.
+                    if !customFonts.fonts.isEmpty {
+                        Text(TerminalFontFamily.custom.label).tag(TerminalFontFamily.custom)
+                    }
                 }
+                if fonts.family == .custom {
+                    Picker("Imported", selection: $fonts.customFontID) {
+                        Text("None").tag(String?.none)
+                        ForEach(customFonts.fonts) { font in
+                            Text(font.displayName).tag(String?.some(font.id))
+                        }
+                    }
+                }
+            }
+
+            Section {
+                ForEach(customFonts.fonts) { font in
+                    LabeledContent(font.displayName, value: font.postScriptName)
+                        .font(.caption)
+                }
+                .onDelete { offsets in
+                    for index in offsets { customFonts.remove(customFonts.fonts[index]) }
+                }
+                Button {
+                    importing = true
+                } label: {
+                    Label("Import font\u{2026}", systemImage: "plus")
+                }
+            } header: {
+                Text("Imported fonts")
+            } footer: {
+                Text(importFooter)
             }
 
             Section("Size") {
@@ -195,8 +278,36 @@ struct FontSettingsView: View {
                 preview
             }
         }
+        .fileImporter(
+            isPresented: $importing,
+            allowedContentTypes: Self.fontTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            customFonts.importFont(from: url)
+        }
         .navigationTitle("Font")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// The footer is a computed property rather than an inline concatenation:
+    /// the interpolations plus the literals exceed what the type checker will
+    /// do inside a view builder, and it reports that as a timeout.
+    private var importFooter: String {
+        var text = "A .ttf, .otf or .ttc file. It is copied into CQUTmux, so "
+            + "removing it from Files later does not break the terminal."
+        if let error = customFonts.lastError {
+            text += "\n\n\(error)"
+        }
+        return text
+    }
+
+    /// What the picker will let the user choose. A font is not a standard
+    /// content type on iOS, so the extensions are declared here rather than
+    /// relying on a UTI that does not exist.
+    private static var fontTypes: [UTType] {
+        ["public.truetype-font", "public.opentype-font", "public.truetype-font-collection"]
+            .compactMap { UTType($0) }
     }
 
     /// A few lines of the sort of output the terminal actually shows, so the

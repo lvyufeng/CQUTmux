@@ -27,6 +27,12 @@ struct SyncPayload: Codable, Equatable {
     var fontSize: Double?
     var lineSpacing: Double?
     var cjkFallback: String?
+    /// Which imported font is in use. The font *files* are deliberately not
+    /// synced — they are megabytes, and the other device may not have the
+    /// licence for them — so a device that receives this and lacks the font
+    /// falls back to the system mono. That is why the setting is small and
+    /// optional rather than a list.
+    var customFontID: String?
 
     var cursorShape: String?
     var cursorBlinks: Bool?

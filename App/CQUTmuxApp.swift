@@ -10,6 +10,7 @@ struct CQUTmuxApp: App {
     @State private var connection = AgentConnection()
     @State private var themes = ThemeStore()
     @State private var fonts = TerminalFontStore()
+    @State private var customFonts = CustomFontStore()
     @State private var cursor = CursorSettings()
     @State private var icons = AppIconStore()
     @State private var sessionLayout = SessionLayout()
@@ -30,6 +31,7 @@ struct CQUTmuxApp: App {
                 .environment(connection)
                 .environment(themes)
                 .environment(fonts)
+                .environment(customFonts)
                 .environment(cursor)
                 .environment(icons)
                 .environment(sessionLayout)
@@ -40,6 +42,21 @@ struct CQUTmuxApp: App {
                     if gate.isLocked { LockedView(gate: gate) }
                 }
                 .task {
+                    // Wired here rather than in the font screen, so an imported
+                    // font resolves from the first frame the terminal is built
+                    // rather than only after someone visits Settings.
+                    fonts.customFonts = customFonts
+                    #if DEBUG
+                    // A UI run cannot drive the document picker, so a font to
+                    // look at has to arrive by path. Done here, before the
+                    // screen is built, so the picker and the list are already
+                    // populated when Settings → Font first appears.
+                    if let path = ProcessInfo.processInfo.environment["CQUT_DEV_IMPORT_FONT"],
+                       let imported = customFonts.importForTesting(path: path) {
+                        fonts.family = .custom
+                        fonts.customFontID = imported.id
+                    }
+                    #endif
                     // Runs before the debug seeds so a synced host list is
                     // what the seeds have to override, not the other way round.
                     await syncStore()

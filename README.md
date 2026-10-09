@@ -62,7 +62,7 @@ App/                    SwiftUI app (features grouped by domain)
   Features/Code/        files, diffs, git history, pasted files
   Features/Preview/     browser bridge and simulator preview
   Features/Security/    Keychain, key management
-  Features/Settings/    theme, font, cursor, speech, iCloud sync, integrations, input
+  Features/Settings/    theme, font (+ custom font import), cursor, speech, iCloud sync, integrations, input
   Features/Voice/       dictation engines (Apple / Whisper / Parakeet / cloud)
 Packages/CQUTTransport/ local SwiftPM package: the SSH transport, agent forwarding
 Packages/CQUTMosh/      the mosh↔Swift driver (C); see scripts/mosh-ios/

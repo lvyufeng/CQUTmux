@@ -37,6 +37,7 @@ extension SyncPayload {
         payload.themeName = stores.themes.current.id
         payload.importedThemes = stores.themes.imported
         payload.fontFamily = stores.fonts.family.id
+        payload.customFontID = stores.fonts.customFontID
         payload.fontSize = stores.fonts.size
         payload.lineSpacing = stores.fonts.lineSpacing
         payload.cjkFallback = stores.fonts.cjk.rawValue
@@ -86,6 +87,7 @@ extension SyncPayload {
         }
         if let fontSize { stores.fonts.size = fontSize }
         if let lineSpacing { stores.fonts.lineSpacing = lineSpacing }
+        if let customFontID { stores.fonts.customFontID = customFontID }
         if let cjkFallback, let cjk = CJKFallback(rawValue: cjkFallback) {
             stores.fonts.cjk = cjk
         }

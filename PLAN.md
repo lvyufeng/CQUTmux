@@ -49,6 +49,7 @@
 | 输入 | Option 当 Meta（`InputSettings.optionMeta`）、栏内按键增删排序、D-pad 四向 + 两角可绑定（Esc/Del/^C/收键盘）、接硬件键盘时自动收栏 | P5 ✅ 规则实测 + 端到端实测 |
 | 终端 | 手势：swipe 切窗口、pinch 缩放、双击 Tab | P3 |
 | 终端 | 主题 / 字体 / 图标、CJK 输入 | P4 ✅ 主题+字体+图标+CJK |
+| 终端 | **自定义字体导入**（Settings → Font → Import font…，`.ttf/.otf/.ttc`）：**拷贝**进 App 容器（不是引用文档选择器 URL —— 该 URL 只在回调期间有效，终端要天天重新解析），并用**字体自己的 PostScript 名**注册，而不是文件名 | P5 ✅ 规则实测（25）+ 端到端实测 |
 | 外观 | 主题驱动整个 App（chrome/选中/强调色）、主题导入（粘贴/QR/深链）、光标形状与闪烁、CJK 字形回退、备选 App 图标 | P4 ✅ 实测 |
 | 终端 | 鼠标滚轮手势（双指拖动转 wheel）、滚到底收键盘 | P5 ✅ |
 | 会话 | 会话持久化、切后台恢复、断线重连 | P1–P2 |
@@ -120,6 +121,25 @@ Option 想修饰的那个字母。因此「含任何 ASCII 就整串放行」是
 里记录，**不挂在终端输入通路上**——后者会把用户在 `sudo` 提示符下键入的密码也收进去，而没有人要"听写历史"时
 期望是这个。`scripts/history-check.sh` 24 项覆盖上限（含"正好等于上限时不丢"）、折叠、重启往返、以及
 **存储损坏时退化为空而不是崩溃**。
+
+**自定义字体导入**（Moshi 的 Settings → Terminal Fonts → Import font…，Pro 功能）。
+两处取舍都会**先能跑、以后再坏**，所以都写进了检查脚本：
+
+- **拷贝而不是引用**。文档选择器给的 security-scoped URL 只在回调期间有效，而终端每次重绘都要解析字体，
+  可能是几天后。引用它的实现测试当天完全正常，重启即失效——所以文件被拷进 Application Support 下的 `Fonts/`，
+  注册的是这份拷贝。
+- **名字取自字体，不是文件名**。`JetBrainsMono-Regular.ttf` 与 `jetbrains-mono.ttf` 是同一个字体，
+  而从 zip 里解出来的字体文件常连这两个名字都不是。存下来的必须是 `UIFont(name:)` 之后要找的那个名字，
+  否则导入"成功"、渲染成系统字体，用户只会觉得"这个字体不好看"。做法是 `CGFont.postScriptName`。
+  显示名走 `CTFontCreateWithGraphicsFont` + `CTFontCopyFamilyName`——**iOS 上 `CGFont` 没有 `familyName`**。
+- **非字体文件在导入时就拒**（`CGFont(provider)` 解析失败），而不是等到渲染时静默回退。
+
+`CustomFontStore` 只 import Foundation + CoreText，**完全不碰 UIKit**（对外暴露 `postScriptName(for:)` 而非 `UIFont?`），
+所以 `scripts/fonts-check.sh` 25 项无需模拟器即可跑：真实系统字体导入成功、PostScript 名来自字体、文件是拷贝、
+重启往返、`.txt`/假 ttf/缺失文件全部被拒、重复导入不产生两条、删除同时删文件、以及**存下的名字能经
+`CTFontCreateWithName` 原样解析回来**（而不是被静默替换成别的字体）。
+模拟器实测（`CQUT_DEV_IMPORT_FONT` 注入，因为文档选择器无法被任何 simctl 命令驱动）：
+列表与 Family 选择器都出现 `Courier New` / `CourierNewPSMT`——**两个名字都不是文件名 `Courier New.ttf`**，正是要验的那点。
 
 **顺带修掉一个测试自身的缺陷**：`InputSettings` 原本硬写 `UserDefaults.standard`，
 于是 `scripts/input-check.sh` 既会**改掉跑它的人的设置**，又会把上一次跑剩下的值读回来当输入，
