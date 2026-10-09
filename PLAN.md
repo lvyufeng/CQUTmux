@@ -44,6 +44,7 @@
 | 连接 | Mosh（UDP，抗漫游） | P2 |
 | 连接 | ET / Eternal Terminal（TCP 2022） | P2 ✅ 实测 |
 | 连接 | Auto 传输协商（mosh→ET→SSH） | P2 ✅ 实测 |
+| 连接 | **Easy Pair**（宿主 `cqutmux pair` 生成密钥、写 `authorized_keys`、打印 `cqutmux://pair` 链接与二维码；App 扫码或粘贴即成连接，**私钥走 fragment**） | P5 ✅ 规则实测（pair 36 + qr 33 + qr-js 28 + cli 端到端）+ 界面实测 |
 | 终端 | VT/xterm 仿真、滚动、选中、链接可点 | P1 |
 | 终端 | 自定义键盘附件栏 + 硬件键盘 ⌘K/⌘O/⌘1-9 | P1 |
 | 输入 | Option 当 Meta（`InputSettings.optionMeta`）、栏内按键增删排序、D-pad 四向 + 两角可绑定（Esc/Del/^C/收键盘）、接硬件键盘时自动收栏 | P5 ✅ 规则实测 + 端到端实测 |
@@ -72,6 +73,7 @@
 | 安全 | 重开需生物识别（后台 >30s）、key 导出页（显式空缺） | P4 ✅ 实测 |
 | 同步 | iCloud 设置同步（hosts/主题/字体/光标/布局/引擎；冲突合并；**载荷无密钥**）；凭据同步显示但禁用并说明 | P4 ✅ 实测 |
 | 宿主 | `cqutmux` CLI（`<dir>` 起 tmux / `diff` / `status` / `doctor` / `logs` / `serve` / `install` / `pair`），裸调用仍是网关 | P5 ✅ 实测 |
+| 宿主 | `pair` 生成/复用 `~/.ssh/cqutmux_ed25519`（**独立密钥，绝不碰用户自己的 `id_ed25519`**）、只把公钥写进 `authorized_keys`、打印可扫描的二维码与链接 | P5 ✅ 规则实测 + 端到端实测 |
 | 输入 | 粘贴文件历史与复取（宿主 `/uploads`、`/upload`、`DELETE`；App 侧 Pasted files 页）。**不做**：对外可分享的 HTTPS 短链（那是托管服务） | P4 ✅ 宿主实测 / App 侧未在线实测 |
 | 宿主 | 网关配置文件 `[gateway]`：发现/用量采集/嵌套 agent 抑制/扫描端口范围；标志优先于文件 | P5 ✅ 实测 |
 | 通知 | 通知设置页：权限状态、暂停（客户端强制）、测试通知、远程推送状态 | P4 ✅ 实测 |
@@ -507,6 +509,41 @@ Moshi 把它做成**自己托管的服务**——这是本 App 唯一无法靠�
 ② 引擎与诊断 harness 都用 `"\(error)"` 打印错误，终端状态行会显示 `badStatus(503)` 而不是写好的句子；
 ③ harness 第一轮**不清空上一轮的报告文件**，于是每个用例立刻"通过"在上一轮的内容上——一次失败会被算到错误的用例头上；
 ④ 端口被残留进程占用时每个用例都表现为"连不上"，与 App 坏掉无法区分，现已先行报错。
+
+**本轮新增：Easy Pair**（Moshi 的设置项，文档原话是"only sets up SSH/Mosh host access"，并把连接和**它自己的密钥**一起保存）。
+这是长期以来"连接要靠手填五个字段加一把私钥"的那个缺口。
+
+- **格式是一个 URL**（`cqutmux://pair?v=1&host=…&user=…#key=<base64 seed>`），不是 JSON。
+  理由：`cqutmux://` 本来就是 App 注册的 scheme，于是**同一个字符串既是相机读到的东西，也是能发出去、能从终端输出里点开的链接**；
+  二维码只是它的渲染，不是第二种格式。**私钥放 fragment**——fragment 不发往服务器，链接被日志、被聊天预览、被代理看到时，密钥不在会travel的那一半里。
+- **传的是 32 字节 seed，不是 OpenSSH 私钥文件**：① 它正是 App 存进 Keychain 的东西，跨语言没有转换可出错；
+  ② 44 字符 vs 约 400，二维码才小到能在终端打印；③ 同一把密钥不同生成器的 OpenSSH 编码不同，在这里解析等于再信一遍这个 App 已经读过的格式。
+- **宿主侧 `cqutmux pair`**（不只是打印信息了）：没有密钥就生成 `~/.ssh/cqutmux_ed25519`、把**公钥**追加进 `authorized_keys`、打印链接和它的二维码。
+  密钥文件**独立命名是有意的**——`id_ed25519` 是用户自己的、机器上别的工具也在用，覆盖它等于砸掉用户所有登录，读它等于把一把万能钥匙装进手机。
+- **App 侧**：`HostStore.pair(with:)` 按 hostname/port/user 去重再 upsert，只写链接带来的东西——**没带密钥的链接绝不清掉已有的密钥**
+  （重新配对常常只是为了换 token，静默忘掉密钥会把这件事变成认证失败）。配对成功直接进会话：这正是这个功能存在的意义。
+- **二维码编码器写了两份**（`App/Shared/QRCode.swift` 与 `host/cqutmux-hook/qr.mjs`），这是刻意为之的坏味道：
+  宿主是 Node，App 是 Swift，共用一份不现实。但两份实现正是 bug 藏身之处，所以 **JS 那份拿 Swift 那份的同一批参考矩阵来判**
+  （`scripts/qr-js/main.mjs` 直接读 `scripts/qr/main.swift` 里的向量，两组都对同一个独立编码器负责，而不是互相对照）。
+- **二维码是安全边界**：扫码即得到一把能登录的私钥，所以命令打印时明说"这是秘密"，确认页在保存**之前**显示将保存什么。
+
+**这套检查抓到的问题**（每一条都是真的会打坏用户的）：
+① JS 版把 `placeData` 标过的格子写回了 `reserved`，于是 `applyMask` 时"保留位"= 全部格子，**掩码被套用在空气上**——
+   生成的码看上去完全正常，却读不回来；Swift 版当年正是踩过同一个坑，注释里写着，JS 版还是踩了。
+② 链接里的密钥走过 `String`：**32 字节随机 seed 多数不是合法 UTF-8**，`String(data:encoding:.utf8)` 返回 nil，密钥被**无声丢弃**。
+   现在 `Payload.seed` 是 `Data`，`key` 只是它的 base64 视图；断言里专门加了一条"非 UTF-8 的密钥必须逐字节往返"。
+③ 31 字节的 key 字段原本被当成合法——截断的链接会变成连上后认证失败，比"密钥缺失"难查得多，现在按"无密钥"处理。
+④ 已有密钥时调用 `ssh-keygen -f` 会**在 stdin 等 "Overwrite (y/n)?"**——命令不是失败而是**永久挂起**，且没有任何输出。
+   现在先 `existsSync` 再决定，不去调它。
+⑤ 相机权限文案只写了"导入主题"，而扫码器已经被配对复用；一个 prompt 覆盖全 App，文案说错就是**如实性问题**。
+⑥ 调试用的配对链接原本要在 `.task` 里切到 Paste 页，但相机视图**先一步出现并拉起权限弹窗**；
+   改成 `init` 里就定好初始 phase，相机根本不会被创建。
+
+**实测**：`scripts/build.sh` 通过；`scripts/cli-check.sh` **34 项**（其中 9 项是 Easy Pair 端到端，
+用 `scripts/pair-parse.sh` ——它链接的是 **App 真正发布的那份 `Pairing.swift`**，而不是在检查脚本里再写一个读法，
+后者只能证明宿主和自己一致）；`scripts/pair-check.sh` **36 项**；`scripts/qr-check.sh` **33 项**；`scripts/qr-js-check.sh` **28 项**。
+模拟器截图确认确认页逐字段显示 host/port/user/name、密钥与 token 两项标注正确
+（过程中还学到：`simctl privacy grant camera` 在已安装的 app 上不生效，要全新安装或重启模拟器）。
 
 **未验证项（诚实记录）**：本地通知的**投递**无法在模拟器验证（`simctl` 不能授予通知权限，
 仅能确认授权弹窗出现、代码路径执行）；P4/P5 的 UI 均在模拟器以 shim 数据实测，尚未上真机；

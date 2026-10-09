@@ -85,13 +85,108 @@ grep -q "cqutmux <dir>" "$OUT/help.txt" || fail "help does not describe the path
 grep -q "serve" "$OUT/help.txt" || fail "help does not list serve"
 ok "help lists the commands"
 
-run pair > "$OUT/pair.txt" 2>&1 || fail "pair exited non-zero"
-grep -q "Port" "$OUT/pair.txt" || fail "pair does not print the port"
-grep -q "Token" "$OUT/pair.txt" || fail "pair does not mention the token"
-# The token warning is the point of the command: silence here would let someone
-# expose event history without noticing.
-grep -q "none set" "$OUT/pair.txt" || fail "pair does not warn about a missing token"
-ok "pair prints host, port and the token warning"
+# MARK: - Easy Pair
+#
+# `pair` now sets the host up rather than only describing it, and the thing that
+# has to hold is across two languages and two machines: the host writes the link
+# in JavaScript, the app reads it in Swift, and there is no error channel
+# between them. So what it printed is read back with the app's own parser
+# (`scripts/pair-parse.sh` links the file the app ships) rather than with a
+# second reading written inside this check, which would only prove the host
+# agrees with itself. It runs against a throwaway HOME so no real key or
+# `authorized_keys` is touched.
+
+PAIR_HOME="$OUT/pairhome"
+mkdir -p "$PAIR_HOME/.ssh"
+chmod 700 "$PAIR_HOME/.ssh"
+
+HOME="$PAIR_HOME" run pair --port 2222 --token 'tok&en' --host 10.1.2.3 --user 'the user' \
+  > "$OUT/pair.txt" 2>&1 || fail "pair exited non-zero"
+
+[ -f "$PAIR_HOME/.ssh/cqutmux_ed25519" ] || fail "pair did not generate a key"
+# The public key's own body, not the filename: what has to be in the file is the
+# key, and a check for the path would pass with any line mentioning it.
+PUB_BODY="$(awk '{print $2}' "$PAIR_HOME/.ssh/cqutmux_ed25519.pub")"
+grep -q "$PUB_BODY" "$PAIR_HOME/.ssh/authorized_keys" \
+  || fail "pair did not authorise the key it generated"
+# The private key must never be written where anything else reads it.
+grep -q "PRIVATE KEY" "$PAIR_HOME/.ssh/authorized_keys" \
+  && fail "the private key was written into authorized_keys"
+ok "pair generates a key and authorises only its public half"
+
+# The link is the last line that starts with the scheme; the QR drawing and the
+# prose around it must not be mistaken for it.
+LINK="$(grep -m1 '^cqutmux://pair' "$OUT/pair.txt")"
+[ -n "$LINK" ] || fail "pair printed no link"
+ok "pair prints the link itself, not only a QR code"
+
+# The QR code is drawn above it. If the drawing were empty or the link were left
+# out of it, a camera would see nothing while the command reported success.
+QR_ROWS="$(grep -c '█' "$OUT/pair.txt")"
+[ "$QR_ROWS" -ge 20 ] || fail "pair did not draw a QR code ($QR_ROWS rows)"
+ok "pair draws a QR code"
+
+PARSED="$(scripts/pair-parse.sh link "$LINK")" || fail "the app's parser rejected the link pair printed"
+python3 -I -c "
+import json, sys
+p = json.loads('''$PARSED''')
+assert p['host'] == '10.1.2.3', 'host: ' + json.dumps(p)
+assert p['port'] == 2222, 'port: ' + json.dumps(p)
+assert p['username'] == 'the user', 'username: ' + json.dumps(p)
+assert p['token'] == 'tok&en', 'token: ' + json.dumps(p)
+assert p['keyBytes'] == 32, 'the key did not survive as a 32-byte seed: ' + json.dumps(p)
+assert p['version'] == 1, 'version: ' + json.dumps(p)
+" || fail "the app read the link as different fields from what the host printed"
+ok "the app reads back host, port, user and token from what pair printed"
+
+# The key travels in the fragment, which is the part a server or a chat preview
+# never sees. A link with the key in the query would leak it into every log it
+# passes.
+case "$LINK" in
+  *'#key='*) ;;
+  *) fail "the key is not in the fragment: $LINK" ;;
+esac
+case "${LINK%%#*}" in
+  *key=*) fail "the key is in the query string, where it does not stay private" ;;
+esac
+ok "the private key travels in the fragment, never the query"
+
+# A second run must reuse the key rather than replace it, or every pairing
+# invalidates the phones already paired.
+KEY_BEFORE="$(shasum "$PAIR_HOME/.ssh/cqutmux_ed25519.pub" | cut -d' ' -f1)"
+HOME="$PAIR_HOME" run pair --host 10.1.2.3 > /dev/null 2>&1 || fail "a second pair exited non-zero"
+KEY_AFTER="$(shasum "$PAIR_HOME/.ssh/cqutmux_ed25519.pub" | cut -d' ' -f1)"
+[ "$KEY_BEFORE" = "$KEY_AFTER" ] || fail "pairing twice replaced the key, invalidating the phone already paired"
+ok "pairing again reuses the key"
+
+# The path the phone should dial, learned from what the host actually wrote.
+HOME="$PAIR_HOME" run pair --host 10.1.2.3 --user u > "$OUT/pair2.txt" 2>&1
+LINK2="$(grep -m1 '^cqutmux://pair' "$OUT/pair2.txt")"
+scripts/pair-parse.sh link "$LINK2" > "$OUT/link2.json" || fail "the app rejected a link with no token"
+python3 -I -c "
+import json
+p = json.load(open('$OUT/link2.json'))
+assert 'token' not in p, 'a token appeared in a link made without one: ' + json.dumps(p)
+assert p['keyBytes'] == 32, 'the key was lost when no token was set'
+" || fail "a host with no gateway token produced a wrong link"
+ok "a link without a token still pairs, key included"
+
+# MARK: - The round trip through the app's writer
+#
+# `Pairing.string` is the app's half of the format. The host has to read links
+# the app writes as well, because a host that can only write would break the day
+# the app gains a "share this host" button.
+
+LINK3="$(echo '{"host":"10.9.9.9","port":22,"username":"someone","name":"a box"}' | scripts/pair-parse.sh build)" \
+  || fail "the app could not write a link"
+scripts/pair-parse.sh link "$LINK3" > "$OUT/link3.json" || fail "the app rejected its own link"
+python3 -I -c "
+import json
+p = json.load(open('$OUT/link3.json'))
+assert p['host'] == '10.9.9.9' and p['port'] == 22 and p['username'] == 'someone', json.dumps(p)
+assert p['name'] == 'a box', 'a name with a space did not survive: ' + json.dumps(p)
+" || fail "a link the app wrote did not read back the same"
+ok "a link the app writes reads back the same through the app's parser"
 
 run status --port "$PORT" > "$OUT/status.txt" 2>&1 || fail "status exited non-zero against a live gateway"
 grep -q "running on" "$OUT/status.txt" || fail "status did not find the running gateway"

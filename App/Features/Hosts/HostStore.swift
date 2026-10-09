@@ -30,6 +30,47 @@ final class HostStore {
         save()
     }
 
+    /// Saves a host from a pairing link, key material included.
+    ///
+    /// Kept here rather than in the view because it writes the Keychain and the
+    /// host list together: a host saved without its key authenticates by
+    /// password and fails, and a key saved without its host is an orphan the
+    /// delete path will never clean up.
+    ///
+    /// An existing host at the same address is updated rather than duplicated.
+    /// Re-pairing is how a host that rotated its key is fixed, and a second
+    /// entry with the same address would leave the stale one in the list.
+    @discardableResult
+    func pair(with payload: Pairing.Payload) -> Host? {
+        let existing = hosts.first {
+            $0.hostname.caseInsensitiveCompare(payload.host) == .orderedSame
+                && $0.port == payload.port
+                && $0.username == payload.username
+        }
+        var host = existing ?? Host()
+        host.hostname = payload.host
+        host.port = payload.port
+        host.username = payload.username
+        if let name = payload.name, !name.isEmpty { host.name = name }
+        else if host.name.isEmpty { host.name = payload.host }
+        // Pairing always hands over a key, so the connection should try it.
+        if payload.seed != nil { host.authMethod = .key }
+
+        // Only write what the link carried. A link without a key must not clear
+        // a key that is already there — the host may pair again later simply to
+        // pick up a new token, and silently forgetting the key would turn that
+        // into an authentication failure.
+        if let seed = payload.seed {
+            KeychainStore.save(seed, account: host.keySeedAccount)
+        }
+        if let token = payload.token, let data = token.data(using: .utf8) {
+            KeychainStore.save(data, account: host.gatewayTokenAccount)
+        }
+
+        upsert(host)
+        return host
+    }
+
     private func load() {
         guard let data = try? Data(contentsOf: fileURL) else { return }
         hosts = (try? JSONDecoder().decode([Host].self, from: data)) ?? []

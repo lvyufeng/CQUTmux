@@ -70,7 +70,7 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Scan a theme's QR code to import it. The camera is used only while this screen is open, and nothing is recorded.</string>
+	<string>Scan a QR code to import a theme or pair a host. The camera is used only while that screen is open, and nothing is recorded.</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

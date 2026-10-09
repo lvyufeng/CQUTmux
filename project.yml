@@ -136,11 +136,15 @@ targets:
         # session, so allowing local networking here exposes nothing.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        # Importing a theme by QR code. The camera is only opened from the
-        # import screen, when the user picks the Scan tab.
+        # Scanning a QR code: importing a theme, or pairing a host. Both are
+        # behind the Scan tab of their own screen, so the camera is only ever
+        # opened on a deliberate action and closed when that screen goes away.
+        # The text has to cover both — it is one prompt for the whole app, and
+        # naming only themes would misdescribe what someone pairing a host is
+        # being asked to allow.
         NSCameraUsageDescription: >-
-          Scan a theme's QR code to import it. The camera is used only while
-          this screen is open, and nothing is recorded.
+          Scan a QR code to import a theme or pair a host. The camera is used
+          only while that screen is open, and nothing is recorded.
         # Alternate app icons are declared as loose files rather than in an
         # asset catalog, because XcodeGen's asset support does not surface the
         # alternate-icon set. The PrimaryIcon entry is not optional: without it

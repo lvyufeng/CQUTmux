@@ -23,7 +23,7 @@ cqutmux doctor      check tmux, git, ssh, the gateway and the token, in that ord
 cqutmux logs [-f]   tail ~/.cqutmux/hook.log
 cqutmux serve       run the gateway, spelled out
 cqutmux install     write agent hooks + how to keep the gateway running
-cqutmux pair        host, address, port and token — what to enter in the app
+cqutmux pair        set up a phone: make a key, authorise it, print a link and QR
 cqutmux help
 ```
 
@@ -31,6 +31,29 @@ A single argument is a **path**, not a subcommand, so `cqutmux ~/src/api` names
 a project rather than being read as a typo'd command. `scripts/cli-check.sh`
 covers this file's behaviour, including the one thing that must not change:
 that a bare invocation still starts the gateway.
+
+### Easy Pair
+
+`cqutmux pair` is the whole host side of adding a host to the app. It generates
+an Ed25519 key at `~/.ssh/cqutmux_ed25519` if there is not one already (it
+reuses an existing one, so re-pairing does not invalidate phones already set
+up), appends the **public** half to `~/.ssh/authorized_keys`, and prints a
+`cqutmux://pair` link with a QR code above it to scan from **Add Host → Pair a
+Host**.
+
+The link carries the address, port, user, gateway token and the private key.
+**The key travels in the URL fragment**, which is the part browsers and log
+lines drop, so the same string can be pasted into a message or land in a shell
+history without handing over a login. It is still a secret: whoever reads the
+whole link can log in as you, and the command says so when it prints.
+
+The key is a **dedicated** one rather than your own `id_ed25519` — pairing hands
+the private half to a phone, and that key is used by every other tool on the
+machine. `authorized_keys` only ever receives the public half.
+
+`--host` and `--user` override the guessed address and the login name; they
+exist because the first non-loopback address is not always the interface the
+phone can reach.
 
 ### What `install` writes
 

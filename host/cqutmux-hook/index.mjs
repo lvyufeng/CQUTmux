@@ -21,13 +21,14 @@ import { createServer } from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { execFile, spawn } from 'node:child_process'
-import { readdir, readFile, stat, mkdir, writeFile, rm, chmod } from 'node:fs/promises'
+import { readdir, readFile, stat, mkdir, writeFile, appendFile, rm, chmod } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve, relative, isAbsolute, join, dirname } from 'node:path'
-import { homedir, hostname, networkInterfaces, tmpdir } from 'node:os'
+import { homedir, hostname, networkInterfaces, tmpdir, userInfo } from 'node:os'
 import { createPushService } from './push.mjs'
 import { herdrStatus, herdrSnapshot, herdrApprove, herdrRead, herdrFocusPane } from './herdr.mjs'
 import { readTranscript } from './transcript.mjs'
+import { terminal as qrTerminal } from './qr.mjs'
 
 const run = promisify(execFile)
 
@@ -47,6 +48,8 @@ function parseArgs(argv) {
     pushTopic: process.env.CQUTMUX_PUSH_TOPIC || '',
     pushSandbox: false,
     herdrPath: process.env.CQUTMUX_HERDR || '',
+    user: process.env.CQUTMUX_USER || userInfo().username,
+    host: process.env.CQUTMUX_HOST || '',
     // Defaults, overridden by ~/.config/cqutmux/config.toml. The `pick` in
     // applyConfig compares against these, so changing one here changes the
     // default the file has to beat.
@@ -66,6 +69,8 @@ function parseArgs(argv) {
     else if (argv[i] === '--push-topic') args.pushTopic = argv[++i]
     else if (argv[i] === '--push-sandbox') args.pushSandbox = true
     else if (argv[i] === '--herdr') args.herdrPath = argv[++i]
+    else if (argv[i] === '--user') args.user = argv[++i]
+    else if (argv[i] === '--host') args.host = argv[++i]
   }
   return args
 }
@@ -1002,10 +1007,10 @@ function usage() {
   cqutmux logs [-f]      tail the gateway log
   cqutmux serve          run the gateway (same as running with no arguments)
   cqutmux install        print how to keep the gateway running
-  cqutmux pair           print the details to enter in the app
+  cqutmux pair           set up a phone: print a link and its QR code
   cqutmux help           this text
 
-Options: --port N  --token S  --root DIR`
+Options: --port N  --token S  --root DIR  --user U  --host H`
 }
 
 const argv = process.argv.slice(2)
@@ -1013,7 +1018,7 @@ const argv = process.argv.slice(2)
 // `--port 24880` must not make "24880" look like a directory to open.
 const VALUED_FLAGS = new Set([
   '--port', '--token', '--root', '--webhook', '--push-key', '--push-key-id',
-  '--push-team-id', '--push-topic', '--herdr',
+  '--push-team-id', '--push-topic', '--herdr', '--user', '--host',
 ])
 const positionals = []
 for (let i = 0; i < argv.length; i++) {
@@ -1086,17 +1091,161 @@ async function runCommand(name, argv) {
   }
 }
 
-/// What to type into the app. The token is the only part that is not obvious
-/// from the machine, and printing it is the point of the command.
-function pair() {
-  const address = Object.values(networkInterfaces())
+/// The address the phone should dial: the first non-loopback IPv4, or whatever
+/// `--host` says. `--host` exists for the machines where the first non-loopback
+/// address is not the one on the network the phone is joined to (a Docker or
+/// VPN interface, a second NIC), which is otherwise an unfixable wrong answer.
+function pairAddress() {
+  if (args.host) return args.host
+  const found = Object.values(networkInterfaces())
     .flat()
     .find(i => i && i.family === 'IPv4' && !i.internal)
-  process.stdout.write(`Host            ${hostname()}\n`)
-  if (address) process.stdout.write(`Address         ${address.address}\n`)
-  process.stdout.write(`Port            ${args.port}\n`)
-  process.stdout.write(`Token           ${args.token || '(none set — anyone who can reach this port can read events)'}\n`)
-  process.stdout.write(`Herdr           ${args.herdrPath || '(not configured)'}\n`)
+  return found ? found.address : '127.0.0.1'
+}
+
+function pairKeyPath() {
+  // A dedicated file, not `id_ed25519`: that key is the user's own, reused by
+  // every other tool on the machine, and pairing hands the private half to a
+  // phone. Overwriting it would break their logins everywhere; reading it would
+  // mean the phone holds the key to everything.
+  return join(homedir(), '.ssh', 'cqutmux_ed25519')
+}
+
+/// Percent-encodes a value for the link. Escapes the same delimiter set the
+/// app's `Pairing.escape` does — the two ends have to agree on this or a token
+/// containing `&` arrives truncated at the phone.
+function pairEscape(value) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, c =>
+    `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`)
+}
+
+/// The private key's 32-byte seed out of an unencrypted `openssh-key-v1` file.
+///
+/// The same extraction the app does, and for the same reason: the seed is what
+/// the app stores, so handing over the file itself would mean the phone parsing
+/// a format on a path where a mistake costs a connection.
+function privateKeySeed(pem) {
+  const body = pem.split('\n').filter(line => !line.startsWith('-----')).join('')
+  const blob = Buffer.from(body, 'base64')
+  const magic = Buffer.from('openssh-key-v1\0', 'utf8')
+  if (!blob.subarray(0, magic.length).equals(magic)) {
+    throw new Error('not an openssh-key-v1 private key')
+  }
+  let offset = magic.length
+  const readString = () => {
+    const length = blob.readUInt32BE(offset)
+    offset += 4
+    const value = blob.subarray(offset, offset + length)
+    offset += length
+    return value
+  }
+  const cipher = readString()
+  const kdf = readString()
+  if (cipher.toString() !== 'none' || kdf.toString() !== 'none') {
+    throw new Error('the key has a passphrase; pairing needs an unencrypted key')
+  }
+  readString() // kdf options
+  blob.readUInt32BE(offset); offset += 4 // number of keys
+  readString() // public key blob
+  const privateBlob = readString()
+  let inner = 0
+  const innerString = () => {
+    const length = privateBlob.readUInt32BE(inner)
+    inner += 4
+    const value = privateBlob.subarray(inner, inner + length)
+    inner += length
+    return value
+  }
+  const check1 = privateBlob.readUInt32BE(inner); inner += 4
+  const check2 = privateBlob.readUInt32BE(inner); inner += 4
+  // Equal check integers are how a reader knows the key was decrypted with the
+  // right passphrase. They are always equal here, and checking anyway means a
+  // file that is not what it claims fails here rather than at the first byte of
+  // a key the phone would then never authenticate with.
+  if (check1 !== check2) throw new Error('the key file is malformed (check integers differ)')
+  if (innerString().toString() !== 'ssh-ed25519') {
+    throw new Error('only ed25519 keys can be paired')
+  }
+  innerString() // public key
+  const privateKey = innerString()
+  if (privateKey.length < 32) throw new Error('private key is too short')
+  return privateKey.subarray(0, 32)
+}
+
+/// Sets up Easy Pair: makes sure the host has a key, authorises it, and prints
+/// the link the app opens.
+///
+/// Generating rather than reusing `ssh-agent`'s or a hardware key's is the
+/// point of the command — the phone has to hold the private half, so the host
+/// needs a key whose private half can be handed over, and `~/.ssh/id_ed25519`
+/// reused by other tools is exactly the key that must not be. So a dedicated
+/// `~/.ssh/cqutmux_ed25519` is what this makes, and only its public half goes
+/// into `authorized_keys`.
+async function pair() {
+  const address = pairAddress()
+  // The machine's IP if it has one, else the hostname: the phone reaches this
+  // over the network, and `localhost` in a saved host is a bug that only shows
+  // up later.
+  const host = address === '127.0.0.1' ? hostname() : address
+  const keyPath = pairKeyPath()
+  const comment = `cqutmux@${hostname()}`
+
+  // An existing key is reused, so re-pairing a phone does not invalidate the one
+// already paired. Checked before generating rather than by catching a failure:
+// `ssh-keygen -f` on a path that exists asks "Overwrite (y/n)?" on stdin, so
+// the catch-based version does not fail — it waits forever for an answer the
+// command never gives, and a `cqutmux pair` that hangs with no output is far
+// worse to diagnose than one that errors.
+let seed
+if (existsSync(keyPath)) {
+  try {
+    seed = privateKeySeed(await readFile(keyPath, 'utf8'))
+  } catch (error) {
+    process.stderr.write(`cqutmux: ${keyPath} exists but could not be read: ${error.message}\n`)
+    process.stderr.write('cqutmux: move it aside and run this again to make a new one.\n')
+    process.exit(1)
+  }
+} else {
+  try {
+    // `-N ''` because a passphrase would have to reach the phone through the
+    // same link, which is the same secret twice.
+    await run('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', comment, '-f', keyPath])
+    seed = privateKeySeed(await readFile(keyPath, 'utf8'))
+  } catch (error) {
+    process.stderr.write(`cqutmux: could not make a key: ${error.message}\n`)
+    process.exit(1)
+  }
+}
+
+  const publicLine = (await readFile(`${keyPath}.pub`, 'utf8')).trim()
+  const authorized = join(homedir(), '.ssh', 'authorized_keys')
+  let existing = ''
+  try { existing = await readFile(authorized, 'utf8') } catch { /* none yet is fine */ }
+  if (!existing.split('\n').some(line => line.trim() === publicLine)) {
+    await mkdir(dirname(authorized), { recursive: true })
+    await appendFile(authorized, existing.endsWith('\n') || !existing ? publicLine + '\n' : '\n' + publicLine + '\n')
+    await chmod(authorized, 0o600)
+    process.stdout.write(`Authorised ${keyPath}.pub in ${authorized}\n\n`)
+  }
+
+  const items = [
+    'v=1',
+    `host=${pairEscape(host)}`,
+    `port=${args.port}`,
+    `user=${pairEscape(args.user)}`,
+    `name=${pairEscape(hostname())}`,
+  ]
+  if (args.token) items.push(`token=${pairEscape(args.token)}`)
+  const link = `cqutmux://pair?${items.join('&')}#key=${pairEscape(seed.toString('base64'))}`
+
+  process.stdout.write('Scan this with the app (Add Host → Pair a Host):\n\n')
+  process.stdout.write(qrTerminal(link) + '\n\n')
+  process.stdout.write(`${link}\n\n`)
+  process.stdout.write('The link contains the private key. Treat it as a secret:\n')
+  process.stdout.write('it is not encrypted, and anyone who reads it can log in as you.\n')
+  if (!args.token) {
+    process.stdout.write('No gateway token is set, so this link carries none.\n')
+  }
 }
 
 /// Reports whether a gateway is answering here, and what it says. Reads the

@@ -19,6 +19,7 @@ See plan: [PLAN.md](PLAN.md).
 | 3 | Host gateway + agent Inbox / Diff / Files / History | ✅ |
 | 4 | Notifications, Live Activity, voice, image paste, tmux picker | ✅ |
 | 5 | zellij + herdr, iPad sidebar, browser + simulator preview, gateway token | ✅ |
+| 5 | Easy Pair: `cqutmux pair` makes a key and prints a `cqutmux://pair` QR; the app scans it into a saved host | ✅ |
 | 6 | Apple Watch approvals | ✅ full round trip driven in the watchOS simulator (phone → wrist → approval → `POST /approve/<id>`) |
 
 Each phase was exercised in the simulator against a real sshd on a loopback

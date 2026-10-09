@@ -9,6 +9,17 @@ struct HostsView: View {
     @Environment(HostStore.self) private var store
     @State private var editing: Host?
     @State private var path: [Host] = []
+    @State private var pairing = false
+
+    /// A pairing link to open the sheet with, for a debug run. See
+    /// `PairingView.initialText`.
+    private var pairingLink: String {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["CQUT_DEV_PAIR_LINK"] ?? ""
+        #else
+        ""
+        #endif
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -24,8 +35,9 @@ struct HostsView: View {
                 } description: {
                     Text("Add a Mac, Linux box, WSL or VPS to open a terminal session.")
                 } actions: {
-                    Button("Add Host") { editing = Host() }
+                    Button("Pair a Host") { pairing = true }
                         .buttonStyle(.borderedProminent)
+                    Button("Add Manually") { editing = Host() }
                 }
                 .listRowBackground(Color.clear)
             } else {
@@ -40,6 +52,37 @@ struct HostsView: View {
             }
         }
         .navigationTitle("Terminal")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    // Pairing first: it is the path with no typing in it, and
+                    // the one the host's `cqutmux pair` command produces.
+                    Button {
+                        pairing = true
+                    } label: {
+                        Label("Pair a Host", systemImage: "qrcode.viewfinder")
+                    }
+                    Button {
+                        editing = Host()
+                    } label: {
+                        Label("Add Manually", systemImage: "square.and.pencil")
+                    }
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+            }
+        }
+        .sheet(isPresented: $pairing) {
+            PairingView(initialText: pairingLink) { payload in
+                if let host = store.pair(with: payload) {
+                    // Straight into the session: the whole point of pairing is
+                    // that nothing else has to be filled in, so a screen that
+                    // then asks the user to tap the host would be a step the
+                    // feature exists to remove.
+                    path = [host]
+                }
+            }
+        }
         .navigationDestination(for: Host.self) { host in
             ConnectFlowView(host: host, link: pendingLink)
         }
@@ -79,6 +122,7 @@ struct HostsView: View {
         }
         .task {
             #if DEBUG
+            if !pairingLink.isEmpty { pairing = true }
             if path.isEmpty,
                let target = store.hosts.first(where: { $0.hostname == ProcessInfo.processInfo.environment["CQUT_DEV_HOST"] }) {
                 path = [target]
