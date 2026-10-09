@@ -54,6 +54,7 @@
 | 会话 | 会话持久化、切后台恢复、断线重连 | P1–P2 |
 | 多路复用 | tmux 集成、会话选择器、jump-to window | P2 |
 | 多路复用 | **tmux prefix 可配置**（Settings → Multiplexer，Ctrl-B / Ctrl-A / Ctrl-Space）：Jump-To 与 ⌘数字是**发前缀键**而不是敲命令，故前缀必须与宿主 `tmux.conf` 一致 | P5 ✅ 规则实测 + 端到端实测 |
+| 多路复用 | **窗口快捷行**（key bar 上方，tmux 窗口 1–9 一点直达，可在 Settings → Input 隐藏）：**仅对 session command 判定为 tmux 的宿主显示** | P5 ✅ 端到端实测（tmux 显示 / zellij 隐藏） |
 | 多路复用 | zellij / herdr 支持 | P5 |
 | Agent 层 | cqutmux-hook 网关 + agent 事件捕获 | P3 |
 | Agent 层 | Chat View（Inbox）、approvals、teammate 卡片 | P3 |
@@ -104,6 +105,13 @@ Option 想修饰的那个字母。因此「含任何 ASCII 就整串放行」是
 现 `MuxSettings.Prefix` 三选一，`selectWindow` 带上前缀，⌘p/⌘n 与 ⌘数字也一并改用它。
 端到端实测：宿主 `cat -v` 在 Ctrl-A 下发 `^A3`、Ctrl-B 下发 `^B3`。
 `scripts/mux-check.sh` 20 项覆盖字节算术（`key & 0x1F`）、去重、以及**未知前缀回退而非失败**。
+
+**同轮加上窗口快捷行**：key bar 上方一排 1–9，一点直达 tmux 窗口。它**只对 tmux 宿主显示**——
+因为它发的是 tmux 前缀键，对 zellij/herdr 会话来一下就是往 pane 里塞控制字符，与上一条是同一类错误。
+**这里正好踩中一个真 bug**：判定最初写成 `sessionCommand.contains("tmux")`，而**我们自己的默认 zellij 命令是
+`zellij attach -c cqutmux`——会话名里带 tmux**，于是每个 zellij 宿主都会拿到一排 tmux 按键。
+改成按"命令行首/分隔符后的词"匹配（并剥掉路径），`scripts/mux-check.sh` 里 17 项专门覆盖这个判定，
+包括拿**我们自己的三条默认命令**去测。模拟器实测：tmux 宿主显示、zellij 宿主隐藏。
 
 **顺带修掉一个测试自身的缺陷**：`InputSettings` 原本硬写 `UserDefaults.standard`，
 于是 `scripts/input-check.sh` 既会**改掉跑它的人的设置**，又会把上一次跑剩下的值读回来当输入，

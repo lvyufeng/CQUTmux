@@ -46,6 +46,7 @@ struct SyncPayload: Codable, Equatable {
     var hideBarWithHardwareKeyboard: Bool?
     var barItems: [String]?
     var dpadCorners: [String: String]?
+    var hidesWindowRow: Bool?
 
     /// The host's tmux prefix. Worth syncing for the same reason it is a
     /// setting at all: it describes the *host*, and a user's hosts are set up

@@ -10,12 +10,11 @@ struct InputSettingsView: View {
                 Toggle("Option sends Meta", isOn: $input.optionIsMeta)
                 Toggle("Hide the key bar with a hardware keyboard",
                        isOn: $input.hideBarWithHardwareKeyboard)
+                Toggle("Hide the window row", isOn: $input.hidesWindowRow)
             } header: {
                 Label("Keyboard", systemImage: "keyboard")
             } footer: {
-                Text("Meta sends Option+letter as Esc then the letter, which is what readline and "
-                     + "emacs expect for word motions. Off, Option types the accented character "
-                     + "the keyboard is set up for.")
+                Text(keyboardFooter)
             }
 
             Section {
@@ -61,6 +60,17 @@ struct InputSettingsView: View {
         .navigationTitle("Input")
         .navigationBarTitleDisplayMode(.inline)
         .environment(\.editMode, .constant(.active))
+    }
+
+    /// Extracted from the view builder: the concatenation of four literals
+    /// inside a `Text` in a `Section` footer is more than the type checker
+    /// wants to do in one expression, and it reports that as a confusing
+    /// "unable to type-check in reasonable time" rather than as a real error.
+    private var keyboardFooter: String {
+        "Meta sends Option+letter as Esc then the letter, which is what readline and "
+        + "emacs expect for word motions. Off, Option types the accented character "
+        + "the keyboard is set up for. The window row taps straight to tmux window "
+        + "1\u{2013}9, above the keys; windows past 9 need the session picker."
     }
 
     private func icon(_ item: InputSettings.Item) -> String {

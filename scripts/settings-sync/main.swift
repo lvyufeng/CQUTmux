@@ -223,10 +223,12 @@ withInput.optionIsMeta = true
 withInput.hideBarWithHardwareKeyboard = false
 withInput.barItems = ["control", "dpad"]
 withInput.dpadCorners = ["topLeading": "interrupt"]
+withInput.hidesWindowRow = true
 let inputJSON = String(data: try! JSONEncoder().encode(withInput), encoding: .utf8)!
 check(inputJSON.contains("optionIsMeta"), "the payload carries Option-as-Meta")
 check(inputJSON.contains("barItems"), "the payload carries the bar's item order")
 check(inputJSON.contains("dpadCorners"), "the payload carries the corner bindings")
+check(inputJSON.contains("hidesWindowRow"), "the payload carries the window row's visibility")
 
 var untouched = SyncPayload()
 let untouchedJSON = String(data: try! JSONEncoder().encode(untouched), encoding: .utf8)!

@@ -19,7 +19,12 @@ enum DebugSeed {
         // otherwise only reachable by hand-editing the form.
         host.transport = TransportKind(rawValue: env["CQUT_DEV_TRANSPORT"] ?? "") ?? .ssh
         host.moshPortRange = env["CQUT_DEV_MOSH_PORT_RANGE"]
-        host.sessionCommand = ""
+        // Empty by default: the harnesses drive a plain shell so a typed
+        // command lands on a prompt rather than inside a multiplexer.
+        // `CQUT_DEV_SESSION_COMMAND` sets one when the mux itself is what is
+        // under test — the window row is only shown for a host whose command
+        // says tmux, so that branch cannot be reached otherwise.
+        host.sessionCommand = env["CQUT_DEV_SESSION_COMMAND"] ?? ""
 
         if let jump = env["CQUT_DEV_JUMP"], !jump.isEmpty {
             host.jumpHost = jump

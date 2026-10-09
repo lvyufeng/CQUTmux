@@ -113,7 +113,10 @@ struct TerminalScreen: View {
                     hideWithHardwareKeyboard: input.hideBarWithHardwareKeyboard,
                     hardwareKeyboard: hardwareKeyboard
                 ) {
-                    accessoryBar
+                    VStack(spacing: 0) {
+                        if host.mux == "tmux", !input.hidesWindowRow { windowRow }
+                        accessoryBar
+                    }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
@@ -211,6 +214,44 @@ struct TerminalScreen: View {
                 }
                 #endif
             }
+    }
+
+    /// One tap per tmux window, 1–9, above the key bar.
+    ///
+    /// Above rather than below on purpose: this is the row a thumb reaches
+    /// past to get to the keys, and the keys are the ones pressed constantly.
+    /// A row that pushed them up the screen would cost more than it saved.
+    ///
+    /// Only 1–9 because tmux binds those to bare digits — window 10 needs the
+    /// command prompt, which is what Jump To is for. Showing 1–20 as glass
+    /// buttons would make two thirds of them do something different from the
+    /// rest.
+    ///
+    /// Only shown for tmux, and that is the whole reason the view consults
+    /// `host.mux`: these buttons send prefix-key keystrokes, so on a zellij or
+    /// herdr session they would type a control character into the pane instead
+    /// of switching tabs — the failure mode this row is most likely to have.
+    private var windowRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(1...9, id: \.self) { index in
+                    Button {
+                        coordinator.terminal?.selectWindow(
+                            mux: "tmux", session: "", selector: String(index)
+                        )
+                    } label: {
+                        Text("\(index)")
+                            .font(.system(.footnote, design: .monospaced))
+                            .frame(minWidth: 30, minHeight: 26)
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.roundedRectangle(radius: 5))
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+        }
+        .background(.bar)
     }
 
     private var accessoryBar: some View {

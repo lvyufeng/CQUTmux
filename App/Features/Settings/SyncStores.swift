@@ -58,6 +58,7 @@ extension SyncPayload {
             if action != InputSettings.defaultCorner(slot) { out[slot.rawValue] = action.rawValue }
         }
         if !corners.isEmpty { payload.dpadCorners = corners }
+        payload.hidesWindowRow = stores.input.hidesWindowRow
         payload.tmuxPrefix = stores.mux.tmuxPrefix.rawValue
         payload.updatedAt = Date()
         return payload
@@ -123,6 +124,7 @@ extension SyncPayload {
             let restored = barItems.compactMap(InputSettings.Item.init(rawValue:))
             if !restored.isEmpty { stores.input.items = restored }
         }
+        if let hidesWindowRow { stores.input.hidesWindowRow = hidesWindowRow }
         if let tmuxPrefix, let prefix = MuxSettings.Prefix(rawValue: tmuxPrefix) {
             stores.mux.tmuxPrefix = prefix
         }

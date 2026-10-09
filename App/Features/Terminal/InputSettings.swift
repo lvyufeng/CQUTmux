@@ -13,6 +13,7 @@ final class InputSettings {
         static let hideBarWithHardwareKeyboard = "input.hideBarWithHardwareKeyboard"
         static let barItems = "input.barItems"
         static let corners = "input.dpadCorners"
+        static let hidesWindowRow = "input.hidesWindowRow"
     }
 
     /// The D-pad corner actions, as raw strings keyed by corner.
@@ -164,6 +165,13 @@ final class InputSettings {
         didSet { store.set(hideBarWithHardwareKeyboard, forKey: Key.hideBarWithHardwareKeyboard) }
     }
 
+    /// Whether the tmux window row is hidden. Off by default: nine small
+    /// buttons cost one row of height and save a tap through the session
+    /// picker every time, which is the trade Moshi ships.
+    var hidesWindowRow: Bool {
+        didSet { store.set(hidesWindowRow, forKey: Key.hidesWindowRow) }
+    }
+
     /// The bar's items, in order. Stored as raw values so a build that adds an
     /// item does not lose a user's arrangement, and one that removes an item
     /// does not resurrect it.
@@ -178,6 +186,7 @@ final class InputSettings {
         // so the bar is duplicating them at the cost of screen height.
         hideBarWithHardwareKeyboard =
             store.object(forKey: Key.hideBarWithHardwareKeyboard) as? Bool ?? true
+        hidesWindowRow = store.bool(forKey: Key.hidesWindowRow)
 
         let stored = store.stringArray(forKey: Key.barItems) ?? []
         let restored = stored.compactMap(Item.init(rawValue:))

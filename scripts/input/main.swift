@@ -170,6 +170,24 @@ check(emptied.items.isEmpty, "a user can empty the bar if they want to")
 settings.move(from: IndexSet(integer: 0), to: settings.items.count)
 check(settings.items.last == start[0], "move sends the first item to the end")
 
+// MARK: - The window row
+
+// Off by default, and it must be off: the row only means anything to a tmux
+// user, and a default that showed it to a zellij or herdr user would be a row
+// of nine buttons that do nothing.
+let fresh = InputSettings(store: UserDefaults(suiteName: "cqutmux.input-row-unused")!)
+check(!fresh.hidesWindowRow, "the window row is shown by default")
+
+let rowStore = UserDefaults(suiteName: "cqutmux.input.check.row")!
+rowStore.removePersistentDomain(forName: "cqutmux.input.check.row")
+let row = InputSettings(store: rowStore)
+row.hidesWindowRow = true
+check(InputSettings(store: rowStore).hidesWindowRow,
+      "hiding the window row survives a relaunch")
+row.hidesWindowRow = false
+check(!InputSettings(store: rowStore).hidesWindowRow,
+      "showing it again survives a relaunch too")
+
 // MARK: - Corner bindings
 
 check(InputSettings.defaultCorner(.topLeading) == .escape,
