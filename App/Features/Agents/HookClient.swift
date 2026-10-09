@@ -245,6 +245,14 @@ final class HookClient {
         return try JSONDecoder().decode(LogResult.self, from: payload.body)
     }
 
+    /// The agent's session log, read as a conversation. `path` is the project
+/// directory, the same one the Files and Changes tabs browse.
+    func transcript(path: String, limit: Int = 200) async throws -> AgentTranscript {
+        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        let payload = try await request("GET", "/transcript?path=\(encoded)&limit=\(limit)")
+        return try JSONDecoder().decode(AgentTranscript.self, from: payload.body)
+    }
+
     func usage() async throws -> UsageBoard {
         let payload = try await request("GET", "/usage")
         return try JSONDecoder().decode(UsageBoard.self, from: payload.body)

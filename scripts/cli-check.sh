@@ -110,9 +110,19 @@ fi
 grep -q "no gateway" "$OUT/dead.txt" || fail "status did not say the gateway was missing"
 ok "status reports a missing gateway and exits non-zero"
 
-run doctor > "$OUT/doctor.txt" 2>&1 || true   # non-zero is expected without tmux
+# Against a port this script has proved is free, not the default. With no
+# --port, doctor probes 24543, which may be a user's own gateway, a leftover
+# from an earlier run, or a socket in TIME_WAIT -- so the result depends on
+# whatever else is on the machine, and one run of this check did fail that way.
+# An explicit dead port makes the gateway line a fast, predictable FAIL.
+run doctor --port "$DEAD_PORT" > "$OUT/doctor.txt" 2>&1 || true   # non-zero is expected without tmux
 grep -qE "^(ok|FAIL)  (tmux|git|ssh)" "$OUT/doctor.txt" || fail "doctor checked none of its tools"
 grep -qE "^(ok|FAIL)  gateway" "$OUT/doctor.txt" || fail "doctor did not check the gateway"
+# A crashed doctor also produces no matching line, and "it died" and "it
+# disagreed" want different investigations -- so require the report to look
+# like a report.
+[ "$(wc -l < "$OUT/doctor.txt")" -ge 5 ] \
+  || fail "doctor produced no report (see $OUT/doctor.txt)"
 ok "doctor checks the tools and the gateway"
 
 run install > "$OUT/install.txt" 2>&1 || fail "install exited non-zero"

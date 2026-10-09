@@ -27,6 +27,7 @@ import { resolve, relative, isAbsolute, join, dirname } from 'node:path'
 import { homedir, hostname, networkInterfaces, tmpdir } from 'node:os'
 import { createPushService } from './push.mjs'
 import { herdrStatus, herdrSnapshot, herdrApprove, herdrRead, herdrFocusPane } from './herdr.mjs'
+import { readTranscript } from './transcript.mjs'
 
 const run = promisify(execFile)
 
@@ -691,6 +692,20 @@ const server = createServer(async (req, res) => {
     if (!dir) return json(res, 403, { error: 'path outside root' })
     const limit = Number(url.searchParams.get('limit') || 40)
     return json(res, 200, await gitLog(dir, limit))
+  }
+
+  if (req.method === 'GET' && url.pathname === '/transcript') {
+    const dir = safePath(url.searchParams.get('path') || '')
+    if (!dir) return json(res, 403, { error: 'path outside root' })
+    const limit = Math.min(1000, Number(url.searchParams.get('limit') || 200))
+    try {
+      return json(res, 200, await readTranscript(dir, limit))
+    } catch (error) {
+      // A transcript we cannot read is "no chat yet", not a failed request:
+      // the app should fall back to the terminal rather than show an error for
+      // a session that may simply not have started.
+      return json(res, 200, { found: false, messages: [], error: String(error.message || error) })
+    }
   }
 
   if (req.method === 'GET' && url.pathname === '/usage') {

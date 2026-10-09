@@ -81,6 +81,32 @@ The reader handles sections, `key = value`, strings, numbers, booleans and
 arrays — not general TOML. It is a hand-rolled parser on purpose: the gateway
 has no dependencies, and five keys do not justify one.
 
+## Reading a session as a conversation
+
+`GET /transcript?path=<dir>` reads the agent's own session log for a project
+directory — for Claude Code, the newest `<session-id>.jsonl` under
+`~/.claude/projects/<slug>/` — and returns it as messages with typed blocks:
+prose, reasoning, tool calls, tool results.
+
+The log is read rather than the terminal pane scraped because that is what
+makes a tool call a card with its own input and output instead of the
+ANSI-coloured text a terminal happened to have on screen. It also means the
+view keeps working when the pane is scrolled, in an alternate screen, or inside
+a TUI.
+
+`transcript.mjs` is the only file that knows the log's format, and it never
+throws: that format belongs to the agent and changes between releases, so an
+unreadable log has to degrade to "no chat yet" rather than to a broken gateway.
+Unknown record types, unknown block types and a half-written final line (the
+normal state while an agent is running) are all skipped. Tool results are
+clamped, and image blocks contribute nothing — a transcript line is not the
+place for a few megabytes of base64.
+
+`scripts/transcript-check.sh` covers those rules against fixtures taken from a
+real transcript, including the shape that is easy to get wrong: a tool result
+arrives as a `user` record, because that is how the agent protocol carries a
+result back, and it must not read as something the person typed.
+
 ## Why loopback
 
 The listener binds to `127.0.0.1` only. The phone reaches it through the SSH
@@ -100,6 +126,7 @@ require `Authorization: Bearer <secret>` on every request.
 | `GET` | `/file?path=<file>` | read a text file under `--root` |
 | `GET` | `/diff?path=<dir>` | `git diff` + `git status` for a repo |
 | `GET` | `/log?path=<dir>&limit=<n>` | recent commits (hash, author, subject, refs) |
+| `GET` | `/transcript?path=<dir>&limit=<n>` | the agent's session log for `<dir>`, read as a conversation |
 | `GET` | `/usage` | 5h / 7d burn windows per agent |
 | `GET` | `/sessions` | tmux and zellij sessions, windows/tabs and pane counts |
 | `GET` | `/ports` | listening TCP ports, dev-looking ones first |

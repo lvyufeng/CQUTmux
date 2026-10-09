@@ -21,12 +21,13 @@ struct CodePanelView: View {
     @State private var showUploads = false
     @State private var recents = RecentDirectoryStore()
 
-    private enum Mode: String, CaseIterable { case files = "Files", changes = "Changes", history = "History" }
+    private enum Mode: String, CaseIterable { case files = "Files", changes = "Changes", history = "History", chat = "Chat" }
 
     private static var initialMode: Mode {
         #if DEBUG
         if ProcessInfo.processInfo.environment["CQUT_DEV_MODE"] == "history" { return .history }
         if ProcessInfo.processInfo.environment["CQUT_DEV_MODE"] == "files" { return .files }
+        if ProcessInfo.processInfo.environment["CQUT_DEV_MODE"] == "chat" { return .chat }
         #endif
         return .changes
     }
@@ -164,6 +165,10 @@ struct CodePanelView: View {
                 case .files: filesList(client)
                 case .changes: changesList
                 case .history: historyList
+                // The transcript is read from the same project directory the Files
+                // tab browses, so the two stay on the same session without a
+                // second picker to keep in step.
+                case .chat: ChatView(client: client, path: path)
                 }
             }
         }
