@@ -61,7 +61,20 @@ public final class SSHMoshLauncher: MoshServerLauncher, @unchecked Sendable {
         // foreground for the life of the session, which would mean holding this
         // SSH channel open forever. Detached, it prints its banner and exits, so
         // the SSH session is only needed to start it.
+        //
+        // Every other variable the configuration carries goes in as its own
+        // `-l`. It has to: the SSH channel's own environment requests reach the
+        // bootstrap shell, not mosh-server, and mosh-server builds the session's
+        // environment from its own `-l` list. A variable we only sent over the
+        // channel would therefore be missing from the one shell the user
+        // actually types into — which is the whole point of exporting it.
         var args = ["-l", "LANG=en_US.UTF-8", "-c", "256", "-s"]
+        for (name, value) in configuration.environment.sorted(by: { $0.key < $1.key }) {
+            // LANG is already above, and repeating it would only risk two
+            // different values for one name.
+            guard name != "LANG" else { continue }
+            args += ["-l", "\(name)=\(value)".shellQuoted]
+        }
         if let portRange = lock.withLock({ portRange }), !portRange.isEmpty {
             args += ["-p", portRange.shellQuoted]
         }

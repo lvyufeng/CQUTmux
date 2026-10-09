@@ -146,6 +146,15 @@ private final class ShellChannelHandler: ChannelInboundHandler {
         )
         context.triggerUserOutboundEvent(pty, promise: nil)
 
+        // Offered, but do not expect sshd to honour it: the request is only
+        // applied for names the server's own `AcceptEnv` lists, and a stock
+        // `sshd_config` lists none. Verified against a real sshd here — the
+        // request is acknowledged and the variable still arrives unset, and
+        // OpenSSH's own client behaves identically with `SetEnv`. Sending it
+        // anyway costs nothing and covers hosts that do configure `AcceptEnv`;
+        // anything that must actually arrive goes in as an export typed into
+        // the session (see `IntegrationSettings.shellExportLine`), or as a
+        // `-l` argument to a launcher that builds its own environment.
         for (name, value) in configuration.environment {
             context.triggerUserOutboundEvent(
                 SSHChannelRequestEvent.EnvironmentRequest(wantReply: false, name: name, value: value),

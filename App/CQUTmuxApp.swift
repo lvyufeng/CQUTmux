@@ -106,7 +106,8 @@ struct CQUTmuxApp: App {
             fonts: fonts,
             cursor: cursor,
             layout: sessionLayout,
-            speech: SpeechSettings()
+            speech: SpeechSettings(),
+            integrations: IntegrationSettings()
         )
         await coordinator.run(stores: stores)
     }

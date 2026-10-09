@@ -121,6 +121,35 @@ container with a private tmux server is the one arrangement that will not work:
 the app would attach to an empty session list.
 | `POST` | `/upload` | write a raw body (a pasted image) under `.cqutmux/paste/` |
 
+## The client marker
+
+Settings → Integrations → Shell exports `CQUTMUX_CLIENT=1` into the sessions the
+app opens, so an rc file, prompt or tmux config on the host can tell it is being
+driven from the app:
+
+```sh
+if [ -n "$CQUTMUX_CLIENT" ]; then
+  # trim prompts, skip heavy glyphs…
+fi
+```
+
+It is typed into the session as an `export`, not sent as an SSH environment
+request. That is forced rather than chosen: sshd discards environment requests
+for any name its own `AcceptEnv` does not list, and a stock `sshd_config` lists
+none — the request is acknowledged and the variable still arrives unset. On the
+mosh path the same variable is also passed to `mosh-server` as a `-l` argument,
+because mosh-server builds the session's environment itself and the login
+shell's rc files run before the typed line would reach them.
+
+Eternal Terminal cannot carry it at all: its protocol builds the session
+environment from reverse port forwards only.
+
+To keep the variable across a tmux attach:
+
+```tmux
+set-option -ga update-environment " CQUTMUX_CLIENT"
+```
+
 Event body:
 
 ```json

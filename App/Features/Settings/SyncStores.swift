@@ -24,6 +24,7 @@ struct SyncStores {
     let cursor: CursorSettings
     let layout: SessionLayout
     let speech: SpeechSettings
+    let integrations: IntegrationSettings
 }
 
 extension SyncPayload {
@@ -41,6 +42,7 @@ extension SyncPayload {
         payload.cursorBlinks = stores.cursor.blinks
         payload.sessionLayout = stores.layout.style.rawValue
         payload.speechEngine = stores.speech.engine.rawValue
+        payload.exportClientEnv = stores.integrations.exportClientEnv
         payload.updatedAt = Date()
         return payload
     }
@@ -82,5 +84,7 @@ extension SyncPayload {
         if let speechEngine, let engine = SpeechSettings.Engine(rawValue: speechEngine) {
             stores.speech.engine = engine
         }
+
+        if let exportClientEnv { stores.integrations.exportClientEnv = exportClientEnv }
     }
 }

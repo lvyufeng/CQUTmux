@@ -27,6 +27,10 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     private let transport: TerminalTransport
     private let configuration: TransportConfiguration
     private let startupCommand: String?
+    /// Sent as a shell line the moment the session is up, ahead of any startup
+    /// command. See `IntegrationSettings` for why an export and not the SSH
+    /// environment request.
+    private let startupPreamble: String?
     private let theme: TerminalTheme
     private var didRunStartup = false
     /// The user's gesture bindings, if any. nil keeps every gesture on its
@@ -54,12 +58,14 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         frame: CGRect,
         configuration: TransportConfiguration,
         startupCommand: String?,
+        startupPreamble: String? = nil,
         theme: TerminalTheme = TerminalTheme.named(nil),
         font: UIFont = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular),
         transport: TerminalTransport = SSHTransport()
     ) {
         self.configuration = configuration
         self.startupCommand = startupCommand
+        self.startupPreamble = startupPreamble
         self.theme = theme
         self.transport = transport
         super.init(frame: frame)
@@ -339,9 +345,17 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         case .connected:
             status = .connected
             attempt = 0
-            if let startupCommand, !didRunStartup {
+            if !didRunStartup {
                 didRunStartup = true
-                write(Data((startupCommand + "\n").utf8))
+                // Preamble first: the startup command may itself branch on a
+                // variable the preamble sets, and a line that would only take
+                // effect for the *next* command would be a trap.
+                var lines: [String] = []
+                if let startupPreamble, !startupPreamble.isEmpty { lines.append(startupPreamble) }
+                if let startupCommand, !startupCommand.isEmpty { lines.append(startupCommand) }
+                if !lines.isEmpty {
+                    write(Data((lines.joined(separator: "\n") + "\n").utf8))
+                }
             }
         case .output(let data):
             feed(byteArray: ArraySlice(data))

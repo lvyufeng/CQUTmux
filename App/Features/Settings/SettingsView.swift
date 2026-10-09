@@ -6,6 +6,7 @@ struct SettingsView: View {
     /// and the push below happens here, once, in the same place the tap does.
     enum Route: Hashable {
         case theme, font, cursor, icon, speech, sessions, security, notifications, sync
+        case integrations
         case standIn(String)
     }
 
@@ -63,6 +64,11 @@ struct SettingsView: View {
                         Label("Sessions layout", systemImage: "rectangle.grid.1x2")
                     }
                 }
+                Section("Integrations") {
+                    NavigationLink(value: Route.integrations) {
+                        Label("Shell", systemImage: "terminal")
+                    }
+                }
                 Section("About") {
                     LabeledContent("Version", value: Bundle.main.appVersion)
                     LabeledContent("Hook gateway", value: "127.0.0.1:24543")
@@ -80,6 +86,7 @@ struct SettingsView: View {
                 case .notifications: NotificationSettingsView()
                 case .sync: SyncSettingsView()
                 case .speech: SpeechSettingsView()
+                case .integrations: IntegrationSettingsView()
                 case .standIn(let title): PlaceholderView(
                     title: title,
                     systemImage: "gear",
@@ -106,7 +113,7 @@ struct SettingsView: View {
         guard let tab = ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] else { return nil }
         switch tab {
         case "theme", "font", "speech", "cursor", "icon", "sessions", "security",
-             "notifications", "sync":
+             "notifications", "sync", "integrations":
             return tab
         default:
             return nil
@@ -124,6 +131,7 @@ struct SettingsView: View {
         case "security": SecuritySettingsView()
         case "notifications": NotificationSettingsView()
         case "sync": SyncSettingsView()
+        case "integrations": IntegrationSettingsView()
         default: SpeechSettingsView()
         }
     }

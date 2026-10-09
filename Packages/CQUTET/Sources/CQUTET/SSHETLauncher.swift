@@ -73,6 +73,17 @@ public final class SSHETLauncher: ETLauncher, @unchecked Sendable {
         // running server's FIFO on its own (~/.local/share/etserver/...), which
         // is also how ET's own client reaches a server the user started by hand.
         let port = lock.withLock { serverPort }
+        // No environment is passed here, and none can be. ET's protocol carries
+        // exactly one variable to the far side — `SSH_AUTH_SOCK`, as part of a
+        // reverse port forward (TerminalServer.cpp builds the session's
+        // environment from the payload's tunnelled-forward entries and nothing
+        // else). Setting variables on this command line would set them for
+        // etterminal's own process and then be dropped, which is worse than not
+        // doing it: it would read as though the session inherited them.
+        //
+        // The consequence is real and worth stating plainly rather than
+        // working around: `IntegrationSettings` exports its marker over SSH and
+        // mosh, not over ET.
         let command = ["printf", "%s\\n", stdinLine.shellQuoted, "|", etterminalPath]
             .joined(separator: " ")
 

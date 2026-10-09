@@ -193,6 +193,25 @@ check(
     "it records that a key is used, not the key"
 )
 
+// MARK: - The client marker travels, and only as a yes/no
+
+// `exportClientEnv` is the newest field, and the one whose absence would be
+// easiest to miss: without these, a payload written by an older build would
+// silently keep resetting it. Its value is a `Bool?`, so the only thing that
+// can reach the wire is `true`, `false` or nothing — no variable name, no
+// value, and nothing that could be pointed at a secret.
+var withMarker = SyncPayload()
+withMarker.exportClientEnv = true
+let markerJSON = String(data: try! JSONEncoder().encode(withMarker), encoding: .utf8)!
+check(markerJSON.contains("exportClientEnv"), "the payload carries the client-marker setting")
+
+var absent = SyncPayload()
+check(
+    String(data: try! JSONEncoder().encode(absent), encoding: .utf8)!
+        .contains("exportClientEnv") == false,
+    "an unset marker is omitted rather than sent as false"
+)
+
 // MARK: - Enable/disable
 
 let toggling = store("toggling")

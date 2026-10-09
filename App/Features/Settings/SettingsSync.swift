@@ -33,6 +33,10 @@ struct SyncPayload: Codable, Equatable {
 
     var sessionLayout: String?
     var speechEngine: String?
+    /// Whether sessions export the client marker. A preference, not a secret,
+    /// like everything else here — see `SyncStores` for what is deliberately
+    /// absent.
+    var exportClientEnv: Bool?
 
     /// When this device last wrote the payload. Used only to decide which side
     /// is newer when both have changed; the clock is the device's, so a badly

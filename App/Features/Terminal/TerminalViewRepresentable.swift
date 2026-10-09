@@ -428,6 +428,9 @@ final class TerminalCoordinator {
 private struct TerminalViewRepresentable: UIViewRepresentable {
     let host: Host
     let credential: SSHCredential
+    /// Read at connect time, so flipping the toggle and reconnecting takes
+    /// effect without anything being rebuilt.
+    let integrations = IntegrationSettings()
     let coordinator: TerminalCoordinator
     let theme: TerminalTheme
     let fonts: TerminalFontStore
@@ -446,7 +449,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> CQUTTerminalView {
-        let configuration = TransportConfiguration(
+        var configuration = TransportConfiguration(
             host: host.hostname,
             port: host.port,
             username: host.username,
@@ -465,6 +468,14 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
             forwardAgent: host.forwardAgent && host.transport == .ssh && credential.isKey,
             agentSigner: SSHCredential.agentSigner(for: credential)
         )
+        // Read here, where the session is actually built, rather than captured
+        // when the transport was constructed: the toggle is a live setting, and
+        // a value captured earlier would keep exporting after it was turned off.
+        // Carried to the session's shell over SSH, and for mosh also as an
+        // explicit `-l` on mosh-server, which builds its own environment and
+        // would otherwise not see it. ET has no way to carry it at all; see
+        // `SSHETLauncher`.
+        configuration.applyIntegrationMarkers(IntegrationSettings())
         // The transport is chosen here rather than defaulted in the view, so a
         // host that asks for something unavailable says why instead of quietly
         // behaving like SSH.
@@ -480,6 +491,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
             frame: .zero,
             configuration: configuration,
             startupCommand: host.sessionCommand.isEmpty ? nil : host.sessionCommand,
+            startupPreamble: integrations.shellExportLine,
             theme: theme,
             font: fonts.uiFont(),
             transport: transport

@@ -33,9 +33,13 @@ final class AgentConnection {
             return
         }
 
-        let configuration = TransportConfiguration(
+        var configuration = TransportConfiguration(
             host: host.hostname, port: host.port, username: host.username, credential: credential
         )
+        // The gateway connection runs commands on the host too, so the marker
+        // belongs here as much as in the terminal — an rc file that branches on
+        // it sees a consistent answer either way.
+        configuration.applyIntegrationMarkers(IntegrationSettings())
         let token = KeychainStore.load(account: host.gatewayTokenAccount)
             .flatMap { String(data: $0, encoding: .utf8) }
         let client = HookClient(configuration: configuration, remotePort: host.gatewayPort, token: token)
