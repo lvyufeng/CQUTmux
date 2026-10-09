@@ -47,8 +47,14 @@ public final class WhisperDictation {
     private let queue = DispatchQueue(label: "app.cqutmux.whisper.audio")
 
     private let models: WhisperModelStore
+    /// One opaque handle, of whichever family is loaded. Both are `OpaquePointer`
+    /// and neither is ever live at the same time, so one slot is enough — but
+    /// `loadedFamily` is what decides which free/transcribe function to call,
+    /// because passing a Parakeet handle to whisper's free is a crash rather
+    /// than an error.
     private var handle: OpaquePointer?
     private var loaded: String?
+    private var loadedFamily: WhisperModel.Family = .whisper
 
     public var isRecording: Bool { state == .recording }
 
@@ -57,7 +63,15 @@ public final class WhisperDictation {
     }
 
     deinit {
-        if let handle { cqut_whisper_free(handle) }
+        free(handle)
+    }
+
+    private func free(_ context: OpaquePointer?) {
+        guard let context else { return }
+        switch loadedFamily {
+        case .whisper: cqut_whisper_free(context)
+        case .parakeet: cqut_parakeet_free(context)
+        }
     }
 
     public func toggle(model: WhisperModel, language: String? = nil) {
@@ -223,7 +237,7 @@ public final class WhisperDictation {
     /// large one over a gigabyte, so the app calls this when dictation is
     /// turned off rather than holding it for the life of the process.
     public func unload() {
-        if let handle { cqut_whisper_free(handle) }
+        free(handle)
         handle = nil
         loaded = nil
     }
@@ -254,14 +268,25 @@ public final class WhisperDictation {
         let useGPU = cqut_whisper_gpu_available() != 0
         #endif
 
+        let family = model.family
         let context = await Task.detached(priority: .userInitiated) { () -> OpaquePointer? in
-            path.withCString { cqut_whisper_load($0, useGPU ? 1 : 0) }
+            switch family {
+            case .whisper: path.withCString { cqut_whisper_load($0, useGPU ? 1 : 0) }
+            case .parakeet: path.withCString { cqut_parakeet_load($0, useGPU ? 1 : 0) }
+            }
         }.value
 
         guard let context else {
-            throw WhisperError.failed(String(cString: cqut_whisper_last_error()))
+            // Each family keeps its own last-error, and reading the wrong one
+            // would report an empty string — which is worse than a wrong
+            // message, because it looks like success.
+            let message = family == .whisper
+                ? String(cString: cqut_whisper_last_error())
+                : String(cString: cqut_parakeet_last_error())
+            throw WhisperError.failed(message)
         }
         handle = context
+        loadedFamily = family
         loaded = model.name
     }
 
@@ -318,23 +343,45 @@ public final class WhisperDictation {
         status = "Transcribing…"
         defer { status = nil }
 
-        let rc: Int32 = audio.withUnsafeBufferPointer { buffer in
-            let samples = buffer.baseAddress
-            if let language {
-                return language.withCString { cqut_whisper_transcribe(handle, samples, Int32(buffer.count), $0) }
+        let rc: Int32
+        switch loadedFamily {
+        case .whisper:
+            rc = audio.withUnsafeBufferPointer { buffer in
+                if let language {
+                    return language.withCString {
+                        cqut_whisper_transcribe(handle, buffer.baseAddress, Int32(buffer.count), $0)
+                    }
+                }
+                return cqut_whisper_transcribe(handle, buffer.baseAddress, Int32(buffer.count), nil)
             }
-            return cqut_whisper_transcribe(handle, samples, Int32(buffer.count), nil)
+        case .parakeet:
+            // No language argument: Parakeet decodes no language token. The
+            // engine choice is the language choice, which is why the settings
+            // screen warns that it is English and European only.
+            rc = audio.withUnsafeBufferPointer { buffer in
+                cqut_parakeet_transcribe(handle, buffer.baseAddress, Int32(buffer.count))
+            }
         }
 
         guard rc == 0 else {
-            throw WhisperError.failed(String(cString: cqut_whisper_last_error()))
+            let message = loadedFamily == .whisper
+                ? String(cString: cqut_whisper_last_error())
+                : String(cString: cqut_parakeet_last_error())
+            throw WhisperError.failed(message)
         }
 
         var text = ""
-        for index in 0..<cqut_whisper_segment_count(handle) {
-            if let piece = cqut_whisper_segment_text(handle, index) {
-                text += String(cString: piece)
+        let segments: Int32
+        switch loadedFamily {
+        case .whisper: segments = cqut_whisper_segment_count(handle)
+        case .parakeet: segments = cqut_parakeet_segment_count(handle)
+        }
+        for index in 0..<segments {
+            let piece: UnsafePointer<CChar>? = switch loadedFamily {
+            case .whisper: cqut_whisper_segment_text(handle, index)
+            case .parakeet: cqut_parakeet_segment_text(handle, index)
             }
+            if let piece { text += String(cString: piece) }
         }
         transcript = text
     }

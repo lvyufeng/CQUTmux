@@ -28,10 +28,15 @@ enum SpeechDiagnostics {
 
         let report: String
         do {
+            // The engine the user actually selected, not a fixed one: the
+            // point of the harness is to exercise the shipped path, and a
+            // Parakeet run that silently used a Whisper model would prove
+            // nothing about Parakeet.
+            let model = settings.model
             let text = try await engine.transcribeFile(
                 at: URL(fileURLWithPath: path),
-                model: settings.whisperModel,
-                language: settings.whisperModel.multilingual ? "en" : nil)
+                model: model,
+                language: model.multilingual ? "en" : nil)
             report = "TRANSCRIBE_OK\n\(text)\n"
         } catch {
             report = "TRANSCRIBE_FAIL\n\(error)\n"

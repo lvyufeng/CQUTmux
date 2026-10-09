@@ -69,7 +69,12 @@ cmake -B "$BUILD/build" -G Xcode \
   -S "$SRC" >/dev/null
 
 echo "==> building"
-cmake --build "$BUILD/build" --config Release --target whisper -- -quiet
+# Both targets, because whisper.cpp 1.9.5 ships Parakeet in-tree (src/parakeet.cpp)
+# and it builds against this same ggml. That is the whole reason Parakeet can
+# ship here: the alternative — vendor parakeet.cpp separately — carries its own
+# patched ggml, and two static ggmls in one binary do not collide loudly, they
+# silently resolve to the first one.
+cmake --build "$BUILD/build" --config Release --target whisper parakeet -- -quiet
 
 # $OUT is the vendor root, not the platform directory: archives land in
 # $OUT/$PLATFORM_NAME/ and the headers in $OUT/include/, shared between slices
@@ -81,6 +86,7 @@ mkdir -p "$OUT/$PLATFORM_NAME" "$OUT/include"
 LIBDIR="$BUILD/build"
 for lib in \
   "src/Release-$PLATFORM_NAME/libwhisper.a" \
+  "src/Release-$PLATFORM_NAME/libparakeet.a" \
   "ggml/src/Release-$PLATFORM_NAME/libggml-base.a" \
   "ggml/src/Release-$PLATFORM_NAME/libggml-cpu.a" \
   "ggml/src/Release-$PLATFORM_NAME/libggml.a" \
@@ -93,6 +99,7 @@ done
 
 for header in \
   include/whisper.h \
+  include/parakeet.h \
   ggml/include/ggml.h ggml/include/ggml-alloc.h ggml/include/ggml-backend.h \
   ggml/include/ggml-metal.h ggml/include/ggml-cpu.h ggml/include/ggml-blas.h \
   ggml/include/gguf.h
@@ -109,12 +116,15 @@ case "$SDK" in
   iphonesimulator) TARGET=arm64-apple-ios18.0-simulator ;;
   iphoneos)        TARGET=arm64-apple-ios18.0 ;;
 esac
-xcrun --sdk "$SDK" clang -isysroot "$SDKROOT" -target "$TARGET" -O2 -fPIC \
-  -I "$OUT/include" \
-  -I "$HERE/../../Packages/CQUTWhisper/Sources/CQUTWhisperC/include" \
-  -c "$HERE/driver/whisper_shim.c" -o "$BUILD/whisper_shim.o"
-xcrun libtool -static -o "$OUT/$PLATFORM_NAME/libwhisperclient.a" "$BUILD/whisper_shim.o" 2>/dev/null \
-  || { ar rcs "$OUT/$PLATFORM_NAME/libwhisperclient.a" "$BUILD/whisper_shim.o"; }
+for shim in whisper_shim parakeet_shim; do
+  xcrun --sdk "$SDK" clang -isysroot "$SDKROOT" -target "$TARGET" -O2 -fPIC \
+    -I "$OUT/include" \
+    -I "$HERE/../../Packages/CQUTWhisper/Sources/CQUTWhisperC/include" \
+    -c "$HERE/driver/$shim.c" -o "$BUILD/$shim.o"
+done
+xcrun libtool -static -o "$OUT/$PLATFORM_NAME/libwhisperclient.a" \
+  "$BUILD/whisper_shim.o" "$BUILD/parakeet_shim.o" 2>/dev/null \
+  || { ar rcs "$OUT/$PLATFORM_NAME/libwhisperclient.a" "$BUILD/whisper_shim.o" "$BUILD/parakeet_shim.o"; }
 
 # Same reasoning as scripts/et-ios/libsodium.sh: a configure that guessed wrong
 # still emits an archive, so size is checked instead of existence. A CPU-only

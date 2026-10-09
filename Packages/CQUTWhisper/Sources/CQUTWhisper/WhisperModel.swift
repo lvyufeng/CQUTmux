@@ -10,45 +10,84 @@ import CQUTWhisperC
 /// Whisper and Parakeet engines, and it is the only shape that works when the
 /// smallest useful model is still larger than most apps.
 public struct WhisperModel: Identifiable, Hashable, Sendable {
+    /// Which engine runs this file. Two families share one catalog type because
+    /// everything about them from here is the same shape — a name, a size, a
+    /// URL and a hash — and splitting the type would mean duplicating the store
+    /// for no gain.
+    public enum Family: Sendable { case whisper, parakeet }
+
     public let name: String
     public let label: String
     public let bytes: Int64
     public let multilingual: Bool
+    public let family: Family
 
     public var id: String { name }
     public var sizeLabel: String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    /// The models the vendored build offers. Read from the C table rather than
-    /// repeated here, so the catalog, the URLs and the hashes cannot drift
-    /// apart — they are one table in one place.
+    /// The models the vendored build offers. Read from the C tables rather than
+    /// repeated here, so the catalogs, the URLs and the hashes cannot drift
+    /// apart — each family is one table in one place.
     public static let all: [WhisperModel] = {
-        var raw = [cqut_whisper_model](repeating: cqut_whisper_model(), count: 16)
-        let count = raw.withUnsafeMutableBufferPointer { buffer in
+        whisperModels + parakeetModels
+    }()
+
+    public static let whisperModels: [WhisperModel] = readTable(family: .whisper, capacity: 16) {
+        $0.withUnsafeMutableBufferPointer { buffer in
             cqut_whisper_models(buffer.baseAddress, Int32(buffer.count))
         }
+    }
+
+    /// Empty when the vendored build has no Parakeet, so the settings screen
+    /// hides the engine rather than offering one that cannot load a model.
+    public static let parakeetModels: [WhisperModel] = {
+        guard cqut_parakeet_available() != 0 else { return [] }
+        return readTable(family: .parakeet, capacity: 8) {
+            $0.withUnsafeMutableBufferPointer { buffer in
+                cqut_parakeet_models(buffer.baseAddress, Int32(buffer.count))
+            }
+        }
+    }()
+
+    private static func readTable(
+        family: Family,
+        capacity: Int,
+        _ fill: (inout [cqut_whisper_model]) -> Int32
+    ) -> [WhisperModel] {
+        var raw = [cqut_whisper_model](repeating: cqut_whisper_model(), count: capacity)
+        let count = fill(&raw)
         return raw.prefix(Int(count)).map { entry in
             WhisperModel(
                 name: entry.name.map { String(cString: $0) } ?? "",
                 label: entry.label.map { String(cString: $0) } ?? "",
                 bytes: entry.bytes,
-                multilingual: entry.multilingual != 0
+                multilingual: entry.multilingual != 0,
+                family: family
             )
         }
-    }()
+    }
 
     /// English-only models are meaningfully more accurate for English at the
     /// same size, which is the trade the `.en` files exist to offer.
-    public static let english = all.filter { !$0.multilingual }
-    public static let multilingual = all.filter(\.multilingual)
+    public static let english = whisperModels.filter { !$0.multilingual }
+    public static let multilingual = whisperModels.filter(\.multilingual)
 
     public var downloadURL: URL? {
-        name.withCString { cqut_whisper_model_url($0) }.flatMap { URL(string: String(cString: $0)) }
+        let cString: UnsafePointer<CChar>? = switch family {
+        case .whisper: name.withCString { cqut_whisper_model_url($0) }
+        case .parakeet: name.withCString { cqut_parakeet_model_url($0) }
+        }
+        return cString.flatMap { URL(string: String(cString: $0)) }
     }
 
     var expectedSHA256: String? {
-        name.withCString { cqut_whisper_model_sha256($0) }.map { String(cString: $0) }
+        let cString: UnsafePointer<CChar>? = switch family {
+        case .whisper: name.withCString { cqut_whisper_model_sha256($0) }
+        case .parakeet: name.withCString { cqut_parakeet_model_sha256($0) }
+        }
+        return cString.map { String(cString: $0) }
     }
 }
 

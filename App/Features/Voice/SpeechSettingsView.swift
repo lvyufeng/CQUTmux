@@ -17,7 +17,7 @@ struct SpeechSettingsView: View {
         List {
             Section {
                 Picker("Engine", selection: $settings.engine) {
-                    ForEach(SpeechSettings.Engine.allCases, id: \.self) { engine in
+                    ForEach(SpeechSettings.Engine.offered, id: \.self) { engine in
                         Text(engine.label).tag(engine)
                     }
                 }
@@ -29,15 +29,16 @@ struct SpeechSettingsView: View {
                 Text(settings.engine.detail)
             }
 
-            if settings.engine == .whisper {
-                whisperSection
+            if settings.engine != .apple {
+                modelSection
             }
 
             Section {
                 LabeledContent("Permission", value: "Microphone")
             } footer: {
-                Text("Audio is transcribed on this device. Whisper models are downloaded from "
-                     + "Hugging Face at huggingface.co/ggerganov/whisper.cpp.")
+                Text("Audio is transcribed on this device and never uploaded. Models come from "
+                     + "Hugging Face: whisper.cpp models from ggerganov/whisper.cpp, Parakeet "
+                     + "from ggml-org/parakeet-GGUF.")
             }
         }
         .navigationTitle("Speech")
@@ -45,9 +46,9 @@ struct SpeechSettingsView: View {
     }
 
     @ViewBuilder
-    private var whisperSection: some View {
+    private var modelSection: some View {
         Section("Model") {
-            ForEach(WhisperModel.all) { model in
+            ForEach(settings.modelsForCurrentEngine) { model in
                 row(model)
             }
         }
@@ -90,7 +91,7 @@ struct SpeechSettingsView: View {
                     Text("\(Int(progress.fraction * 100))%")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
-                } else if settings.whisperModelName == model.name && installed {
+                } else if settings.model.name == model.name && installed {
                     Image(systemName: "checkmark")
                         .foregroundStyle(Theme.accent)
                 } else if installed {
@@ -108,11 +109,11 @@ struct SpeechSettingsView: View {
             if installed {
                 Button("Delete", role: .destructive) {
                     models.remove(model)
-                    if settings.whisperModelName == model.name {
+                    if settings.model.name == model.name {
                         // Falling back rather than leaving the picker pointing
                         // at a file that is gone, which would make the
                         // microphone fail with no visible cause.
-                        settings.whisperModelName = WhisperModel.all.first?.name ?? ""
+                        select(firstOf: model.family, in: settings)
                     }
                 }
             }
@@ -125,13 +126,29 @@ struct SpeechSettingsView: View {
     }
 
     private func choose(_ model: WhisperModel, installed: Bool) async {
-        settings.whisperModelName = model.name
+        select(model, in: settings)
         guard !installed else { return }
         do {
             try await models.download(model)
             error = nil
         } catch {
             self.error = "\(error)"
+        }
+    }
+
+    /// Writes the choice into whichever family the model belongs to, so
+    /// picking a Parakeet model does not overwrite the Whisper choice.
+    private func select(_ model: WhisperModel, in settings: SpeechSettings) {
+        switch model.family {
+        case .whisper: settings.whisperModelName = model.name
+        case .parakeet: settings.parakeetModelName = model.name
+        }
+    }
+
+    private func select(firstOf family: WhisperModel.Family, in settings: SpeechSettings) {
+        switch family {
+        case .whisper: settings.whisperModelName = WhisperModel.whisperModels.first?.name ?? ""
+        case .parakeet: settings.parakeetModelName = WhisperModel.parakeetModels.first?.name ?? ""
         }
     }
 }

@@ -13,18 +13,38 @@ import CQUTWhisper
 @Observable
 final class SpeechSettings {
     enum Engine: String, CaseIterable, Sendable {
+        case parakeet
         case apple
         case whisper
 
         var label: String {
             switch self {
+            case .parakeet: "Parakeet"
             case .apple: "Apple"
             case .whisper: "Whisper"
             }
         }
 
+        /// The order Moshi presents them in, and for the same reason: Parakeet
+        /// is the one to start with for English, Apple is there when its
+        /// offline model is, and Whisper is the fallback for the languages
+        /// neither covers.
+        static var offered: [Engine] {
+            var engines = allCases
+            // Offered only when the vendored build actually has it, so the
+            // picker never lists an engine that cannot load a model.
+            if WhisperModel.parakeetModels.isEmpty {
+                engines.removeAll { $0 == .parakeet }
+            }
+            return engines
+        }
+
         var detail: String {
             switch self {
+            case .parakeet:
+                "Fast and accurate for English and many European languages, fully offline once "
+                    + "the model is downloaded. Recommended unless you need a language it "
+                    + "doesn't cover."
             case .apple:
                 "On-device, no download. Needs the offline speech model for your language — "
                     + "iOS › General › Keyboard › Dictation."
@@ -38,22 +58,50 @@ final class SpeechSettings {
     private let defaults: UserDefaults
     private static let key = "cqutmux.speech.engine"
     private static let modelKey = "cqutmux.speech.whisperModel"
+    private static let parakeetModelKey = "cqutmux.speech.parakeetModel"
 
     var engine: Engine {
         didSet { defaults.set(engine.rawValue, forKey: Self.key) }
     }
 
-    /// The model to run, defaulting to the smallest English one: it is the
-    /// only choice that is both quick to fetch and accurate enough to speak a
-    /// shell command into.
+    /// One stored name per family, because they are not interchangeable: the
+    /// Parakeet choice would otherwise be lost every time the engine switched
+    /// to Whisper and back, and the two engines' models are not substitutable.
     var whisperModelName: String {
         didSet { defaults.set(whisperModelName, forKey: Self.modelKey) }
     }
+    var parakeetModelName: String {
+        didSet { defaults.set(parakeetModelName, forKey: Self.parakeetModelKey) }
+    }
 
-    var whisperModel: WhisperModel {
-        WhisperModel.all.first { $0.name == whisperModelName }
-            ?? WhisperModel.all.first { $0.name == "ggml-tiny.en.bin" }
-            ?? WhisperModel.all[0]
+    /// The model the selected engine will run.
+    var model: WhisperModel {
+        switch engine {
+        case .parakeet:
+            WhisperModel.parakeetModels.first { $0.name == parakeetModelName }
+                ?? WhisperModel.parakeetModels.first
+                ?? WhisperModel.whisperModels[0]
+        case .apple, .whisper:
+            // Defaults to the smallest English one: the only choice that is
+            // both quick to fetch and accurate enough to speak a shell command
+            // into.
+            WhisperModel.whisperModels.first { $0.name == whisperModelName }
+                ?? WhisperModel.whisperModels.first { $0.name == "ggml-tiny.en.bin" }
+                ?? WhisperModel.whisperModels[0]
+        }
+    }
+
+    /// Kept for callers that predate the second local engine.
+    var whisperModel: WhisperModel { model }
+
+    /// The models to list for the current engine. Apple's engine has none of
+    /// its own — its model is the system's.
+    var modelsForCurrentEngine: [WhisperModel] {
+        switch engine {
+        case .parakeet: WhisperModel.parakeetModels
+        case .whisper: WhisperModel.whisperModels
+        case .apple: []
+        }
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -61,6 +109,9 @@ final class SpeechSettings {
         let stored = defaults.string(forKey: Self.key)
         engine = stored.flatMap(Engine.init(rawValue:)) ?? .apple
         whisperModelName = defaults.string(forKey: Self.modelKey) ?? "ggml-tiny.en.bin"
+        parakeetModelName = defaults.string(forKey: Self.parakeetModelKey)
+            ?? WhisperModel.parakeetModels.first?.name
+            ?? ""
     }
 }
 
@@ -109,7 +160,7 @@ final class Dictation {
     var isReady: Bool {
         switch settings.engine {
         case .apple: true
-        case .whisper: models.isInstalled(settings.whisperModel)
+        case .whisper, .parakeet: models.isInstalled(settings.model)
         }
     }
 
@@ -117,10 +168,10 @@ final class Dictation {
         switch settings.engine {
         case .apple:
             nil
-        case .whisper:
-            models.isInstalled(settings.whisperModel)
+        case .whisper, .parakeet:
+            models.isInstalled(settings.model)
                 ? nil
-                : "Download \(settings.whisperModel.label) in Settings › Speech to dictate."
+                : "Download \(settings.model.label) in Settings › Speech to dictate."
         }
     }
 
@@ -130,7 +181,7 @@ final class Dictation {
             apple.toggle(locale: locale)
             isListening = apple.isListening
             problem = apple.state.problem
-        case .whisper:
+        case .whisper, .parakeet:
             // Built on first use rather than in `init`: it holds an
             // AVAudioEngine, and constructing one for every `Dictation` the
             // terminal makes — including when Apple's engine is selected —
@@ -150,7 +201,7 @@ final class Dictation {
                     isListening = false
                     onUpdate?(.final(text))
                 }
-                engine.start(model: settings.whisperModel)
+                engine.start(model: settings.model)
                 isListening = engine.isRecording
             }
             problem = engine.state.problem
@@ -160,7 +211,7 @@ final class Dictation {
     func stop() {
         switch settings.engine {
         case .apple: apple.stop()
-        case .whisper:
+        case .whisper, .parakeet:
             if whisper?.isRecording == true { whisper?.finish(language: nil) }
         }
         isListening = false
@@ -169,7 +220,7 @@ final class Dictation {
     // MARK: - Internals
 
     private func language(for locale: Locale) -> String? {
-        guard settings.whisperModel.multilingual else { return nil }
+        guard settings.model.multilingual else { return nil }
         return locale.language.languageCode?.identifier
     }
 }

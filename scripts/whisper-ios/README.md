@@ -8,7 +8,7 @@ one small C driver as the seam, and let SwiftPM ship only the header.
 
 | File | What it does |
 |---|---|
-| `build.sh` | Cross-compiles whisper.cpp + ggml into `Vendor/whisper/` |
+| `build.sh` | Cross-compiles whisper.cpp + ggml + **Parakeet** into `Vendor/whisper/` |
 | `driver/whisper_shim.c` | The C seam: load, transcribe, read segments |
 | `check.sh` | Codec-level check — archives linked directly, `jfk.wav` in, text out |
 | `app-test.sh` | App-level check — the same recording through the shipped app |

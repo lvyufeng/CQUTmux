@@ -28,20 +28,37 @@ trap 'rm -rf "$WORK"' EXIT
 SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 TARGET=arm64-apple-ios18.0-simulator
 
-echo "==> building the check for the simulator"
+# Which engine to exercise. The harness around it is identical — same vendored
+# tree, same single ggml, same simulator staging — so only the driver, the
+# archive it links, and the marker differ.
+ENGINE="${CQUT_ENGINE:-whisper}"
+
+echo "==> building the $ENGINE check for the simulator"
 LIBS="$VENDOR/iphonesimulator"
-xcrun --sdk iphonesimulator clang -isysroot "$SDK" -target "$TARGET" -O1 \
-  -I"$VENDOR/include" \
-  "$HERE/checks/transcribe.c" \
-  "$LIBS/libwhisper.a" \
-  "$LIBS/libggml.a" \
-  "$LIBS/libggml-base.a" \
-  "$LIBS/libggml-cpu.a" \
-  "$LIBS/libggml-metal.a" \
-  "$LIBS/libggml-blas.a" \
-  -lc++ -framework Accelerate -framework Metal -framework MetalKit \
-  -framework Foundation -framework CoreML \
-  -o "$WORK/transcribe"
+# Both paths link the one ggml, which is the point: whisper.cpp 1.9.5 builds
+# Parakeet in-tree against the same ggml, so no second copy is ever introduced.
+GGML_LIBS="$LIBS/libggml.a $LIBS/libggml-base.a $LIBS/libggml-cpu.a $LIBS/libggml-metal.a $LIBS/libggml-blas.a"
+if [ "$ENGINE" = "parakeet" ]; then
+  # Goes through libwhisperclient.a because it drives the app's own seam
+  # (cqut_parakeet_*), not parakeet.h. The CLI can call parakeet_full directly;
+  # the app cannot, and the seam is what needs testing.
+  xcrun --sdk iphonesimulator clang -isysroot "$SDK" -target "$TARGET" -O1 \
+    -I"$VENDOR/include" \
+    -I"$HERE/../../Packages/CQUTWhisper/Sources/CQUTWhisperC/include" \
+    "$HERE/checks/parakeet.c" \
+    "$LIBS/libwhisperclient.a" "$LIBS/libparakeet.a" $GGML_LIBS \
+    -lc++ -framework Accelerate -framework Metal -framework MetalKit \
+    -framework Foundation -framework CoreML \
+    -o "$WORK/parakeet-check" || { echo "check failed to build" >&2; exit 1; }
+else
+  xcrun --sdk iphonesimulator clang -isysroot "$SDK" -target "$TARGET" -O1 \
+    -I"$VENDOR/include" \
+    "$HERE/checks/transcribe.c" \
+    "$LIBS/libwhisper.a" $GGML_LIBS \
+    -lc++ -framework Accelerate -framework Metal -framework MetalKit \
+    -framework Foundation -framework CoreML \
+    -o "$WORK/transcribe" || { echo "check failed to build" >&2; exit 1; }
+fi
 
 # simctl spawn runs the program inside the simulator's own filesystem. A host
 # temp path is not mapped in there, and dyld aborts on the executable before
@@ -61,14 +78,34 @@ DEST="${CONTAINER:+$CONTAINER/Documents}"
 [ -n "$DEST" ] && mkdir -p "$DEST"
 
 cp "$MODEL" "$WAV" "$SIMTMP/"
-cp "$WORK/transcribe" "$SIMTMP/"
+# Stage whichever binary this mode built. Resolved here rather than in the
+# engine block below because staging happens before it.
+if [ "$ENGINE" = "parakeet" ]; then cp "$WORK/parakeet-check" "$SIMTMP/"; else cp "$WORK/transcribe" "$SIMTMP/"; fi
 mkdir -p "$SIMTMP/speech"
 [ -n "$DEST" ] && cp "$MODEL" "$WAV" "$DEST/" && mkdir -p "$DEST/speech"
 
-echo "==> transcribing $(basename "$WAV") with $(basename "$MODEL")"
-xcrun simctl spawn "$DEVICE" "$SIMTMP/transcribe" "$SIMTMP/$(basename "$MODEL")" "$SIMTMP/$(basename "$WAV")" \
-  | tee "$WORK/out"
+# CQUT_ENGINE=parakeet runs the same harness against the other engine, because
+# everything either side of the link line is identical: same vendored tree, same
+# one ggml, same simulator staging. Only the driver and the marker differ, and
+# the marker is what proves the right one actually ran.
+if [ "$ENGINE" = "parakeet" ]; then
+  EXPECT="PARAKEET_CHECK_PASS"
+  BINARY="$WORK/parakeet-check"
+else
+  EXPECT="WHISPER_CHECK_PASS"
+  BINARY="$WORK/transcribe"
+fi
 
-grep -q WHISPER_CHECK_PASS "$WORK/out" \
-  && echo "==> PASS: backend registered, model loaded, speech recognised" \
+echo "==> transcribing $(basename "$WAV") with $(basename "$MODEL") via $ENGINE"
+# WHISPER_NO_GPU is forwarded explicitly: simctl has no positional environment,
+# and a host variable reaches the spawned process only under the SIMCTL_CHILD_
+# prefix. Set without it — as this script first did — the simulator uses its stub
+# GPU, reports working-set 0, and traps inside Metal, which reads as the engine
+# being broken rather than the invocation being wrong.
+SIMCTL_CHILD_WHISPER_NO_GPU="${WHISPER_NO_GPU:-}" \
+xcrun simctl spawn "$DEVICE" "$SIMTMP/$(basename "$BINARY")" "$SIMTMP/$(basename "$MODEL")" "$SIMTMP/$(basename "$WAV")" \
+  ${CQUT_EXPECT:+"$CQUT_EXPECT"} | tee "$WORK/out"
+
+grep -q "$EXPECT" "$WORK/out" \
+  && echo "==> PASS: $ENGINE registered, model loaded, speech recognised" \
   || { echo "==> FAIL"; exit 1; }

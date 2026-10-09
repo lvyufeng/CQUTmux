@@ -79,6 +79,55 @@ const char *cqut_whisper_model_url(const char *name);
  * file is handed to the model loader. NULL if unknown. */
 const char *cqut_whisper_model_sha256(const char *name);
 
+/* ---------------------------------------------------------------------------
+ * Parakeet
+ *
+ * A second engine behind the same seam, for the same reason. whisper.cpp 1.9.5
+ * ships Parakeet in-tree (src/parakeet.cpp) and builds it against the *same*
+ * ggml, so both engines arrive in the one vendored archive set. That detail is
+ * the whole reason this is here: parakeet.cpp, the standalone project, carries
+ * its own patched ggml, and two static ggmls in one binary do not fail to link
+ * — the second is silently dropped and whichever engine lost binds to the
+ * other's ggml. Sharing the build is what makes two engines possible at all.
+ *
+ * Moshi recommends Parakeet for English and many European languages, and the
+ * reason is size: 0.6 B parameters here against whisper's multilingual models,
+ * with nothing sent off the device.
+ * ------------------------------------------------------------------------ */
+
+typedef struct cqut_parakeet cqut_parakeet;
+
+/* Loads a model from disk. Returns NULL if the file is missing or is not a
+ * Parakeet model; cqut_parakeet_last_error says which. */
+cqut_parakeet *cqut_parakeet_load(const char *path, int use_gpu);
+void cqut_parakeet_free(cqut_parakeet *ctx);
+
+/* Transcribes 16 kHz mono float samples. Returns 0 on success. Parakeet is
+ * English-and-European only and decodes no language token, so there is no
+ * `language` here — the engine selector in the app is what handles the choice,
+ * not a parameter. */
+int cqut_parakeet_transcribe(cqut_parakeet *ctx, const float *samples, int n_samples);
+
+/* As cqut_whisper_segment_text and friends. Parakeet emits a single segment
+ * covering the utterance, with word timing available per token. */
+const char *cqut_parakeet_segment_text(cqut_parakeet *ctx, int index);
+int cqut_parakeet_segment_count(cqut_parakeet *ctx);
+long long cqut_parakeet_segment_start_ms(cqut_parakeet *ctx, int index);
+long long cqut_parakeet_segment_end_ms(cqut_parakeet *ctx, int index);
+int cqut_parakeet_token_count(cqut_parakeet *ctx, int segment);
+
+const char *cqut_parakeet_last_error(void);
+
+/* True when the vendored build has Parakeet compiled in. The app asks before
+ * offering the engine, so a build without it hides the option instead of
+ * failing when a user taps the microphone. */
+int cqut_parakeet_available(void);
+
+/* The Parakeet models the app offers. Same contract as cqut_whisper_models. */
+int cqut_parakeet_models(cqut_whisper_model *out, int max);
+const char *cqut_parakeet_model_url(const char *name);
+const char *cqut_parakeet_model_sha256(const char *name);
+
 #ifdef __cplusplus
 }
 #endif

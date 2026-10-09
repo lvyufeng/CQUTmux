@@ -57,7 +57,7 @@
 | Agent 层 | Usages 看板（5h/7d 用量与 burn pace） | P4 |
 | 通知 | 本地/远程推送、webhook 告警 | P4 |
 | 系统 | Live Activity / Dynamic Island / Apple Watch | P4 / P6 ✅ 表盘实测 |
-| 语音 | 端侧听写（Apple Speech ✅ + whisper.cpp ✅ 已实测；**Parakeet ⚠️ 已编成并实测转写，但未接线**——见 4b 表末行；cloud 引擎按 Moshi 是托管服务，不做） | P4 ⚠️ |
+| 语音 | 端侧听写（**Parakeet ✅ + Apple Speech ✅ + whisper.cpp ✅，三个均已实测**；cloud 引擎按 Moshi 是托管服务，不做） | P4 ✅ |
 | 输入 | 图片粘贴 / 裁剪 / 标注 / 发送 | P4 |
 | 安全 | SSH key 存 Keychain + Face ID 保护 | P1 |
 | 其他 | 远程剪贴板 OSC 52、Tailscale、iPad 分栏 | P5 |
@@ -232,7 +232,9 @@ CJK 输入依赖 SwiftTerm 的
 `UITextInput` 实现（已确认其实现 `setMarkedText`/`unmarkText`/`_markedTextRange` 全量协议，
 即系统输入法的组合文本路径），但未在真机上用中文键盘实测。
 
-**未对齐项（尚未实现）**：
+**曾判定为"未对齐"、现已逐条落地或查明不必做的项**：
+
+（下表每行都保留了当初的判断与后来的结论。它存在的意义不是记录进度，而是这几条里有三条当初都判错了——agent forwarding 判成环境所限、herdr 判成无公开协议、Parakeet 判成 ggml 冲突不可解——错法各不相同，记下来比记结果有用。）
 
 | 项 | 原因 | 现状 |
 |---|---|---|
@@ -244,7 +246,7 @@ CJK 输入依赖 SwiftTerm 的
 网关本就跑在宿主上、紧挨着那个 Unix socket，于是直接说协议（`callHerdrSocket`，一行 JSON，`{id,method,params}` 信封，与 CLI 自身一致）。
 实测：`POST /herdr/focus/w1:p1` 后 herdr 自报 `focused_pane_id=w1:p1`，再 focus `w1:p2` 又变回 `w1:p2`——**确认焦点真的动了**，而不是返回 ok 却什么也没发生 |
 | 远程推送（APNs） | **两端代码已写全并已跑通到系统边界**：App 侧 `PushCoordinator`/`AppDelegate`（令牌注册、`CQUT_APPROVAL` 分类的锁屏 Allow/Deny、前后台推送回调）→ `POST /push/register` → 宿主 `push.mjs`（HTTP/2 + ES256 provider JWT，签名经 openssl 生成的测试密钥**验签通过**、64 字节裸 r‖s 编码正确）。**卡在签名**：模拟器日志 `Push registration with a nil environment`——无 `aps-environment` entitlement，而该 entitlement 必须有付费开发者账号的 provisioning profile。本地通知 + webhook 告警已覆盖同类场景。<br>**查 Moshi 文档后的两点更正**：① 推送**不需要账号登录**，也不需要用户自备 Apple 开发者证书——Moshi 自己是发送方，走 `api.getmoshi.app` 再分发（Expo Push / APNs），文档只说 per-device "license join"，从未要求用户有开发者账号。也就是说，**如果要对齐，需要的不是用户掏钱，而是我们也得有一个托管推送服务**——这与 Moshi 自己声称的 "no session relay" 并不矛盾（它明确区分了会话中转与推送服务）。② 我们目前是**直接对 APNs 发**（provider JWT），所以确实需要付费账号；Moshi 的路线不需要。两条路都能到，只是前者要多一个自有服务。 |
-| Parakeet 语音引擎 | **Moshi 有四个语音引擎，Parakeet 是它当前推荐的默认**（getmoshi.app/docs/voice："Parakeet runs a fast on-device model and is the engine we currently recommend for English and many European languages … Start here unless you need a language it doesn't cover"）。我们此前只对齐了 Apple + whisper 两个。<br>**已做**：`scripts/parakeet-ios/build.sh` 交叉编出 iOS 静态库（simulator 与 device 均成功），`scripts/parakeet-ios/check.sh` 在模拟器上实测转写出**逐字正确**的文本（`Well, I don't wish to see it any more, observed Phoebe, turning away her eyes. It is certainly very like the old portrait.`，模型 `tdt_ctc-110m-q8_0` 169.6 MB）。parakeet.cpp 是 iOS 友好的——无 `fork`/`exec`、无 PTY，C API 直接吃内存里的 float PCM。<br>**未接线的原因（真障碍，非环境所限）**：本 App 已经静态链了 whisper 自己的 **ggml 0.26.0**，而 parakeet.cpp 自带一份**不同的、打过补丁的 ggml**（submodule `e705c5f` + 3 个 conv-2d/broadcast 补丁）。两者全局符号重叠：`libggml-base.a` 910 个、`libggml-cpu.a` 533 个。**两个静态库同时链不会报错**——静态库只补未定义符号，第二份被静默忽略，于是其中一个引擎会绑到另一个的 ggml 上：能编过、能加载两个模型、然后给出错误结果或在 ggml 内部崩。实测把两者链在一起，退出码 0。`ggml_tensor` 两者都是 336 字节，但 `ggml.h` 差 255 行，后端不通用。<br>**三条出路**（尚未选）：① 统一到一份 ggml（whisper 改用 `e705c5f` + parakeet 的三个补丁），代价是两个引擎从此共用一个 ggml 版本；② 用 `objcopy --prefix-symbols` 给 parakeet 的 ggml 加前缀，机械但每次重建都要重做；③ 拆成各自进程的 extension。<br>**也踩到一个坑**：Metal 开关是 `PARAKEET_GGML_METAL` 而非 `GGML_METAL`——parakeet.cpp 用自己的变量 `FORCE` 掉 ggml 的选项，直接设 `GGML_METAL=ON` 会被静默覆盖、编出纯 CPU 版且无任何警告。详见 `scripts/parakeet-ios/README.md` | ⚠️ 引擎已编成并实测，未接线 |
+| Parakeet 语音引擎 | **Moshi 有四个语音引擎，Parakeet 是它当前推荐的默认**（getmoshi.app/docs/voice："the engine we currently recommend for English and many European languages"）。此前只对齐了 Apple + whisper，现已补齐并实测。<br>**关键发现**：**whisper.cpp 1.9.5 自带 Parakeet**（`src/parakeet.cpp` + `include/parakeet.h` + 独立 `parakeet` target），且**用的是同一个 ggml**。它本来就在 `scripts/whisper-ios/build.sh` 编出的那套 archive 里，只是我们没收集。所以"再加一个引擎"实际是加一行 target 和一行 `-lparakeet`。<br>**此前判断的翻案**：先前记的障碍（独立项目 `rjyo/parakeet.cpp` 自带一份打过补丁的 ggml，与本 App 已链的 whisper ggml 符号冲突）**是真的**——实测 `libggml-base.a` 重叠 910 个符号，且两者静态链接**不退错**，第二份被静默丢弃、其中一个引擎绑到另一个的 ggml 上，一个链接两者的测试二进制退出码 0。但这条路**根本不必走**：in-tree 的 Parakeet 是同一个引擎、同一份 ggml，没有第二份可冲突。<br>**实测**：① `scripts/whisper-ios/check.sh`（`CQUT_ENGINE=parakeet`，走 App 自己的 C seam 而非 CLI）：`PASS transcript contains "Phoebe"/"portrait"` + 时间戳单位断言通过；② App 级 `app-test.sh`：`TRANSCRIBE_OK / Well, I don't wish to see it any more, observed Phoebe, turning away her eyes...`；③ Whisper 同一构建回归通过，两个引擎共用一个 ggml 必须两个都验；④ 设置页三个引擎按 Moshi 顺序排列（Parakeet / Apple / Whisper）。<br>**踩到的真坑**：parakeet.cpp 的 segment 时间是**帧数**（100 fps），数值上恰好等于 whisper 的厘秒。第一版 seam 按注释里写的"毫秒"原样透传，7.4 秒的片段返回 end=744——看着像个合理的亚秒时间戳，而不是差了 10 倍，任何文本比对都抓不到。现在检查脚本拿它和音频长度对照。<br>**模型**：`ggml-org/parakeet-GGUF` 的 GGML 格式（**不是** parakeet.cpp 的 GGUF，两者互不可读），q4_k 415.6 MB / q8_0 668.8 MB / f16 1.26 GB，sha256 记在 `parakeet_shim.c` 里 | ✅ 已实现并实测 |
 | Tailscale 网络探测 | **不需要**：Moshi 自己的文档写明它不做内置集成（"no built-in Tailscale host picker"，VPN 在系统层透明工作），用 `100.x.y.z` / MagicDNS 名当普通 SSH 目标即可 | 与 Moshi 一致；直连与隧道不受影响 |
 
 ## 5. 主要风险
