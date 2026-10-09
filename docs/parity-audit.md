@@ -117,3 +117,26 @@ has since been closed, with the check that pins it.
 Note on the last one: the config file is read once at daemon start, so
 `cqutmux set` on a running gateway takes effect on the next start, not
 immediately. Moshi's own hook-settings docs imply the same for its daemon.
+
+- **Two-finger swipes drive the multiplexer** — sideways moves pane, up and
+  down moves tab (or opens herdr's workspace navigator, which is what Moshi
+  documents because herdr ships no next-workspace key). Off in Settings →
+  Input, where the two-finger drag falls back to the scrollback and the mouse
+  wheel it always was. The commands are a table of the programs' own published
+  defaults rather than grammar strings: `ShortcutGrammar` folds Shift away and
+  appends a Return, and herdr binds `prefix+z` and `prefix+Shift+Z` to
+  different things, so a chord built from that grammar would be a different
+  binding than the one meant. Zellij gets `zellij action` lines, since it has no
+  prefix — and gets no pane move at all, because its mode-entry key cannot be
+  sent as one chord from the terminal and a stray `MoveFocus` would strand the
+  user in zellij's pane mode.
+- **A separate herdr prefix** under Settings → Multiplexer, with herdr's
+  shortcut list shown beneath it. tmux and herdr are configured by different
+  files and a host often runs both, so one shared prefix would rebind the other
+  program's keys.
+- **A pinch can zoom the pane** (Settings → Toolbar). Moshi's documented
+  behaviour is that a pinch zooms the focused pane; here it has been the
+  font-size control since before the setting existed, and it is the only way to
+  resize text without leaving a session, so the font is still the default and
+  the pane zoom is a choice. On a host with no multiplexer a pinch still resizes
+  the text, so the gesture is never dead.

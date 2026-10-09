@@ -18,6 +18,7 @@ import SwiftUI
 final class ToolbarSettings {
     private enum Key {
         static let glassEffect = "cqutmux.toolbar.glassEffect"
+        static let pinchAction = "cqutmux.toolbar.pinchAction"
     }
 
     /// Where the setting lives. Injectable so a check can use its own suite
@@ -39,6 +40,52 @@ final class ToolbarSettings {
         // false for an unset key, which would make the default "off" and reset
         // every existing install the first time this store is built.
         glassEffect = store.object(forKey: Key.glassEffect) as? Bool ?? true
+        pinchAction = PinchAction(rawValue: store.string(forKey: Key.pinchAction) ?? "") ?? .fontSize
+    }
+
+    /// What a pinch on the terminal does.
+    ///
+    /// Moshi's own documentation is explicit that pinch zooms the focused
+    /// multiplexer pane and back. That is *not* the reading this app defaults
+    /// to: a pinch has been the font-size control here since before this
+    /// setting existed, and it is the only way to resize the terminal's text
+    /// without leaving a session. Silently moving it would make the app feel
+    /// like it had lost a control. So both are offered, and the font is what a
+    /// pinch does until the user says otherwise — the deliberate divergence is
+    /// preserved as the default and the documented behaviour is a choice.
+    enum PinchAction: String, CaseIterable, Identifiable, Codable {
+        /// Resize the terminal text, and remember the size.
+        case fontSize
+        /// Send the multiplexer's own zoom binding.
+        case zoomPane
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .fontSize: "Terminal font size"
+            case .zoomPane: "Zoom the focused pane"
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .fontSize:
+                "Pinching out enlarges the text and pinching back shrinks it, and the "
+                + "size is kept for the next session. This is what a pinch does today, "
+                + "and the only way to resize text without leaving the session."
+            case .zoomPane:
+                "Pinching out asks the host to full-screen the focused pane and pinching "
+                + "back restores the layout. Needs a multiplexer on the host that has a "
+                + "zoom binding, which tmux, herdr and zellij all do. Font size then has "
+                + "to be changed here in Settings. On a host with no multiplexer a pinch "
+                + "still resizes the text, so the gesture is never dead."
+            }
+        }
+    }
+
+    var pinchAction: PinchAction {
+        didSet { store.set(pinchAction.rawValue, forKey: Key.pinchAction) }
     }
 
     /// Whether the system can actually be asked to drop its glass.

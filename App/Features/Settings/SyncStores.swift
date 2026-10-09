@@ -72,6 +72,9 @@ extension SyncPayload {
         if !cornerText.isEmpty { payload.dpadCornerShortcuts = cornerText }
         payload.hidesWindowRow = stores.input.hidesWindowRow
         payload.tmuxPrefix = stores.mux.tmuxPrefix.rawValue
+        payload.herdrPrefix = stores.mux.herdrPrefix.rawValue
+        payload.muxGestures = stores.input.muxGestures
+        payload.pinchZoomsPane = stores.toolbar.pinchAction == .zoomPane
         payload.updatedAt = Date()
         return payload
     }
@@ -145,6 +148,13 @@ extension SyncPayload {
         if let hidesWindowRow { stores.input.hidesWindowRow = hidesWindowRow }
         if let tmuxPrefix, let prefix = MuxSettings.Prefix(rawValue: tmuxPrefix) {
             stores.mux.tmuxPrefix = prefix
+        }
+        if let herdrPrefix, let prefix = MuxSettings.Prefix(rawValue: herdrPrefix) {
+            stores.mux.herdrPrefix = prefix
+        }
+        if let muxGestures { stores.input.muxGestures = muxGestures }
+        if let pinchZoomsPane {
+            stores.toolbar.pinchAction = pinchZoomsPane ? .zoomPane : .fontSize
         }
         if let dpadCorners {
             for slot in InputSettings.Corner.allCases {

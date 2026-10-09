@@ -45,6 +45,18 @@ struct InputSettingsView: View {
             }
 
             Section {
+                Toggle("Two-finger swipes drive the multiplexer", isOn: $input.muxGestures)
+            } header: {
+                Label("Terminal gestures", systemImage: "hand.draw")
+            } footer: {
+                Text("Sideways switches pane; up and down switches tab, or opens "
+                     + "herdr's workspace navigator, which has no next-workspace key "
+                     + "of its own. The keys sent are the host's own — check them under "
+                     + "Settings → Multiplexer. Off, the two-finger drag scrolls "
+                     + "scrollback and sends mouse-wheel events as it always did.")
+            }
+
+            Section {
                 ForEach(InputSettings.Corner.allCases) { slot in
                     Picker(slot.label, selection: Binding(
                         get: { input.corner(slot) },

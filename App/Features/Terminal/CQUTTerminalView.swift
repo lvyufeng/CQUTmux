@@ -51,6 +51,17 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// one `tmux.conf` binds — see `MuxSettings`, and `selectWindow` for why
     /// getting it wrong fails silently.
     var muxPrefix: MuxSettings.Prefix = .controlB
+    /// Which multiplexer the host runs, from `Host.mux`. Nil means we could not
+    /// tell, and every multiplexer gesture then falls through to the terminal
+    /// rather than sending a keystroke for a program that may not be running —
+    /// the failure mode this whole area is most prone to.
+    var muxKind: String?
+    /// Whether the two-finger swipes drive the multiplexer. See
+    /// `InputSettings.muxGestures`.
+    var muxGestures = true
+    /// Whether a pinch zooms the pane instead of changing the font size. See
+    /// `ToolbarSettings.PinchAction`.
+    var pinchZoomsPane = false
     /// Font size that pinch zoom scales from, captured when a pinch begins.
     private var baseFontSize: CGFloat = 12
 
@@ -197,6 +208,84 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         // two-finger pan above is that missing event, and it and the drag
         // recogniser must not both fire for one gesture.
         wheel.require(toFail: pinch)
+
+        // The multiplexer sweeps. Two fingers, and they only claim the gesture
+        // when the host's multiplexer has a binding for that direction — see
+        // `muxCommand(for:)`. `wheel` is made to wait for them, so on a host
+        // where they do fire a two-finger drag switches panes rather than also
+        // scrolling, and on one where they do not, the wheel is what answers.
+        // The order is the opposite of what it looks like: a recogniser that
+        // fails lets the one waiting on it proceed, so this says "the wheel
+        // only scrolls if the sweep declined to move".
+        wheel.require(toFail: paneSweep)
+        wheel.require(toFail: tabSweep)
+        paneSweep.delegate = self
+        tabSweep.delegate = self
+        refreshMuxSweeps()
+    }
+
+    /// A two-finger drag that drives the multiplexer: horizontal switches pane,
+    /// vertical switches tab (or opens herdr's workspace navigator).
+    ///
+    /// Two separate recognisers rather than one, because they wait on different
+    /// things and because a diagonal drag has to resolve to the axis the user
+    /// meant — `velocity(in:)` at `.ended` is what decides, and a recogniser
+    /// that had already locked to one axis could not change its mind.
+    private lazy var paneSweep: UISweepGesture = {
+        let gesture = UISweepGesture(target: self, action: #selector(handleMuxSweep(_:)))
+        gesture.requiredTouches = 2
+        gesture.axis = .horizontal
+        return gesture
+    }()
+
+    private lazy var tabSweep: UISweepGesture = {
+        let gesture = UISweepGesture(target: self, action: #selector(handleMuxSweep(_:)))
+        gesture.requiredTouches = 2
+        gesture.axis = .vertical
+        return gesture
+    }()
+
+    /// Whether either sweep has a command it could send right now.
+    ///
+    /// This is the whole gate, and it is consulted before a gesture starts
+    /// rather than when one ends — see `UISweepGesture.isAvailable`. A plain
+    /// shell has no multiplexer, so nothing is claimed and the two-finger drag
+    /// still reaches the scrollback.
+    func refreshMuxSweeps() {
+        paneSweep.isAvailable = muxGestures && MuxSettings.MuxCommand.matching(
+            horizontal: .next, vertical: nil, mux: muxKind
+        ) != nil
+        tabSweep.isAvailable = muxGestures && MuxSettings.MuxCommand.matching(
+            horizontal: nil, vertical: .next, mux: muxKind
+        ) != nil
+    }
+
+    /// The command a sweep has resolved to. Called only after the gesture has
+    /// ended in `.ended`, which is what `isAvailable` and the travel threshold
+    /// together guarantee has a command behind it.
+    func muxCommand(for sweep: UISweepGesture) -> MuxSettings.MuxCommand? {
+        switch sweep.direction {
+        case .positive:
+            return MuxSettings.MuxCommand.matching(
+                horizontal: sweep.axis == .horizontal ? .next : nil,
+                vertical: sweep.axis == .vertical ? .next : nil,
+                mux: muxKind
+            )
+        case .negative:
+            return MuxSettings.MuxCommand.matching(
+                horizontal: sweep.axis == .horizontal ? .previous : nil,
+                vertical: sweep.axis == .vertical ? .previous : nil,
+                mux: muxKind
+            )
+        case .none:
+            return nil
+        }
+    }
+
+    @objc private func handleMuxSweep(_ gesture: UISweepGesture) {
+        guard gesture.state == .ended, let command = muxCommand(for: gesture) else { return }
+        guard let bytes = command.bytes(prefix: muxPrefix, mux: muxKind) else { return }
+        write(Data(bytes))
     }
 
     /// Two-finger vertical drag → mouse wheel, when the program asked for mouse
@@ -289,6 +378,17 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     }
 
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        // Zooming a pane is a single toggle, not a continuous scale, so it is
+        // sent once per gesture rather than per frame the way the font is.
+        // Anything else would spray the key at the mux and leave the pane
+        // flickering between states.
+        if pinchZoomsPane, MuxSettings.MuxCommand.zoomPane.isAvailable(on: muxKind) {
+            if gesture.state == .ended,
+               let bytes = MuxSettings.MuxCommand.zoomPane.bytes(prefix: muxPrefix, mux: muxKind) {
+                write(Data(bytes))
+            }
+            return
+        }
         switch gesture.state {
         case .changed:
             let size = min(
@@ -595,6 +695,19 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     #if DEBUG
     /// Whether the session is up right now. Test-only.
     var isLiveForTesting: Bool { status.isLive }
+
+    /// Sends a multiplexer command exactly as the sweep's handler does, without
+    /// needing a two-finger drag — which a script cannot perform. Test-only.
+    ///
+    /// Goes through `muxCommand(for:)`-adjacent machinery rather than building
+    /// the bytes here, so what a script exercises is the same table and the same
+    /// gate a real gesture reaches. An unavailable command sends nothing, which
+    /// is the behaviour under test.
+    func fireMuxCommandForTesting(_ command: MuxSettings.MuxCommand) {
+        guard status.isLive, muxGestures else { return }
+        guard let bytes = command.bytes(prefix: muxPrefix, mux: muxKind) else { return }
+        write(Data(bytes))
+    }
 
     /// Runs a gesture's binding exactly as the recogniser's handler does.
     /// Test-only; see `DebugSeed.fireGestureWhenConnected`.

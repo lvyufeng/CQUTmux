@@ -90,6 +90,42 @@ wrongType.set("yes", forKey: "cqutmux.toolbar.glassEffect")
 check(ToolbarSettings(store: wrongType).glassEffect == true,
       "a non-bool value falls back to the default, not to off")
 
+// MARK: - What a pinch does
+
+// The default has to be the font, and not out of sentiment: a pinch has been
+// the font-size control since before this setting existed, and it is the only
+// way to resize the terminal's text without leaving a session. A build that
+// flipped the default would take that away from every existing install.
+let pinchFresh = UserDefaults(suiteName: "cqutmux.toolbar.test.pinch-fresh")!
+UserDefaults.standard.removePersistentDomain(forName: "cqutmux.toolbar.test.pinch-fresh")
+check(ToolbarSettings(store: pinchFresh).pinchAction == .fontSize,
+      "a fresh install pinches to resize the font")
+
+let pinchSuite = UserDefaults(suiteName: "cqutmux.toolbar.test.pinch")!
+UserDefaults.standard.removePersistentDomain(forName: "cqutmux.toolbar.test.pinch")
+let pinch = ToolbarSettings(store: pinchSuite)
+pinch.pinchAction = .zoomPane
+check(ToolbarSettings(store: pinchSuite).pinchAction == .zoomPane,
+      "choosing the pane zoom survives a relaunch")
+check(pinchSuite.string(forKey: "cqutmux.toolbar.pinchAction") == "zoomPane",
+      "and is stored by name, so a reordering of the cases cannot change it")
+
+// A stored value from a build that had a different case is read as the default
+// rather than as nothing — the terminal must still have a working pinch.
+pinchSuite.set("magnify", forKey: "cqutmux.toolbar.pinchAction")
+check(ToolbarSettings(store: pinchSuite).pinchAction == .fontSize,
+      "an unknown stored action falls back to the font size, which is always valid")
+
+// The two readings are distinct, and each one is a case a check can name. If a
+// future edit ever collapsed them into one, the default that this whole
+// divergence rests on would stop being expressible.
+check(ToolbarSettings.PinchAction.allCases.count == 2,
+      "a pinch has exactly two readings: the font, or the pane")
+check(Set(ToolbarSettings.PinchAction.allCases.map(\.label)).count == 2,
+      "and the two are distinguishable on the screen")
+check(ToolbarSettings.PinchAction.zoomPane.detail.contains("multiplexer"),
+      "the zoom reading says what it needs, so choosing it is informed")
+
 print("")
 if failures == 0 {
     print("toolbar: \(checks) checks passed")

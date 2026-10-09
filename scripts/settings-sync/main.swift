@@ -230,12 +230,36 @@ check(inputJSON.contains("barItems"), "the payload carries the bar's item order"
 check(inputJSON.contains("dpadCorners"), "the payload carries the corner bindings")
 check(inputJSON.contains("hidesWindowRow"), "the payload carries the window row's visibility")
 
+// The mux prefixes travel separately, for the same reason they are stored
+// separately: one device whose tmux and herdr prefixes disagree would otherwise
+// rebind one program's shortcuts on the other device from a single field.
+var withMux = SyncPayload()
+withMux.tmuxPrefix = "controlA"
+withMux.herdrPrefix = "controlSpace"
+withMux.muxGestures = false
+let muxJSON = String(data: try! JSONEncoder().encode(withMux), encoding: .utf8)!
+check(muxJSON.contains("herdrPrefix"), "the payload carries herdr's own prefix")
+check(muxJSON.contains("muxGestures"), "the payload carries the mux-gesture switch")
+
+var withPinch = SyncPayload()
+withPinch.pinchZoomsPane = true
+let pinchJSON = String(data: try! JSONEncoder().encode(withPinch), encoding: .utf8)!
+check(pinchJSON.contains("pinchZoomsPane"), "the payload carries what a pinch does")
+
+// A payload from before these fields existed must not be read as "this device
+// turned the gestures off" — the omission has to mean "unchanged", which is the
+// same trap the bar's item list has. Checked below, once `untouched` exists.
+
 var untouched = SyncPayload()
 let untouchedJSON = String(data: try! JSONEncoder().encode(untouched), encoding: .utf8)!
 check(!untouchedJSON.contains("optionIsMeta"),
       "an untouched Option setting is omitted, not sent as false")
 check(!untouchedJSON.contains("barItems"),
       "an unmodified bar is omitted, so it cannot be read as an empty one")
+check(!untouchedJSON.contains("muxGestures"),
+      "an untouched gesture switch is omitted, so it cannot be read as off")
+check(!untouchedJSON.contains("pinchZoomsPane"),
+      "and so is an untouched pinch preference")
 
 // The reason the omission matters: `nil` is not `[]` on the wire, so a payload
 // written before this field existed cannot be read as "this device removed

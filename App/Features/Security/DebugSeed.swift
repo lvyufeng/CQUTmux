@@ -141,6 +141,27 @@ enum DebugSeed {
         }
     }
 
+    /// Sends a multiplexer command once the session is live. Test-only.
+    ///
+    /// A two-finger sweep cannot be performed by a script, so this reaches the
+    /// view's own send path with the same command table a real gesture uses —
+    /// which is the only way to see the bytes on the wire. Pairs with `cat -v`
+    /// on the host, which renders a prefix as `^B`.
+    static func fireMuxCommandWhenConnected(
+        view: CQUTTerminalView, command: MuxSettings.MuxCommand, attempt: Int = 0
+    ) {
+        guard attempt < 60 else { return }
+        guard view.isLiveForTesting else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                fireMuxCommandWhenConnected(view: view, command: command, attempt: attempt + 1)
+            }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            view.fireMuxCommandForTesting(command)
+        }
+    }
+
     static func pressShortcutWhenConnected(
         view: CQUTTerminalView, bytes: [UInt8], attempt: Int = 0
     ) {

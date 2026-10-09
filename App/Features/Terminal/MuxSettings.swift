@@ -16,6 +16,7 @@ import Observation
 final class MuxSettings {
     private enum Key {
         static let tmuxPrefix = "cqutmux.mux.tmuxPrefix"
+        static let herdrPrefix = "cqutmux.mux.herdrPrefix"
     }
 
     /// Where the setting lives. Injectable so a check can use its own suite
@@ -74,8 +75,159 @@ final class MuxSettings {
         didSet { store.set(tmuxPrefix.rawValue, forKey: Key.tmuxPrefix) }
     }
 
+    /// Herdr's prefix, kept separate from tmux's because the two programs are
+    /// configured separately and a host can run both at once. Herdr defaults to
+    /// Ctrl-B as well, but a user who has rebound one of them has almost
+    /// certainly rebound only that one — sharing a single setting would break
+    /// whichever of the two they did not mean to change.
+    var herdrPrefix: Prefix {
+        didSet { store.set(herdrPrefix.rawValue, forKey: Key.herdrPrefix) }
+    }
+
     init(store: UserDefaults = .standard) {
         self.store = store
         tmuxPrefix = Prefix.named(store.string(forKey: Key.tmuxPrefix))
+        herdrPrefix = Prefix.named(store.string(forKey: Key.herdrPrefix))
+    }
+
+    /// The prefix a host's multiplexer answers to.
+    ///
+    /// `mux` is `Host.mux`'s already-detected kind, and an unrecognised or nil
+    /// one gets the tmux prefix: a host we could not classify is a host we have
+    /// nothing better than the default for.
+    func prefix(for mux: String?) -> Prefix {
+        mux == "herdr" ? herdrPrefix : tmuxPrefix
+    }
+
+    /// A control sequence a multiplexer reads as one of its own key bindings.
+    ///
+    /// These are the keystrokes the header gestures, the pinch, and Herdr's
+    /// shortcut panel send. They are *not* in `ShortcutGrammar`: that grammar
+    /// produces at most one control byte followed by text, and the Herdr chords
+    /// that end in a Shift-modified key (`prefix + X` for "kill pane") have no
+    /// control form at all — X is 0x58 and `stop & 0x1F` would send Ctrl-X, which
+    /// is a different binding. Sending the wrong one of those is a destructive
+    /// mistranslation, so they live in a table that can be checked against
+    /// published defaults rather than in a grammar that would have to guess.
+    enum MuxCommand: String, CaseIterable, Codable {
+        /// Move the focus to the next pane.
+        case nextPane, previousPane
+        /// Move the focus to the next tab/window.
+        case nextTab, previousTab
+        /// Toggle the focused pane between split and full-screen.
+        case zoomPane
+        /// Open the workspace navigator.
+        case workspaceNavigator
+        /// Open Herdr's goto prompt, which is how a tab past the ninth digit is
+        /// reached.
+        case gotoPrompt
+
+        var label: String {
+            switch self {
+            case .nextPane: "Next pane"
+            case .previousPane: "Previous pane"
+            case .nextTab: "Next tab"
+            case .previousTab: "Previous tab"
+            case .zoomPane: "Zoom pane"
+            case .workspaceNavigator: "Workspaces"
+            case .gotoPrompt: "Goto"
+            }
+        }
+
+        /// Whether this mux can express the command at all.
+        ///
+        /// Zellij is the awkward one. It has no prefix, so every command goes
+        /// through `zellij action` — and for tabs and zoom that is fine, because
+        /// those are line commands the shell runs. Moving the *focus* is not: the
+        /// only action for it is `MoveFocus`, which is bound inside zellij's pane
+        /// mode, and the mode-entry key (`Ctrl-p`) is only bound from the normal
+        /// mode, so the chord cannot be sent as one blob from the terminal. A
+        /// `MoveFocus` typed while still in pane mode would also leave the user
+        /// typing `h` and `j` into zellij's mode instead of the shell. So the pane
+        /// gestures are offered on tmux and herdr only, and a zellij host gets the
+        /// tab row for what it does have.
+        func isAvailable(on mux: String?) -> Bool {
+            switch self {
+            case .nextPane, .previousPane:
+                return mux == "tmux" || mux == "herdr"
+            case .nextTab, .previousTab, .zoomPane:
+                return mux != nil
+            case .workspaceNavigator, .gotoPrompt:
+                return mux == "herdr"
+            }
+        }
+
+        /// The bytes to send, or nil when this multiplexer has no such binding.
+        ///
+        /// Herdr's chords are read from its own documented defaults rather than
+        /// guessed at, because the cost of guessing is asymmetric: a wrong key in
+        /// tmux does nothing, but a wrong key in herdr is a *different binding* —
+        /// `pane` and `tab` are one letter apart from their neighbours, and the
+        /// uppercase forms are separate bindings entirely. Every byte below is the
+        /// lowercase letter the page lists, with the prefix from the setting in
+        /// front of it.
+        ///
+        /// Zellij gets a `zellij action` line instead, because it has no prefix to
+        /// send at all.
+        func bytes(prefix: MuxSettings.Prefix, mux: String?) -> [UInt8]? {
+            guard isAvailable(on: mux) else { return nil }
+            let head = prefix.bytes
+            switch (mux, self) {
+            case ("tmux", .nextPane): return head + [0x6F]        // prefix o
+            case ("tmux", .previousPane): return head + [0x3B]    // prefix ;
+            case ("tmux", .nextTab): return head + [0x6E]         // prefix n
+            case ("tmux", .previousTab): return head + [0x70]     // prefix p
+            case ("tmux", .zoomPane): return head + [0x7A]        // prefix z
+            case ("zellij", .nextTab): return Array("zellij action go-to-tab 1\n".utf8)
+            case ("zellij", .previousTab):
+                // `go-to-tab` takes an index, not a direction, so "previous" is a
+                // command the host's own zellij resolves against the current tab.
+                return Array("zellij action go-to-previous-tab\n".utf8)
+            case ("zellij", .zoomPane): return Array("zellij action toggle-fullscreen\n".utf8)
+            case ("herdr", .nextPane): return head + [0x6A]       // prefix j
+            case ("herdr", .previousPane): return head + [0x6B]   // prefix k
+            case ("herdr", .nextTab): return head + [0x6E]        // prefix n
+            case ("herdr", .previousTab): return head + [0x70]    // prefix p
+            case ("herdr", .zoomPane): return head + [0x7A]       // prefix z
+            case ("herdr", .workspaceNavigator): return head + [0x77]  // prefix w
+            case ("herdr", .gotoPrompt): return head + [0x67]     // prefix g
+            default:
+                return nil
+            }
+        }
+
+        /// Which command a two-finger swipe means, or nil to leave the swipe to the
+        /// terminal.
+        ///
+        /// Pure and static so the mapping — including which directions are left to
+        /// the terminal — can be checked without a simulator. `mux` is the host's
+        /// detected kind; a host with no multiplexer has no commands at all and
+        /// every direction falls through, which is what keeps two-finger scrolling
+        /// working on a plain shell.
+        static func matching(
+            horizontal: MirrorAxis?, vertical: MirrorAxis?, mux: String?
+        ) -> MuxCommand? {
+            if let horizontal {
+                let command: MuxCommand = horizontal == .next ? .nextPane : .previousPane
+                return command.isAvailable(on: mux) ? command : nil
+            }
+            if let vertical {
+                // Herdr has no next/previous workspace key, so its vertical swipe
+                // opens the navigator instead — "drives the workspace navigator for
+                // you", as Moshi documents. The others move a tab.
+                let command: MuxCommand = mux == "herdr"
+                    ? .workspaceNavigator
+                    : (vertical == .next ? .nextTab : .previousTab)
+                return command.isAvailable(on: mux) ? command : nil
+            }
+            return nil
+        }
+    }
+
+    /// Which way along an axis a swipe went. Named for the multiplexer operation
+    /// rather than the screen direction, so a caller never has to translate
+    /// "left is previous".
+    enum MirrorAxis: String, Codable {
+        case next, previous
     }
 }

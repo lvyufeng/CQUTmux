@@ -15,6 +15,7 @@ final class InputSettings {
         static let corners = "input.dpadCorners"
         static let cornerShortcuts = "input.dpadCornerShortcuts"
         static let hidesWindowRow = "input.hidesWindowRow"
+        static let muxGestures = "input.muxGestures"
     }
 
     /// The D-pad corner actions, as raw strings keyed by corner.
@@ -221,6 +222,22 @@ final class InputSettings {
         didSet { store.set(hidesWindowRow, forKey: Key.hidesWindowRow) }
     }
 
+    /// Whether the two-finger swipes drive the host's multiplexer.
+    ///
+    /// On by default, because that is the gesture Moshi ships and the one a
+    /// user arriving from it will reach for. Off, the two-finger pans are left
+    /// entirely to the terminal: horizontal does nothing and vertical reaches
+    /// the scrollback, which is what the gestures meant before this existed.
+    ///
+    /// It is a switch rather than an unconditional mapping because the
+    /// multiplexer bindings are read from the *host's* configuration, and a
+    /// host whose tmux has no `select-pane -t :.+` is a host where a two-finger
+    /// sideways swipe would do nothing at all — a setting lets that be the
+    /// user's answer rather than ours.
+    var muxGestures: Bool {
+        didSet { store.set(muxGestures, forKey: Key.muxGestures) }
+    }
+
     /// The bar's items, in order. Stored as raw values so a build that adds an
     /// item does not lose a user's arrangement, and one that removes an item
     /// does not resurrect it.
@@ -236,6 +253,11 @@ final class InputSettings {
         hideBarWithHardwareKeyboard =
             store.object(forKey: Key.hideBarWithHardwareKeyboard) as? Bool ?? true
         hidesWindowRow = store.bool(forKey: Key.hidesWindowRow)
+        // Default on: the value is absent on every install that predates the
+        // setting, and those installs are exactly the ones that had the
+        // two-finger swipes do nothing — so "absent" has to mean the new
+        // behaviour or the feature would ship switched off for everyone.
+        muxGestures = store.object(forKey: Key.muxGestures) as? Bool ?? true
 
         let stored = store.stringArray(forKey: Key.barItems) ?? []
         let restored = stored.compactMap(Item.init(rawValue:))

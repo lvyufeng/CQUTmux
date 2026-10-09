@@ -73,6 +73,20 @@ struct SyncPayload: Codable, Equatable {
     /// the same way from every device they own.
     var tmuxPrefix: String?
 
+    /// Herdr's prefix. Separate from tmux's for the same reason the two are
+    /// separate settings: they describe two programs configured in two files,
+    /// and a payload that carried one number for both would silently rebind
+    /// herdr on the other device.
+    var herdrPrefix: String?
+
+    /// Whether the two-finger swipes drive the multiplexer, and whether a pinch
+    /// zooms the pane. Both are per-device in principle — a phone with a
+    /// trackpad attached is a different input situation — but the *preference*
+    /// is the same everywhere, and leaving them out would make the two devices
+    /// disagree about what a pinch does.
+    var muxGestures: Bool?
+    var pinchZoomsPane: Bool?
+
     /// When this device last wrote the payload. Used only to decide which side
     /// is newer when both have changed; the clock is the device's, so a badly
     /// wrong clock loses that comparison. That is acceptable here because the

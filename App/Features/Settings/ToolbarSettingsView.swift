@@ -33,6 +33,24 @@ struct ToolbarSettingsView: View {
                 Text("The key bar above the keyboard is ours, so this changes it "
                      + "on every version. The navigation bars belong to the system.")
             }
+
+            Section {
+                Picker("Pinch", selection: $store.pinchAction) {
+                    ForEach(ToolbarSettings.PinchAction.allCases) { action in
+                        Text(action.label).tag(action)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } header: {
+                Label("Terminal gestures", systemImage: "hand.pinch")
+            } footer: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(store.pinchAction.detail)
+                    Text("The two-finger swipes that switch panes and tabs are under "
+                         + "Settings → Input.")
+                }
+            }
         }
         .navigationTitle("Toolbar")
         .navigationBarTitleDisplayMode(.inline)

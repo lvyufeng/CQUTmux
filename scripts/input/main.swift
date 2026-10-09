@@ -188,6 +188,20 @@ row.hidesWindowRow = false
 check(!InputSettings(store: rowStore).hidesWindowRow,
       "showing it again survives a relaunch too")
 
+// MARK: - The mux-gesture switch
+
+// Default on, and that default is load-bearing: every install that predates
+// this setting has no stored value, and those are exactly the installs whose
+// two-finger swipes did nothing. Reading them as "off" would ship the feature
+// switched off for everyone who upgraded.
+check(InputSettings(store: UserDefaults(suiteName: "cqutmux.input.check.mux-fresh")!)
+        .muxGestures,
+      "a fresh install has the multiplexer gestures on")
+row.muxGestures = false
+check(!InputSettings(store: rowStore).muxGestures,
+      "turning them off survives a relaunch")
+row.muxGestures = true
+
 // MARK: - Corner bindings
 
 check(InputSettings.defaultCorner(.topLeading) == .escape,

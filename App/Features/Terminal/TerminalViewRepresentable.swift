@@ -60,6 +60,7 @@ struct TerminalScreen: View {
                 cursor: cursor,
                 input: input,
                 mux: mux,
+                pinchZoomsPane: toolbar.pinchAction == .zoomPane,
                 allowsClipboardRead: security.allowsClipboardRead
             )
             .ignoresSafeArea(.container, edges: .bottom)
@@ -684,6 +685,8 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
     let cursor: CursorSettings
     let input: InputSettings
     let mux: MuxSettings
+    /// Whether a pinch zooms the multiplexer's pane instead of resizing text.
+    let pinchZoomsPane: Bool
     /// Whether a host program may read the clipboard. Passed in rather than
     /// read from the environment because a `UIViewRepresentable`'s
     /// `updateUIView` has no environment of its own.
@@ -751,7 +754,16 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         view.gestures = gestures
         view.optionIsMeta = input.optionIsMeta
         view.allowsClipboardRead = allowsClipboardRead
-        view.muxPrefix = mux.tmuxPrefix
+        view.muxPrefix = mux.prefix(for: host.mux)
+        // The host's own kind, which is what decides whether a multiplexer
+        // gesture has anywhere to go. Read from `Host.mux` rather than from the
+        // session command string here, because a user's command can change
+        // while the host is saved, and this is the same detector the window row
+        // and the session picker already trust.
+        view.muxKind = host.mux
+        view.muxGestures = input.muxGestures
+        view.pinchZoomsPane = pinchZoomsPane
+        view.refreshMuxSweeps()
         view.onStatus = { status in coordinator.status = status }
         // A pinch resizes the terminal and becomes the saved preference, so the
         // next session opens at the size the user settled on.
@@ -782,6 +794,13 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         if let index = ProcessInfo.processInfo.environment["CQUT_DEV_JUMP_WINDOW"] {
             DebugSeed.jumpWindowWhenConnected(view: view, index: index)
         }
+        // Sends a multiplexer command through the same table the sweeps use,
+        // so the bytes a real two-finger swipe produces can be read on the host
+        // (with `cat -v`) even though a script cannot perform the swipe.
+        if let raw = ProcessInfo.processInfo.environment["CQUT_DEV_MUX_COMMAND"],
+           let command = MuxSettings.MuxCommand(rawValue: raw) {
+            DebugSeed.fireMuxCommandWhenConnected(view: view, command: command)
+        }
         // Same idea for a custom shortcut: the bar cannot be tapped from a
         // script, so the binding is pressed for it and the bytes travel the
         // path a real tap would.
@@ -810,7 +829,11 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         // on the next connection.
         uiView.optionIsMeta = input.optionIsMeta
         uiView.allowsClipboardRead = allowsClipboardRead
-        uiView.muxPrefix = mux.tmuxPrefix
+        uiView.muxPrefix = mux.prefix(for: host.mux)
+        uiView.muxKind = host.mux
+        uiView.muxGestures = input.muxGestures
+        uiView.pinchZoomsPane = pinchZoomsPane
+        uiView.refreshMuxSweeps()
     }
 }
 
