@@ -16,12 +16,14 @@ final class SpeechSettings {
         case parakeet
         case apple
         case whisper
+        case cloud
 
         var label: String {
             switch self {
             case .parakeet: "Parakeet"
             case .apple: "Apple"
             case .whisper: "Whisper"
+            case .cloud: "Cloud"
             }
         }
 
@@ -51,6 +53,9 @@ final class SpeechSettings {
             case .whisper:
                 "whisper.cpp on the device. Works in any language it was trained on; the model is "
                     + "downloaded once and can be removed later."
+            case .cloud:
+                "Sends the recording to an endpoint you configure. The only engine here that "
+                    + "uploads audio — use it only with a service you trust."
             }
         }
     }
@@ -81,7 +86,7 @@ final class SpeechSettings {
             WhisperModel.parakeetModels.first { $0.name == parakeetModelName }
                 ?? WhisperModel.parakeetModels.first
                 ?? WhisperModel.whisperModels[0]
-        case .apple, .whisper:
+        case .apple, .whisper, .cloud:
             // Defaults to the smallest English one: the only choice that is
             // both quick to fetch and accurate enough to speak a shell command
             // into.
@@ -97,7 +102,41 @@ final class SpeechSettings {
         switch engine {
         case .parakeet: WhisperModel.parakeetModels
         case .whisper: WhisperModel.whisperModels
-        case .apple: []
+        case .apple, .cloud: []
+        }
+    }
+
+    private static let endpointKey = "cqutmux.speech.cloudEndpoint"
+    private static let tokenAccount = "speech.cloud.token"
+
+    /// The endpoint the Cloud engine posts to.
+    ///
+    /// Stored as typed and parsed on use, so a half-written URL does not get
+    /// silently discarded while the user is in the middle of entering it. An
+    /// empty string means "not configured", which the engine reports rather
+    /// than failing at the microphone.
+    var cloudEndpoint: String {
+        didSet { defaults.set(cloudEndpoint, forKey: Self.endpointKey) }
+    }
+
+    var cloudURL: URL? {
+        let trimmed = cloudEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let url = URL(string: trimmed),
+              let scheme = url.scheme, scheme == "https" || scheme == "http" else { return nil }
+        return url
+    }
+
+    /// Held in the Keychain rather than `UserDefaults`: it is a bearer token
+    /// for someone else's service, and `UserDefaults` is a plist in the app
+    /// container that any backup would carry off the device.
+    var cloudToken: String {
+        get { KeychainStore.load(account: Self.tokenAccount).flatMap { String(data: $0, encoding: .utf8) } ?? "" }
+        set {
+            if newValue.isEmpty {
+                KeychainStore.delete(account: Self.tokenAccount)
+            } else {
+                KeychainStore.save(Data(newValue.utf8), account: Self.tokenAccount)
+            }
         }
     }
 
@@ -109,6 +148,7 @@ final class SpeechSettings {
         parakeetModelName = defaults.string(forKey: Self.parakeetModelKey)
             ?? WhisperModel.parakeetModels.first?.name
             ?? ""
+        cloudEndpoint = defaults.string(forKey: Self.endpointKey) ?? ""
     }
 }
 
@@ -133,6 +173,7 @@ final class Dictation {
     private let models: WhisperModelStore
     private let apple = VoiceDictationWrapper()
     private var whisper: WhisperDictation?
+    private var cloud: CloudDictation?
 
     init(settings: SpeechSettings, models: WhisperModelStore) {
         self.settings = settings
@@ -158,6 +199,7 @@ final class Dictation {
         switch settings.engine {
         case .apple: true
         case .whisper, .parakeet: models.isInstalled(settings.model)
+        case .cloud: settings.cloudURL != nil
         }
     }
 
@@ -169,6 +211,10 @@ final class Dictation {
             models.isInstalled(settings.model)
                 ? nil
                 : "Download \(settings.model.label) in Settings › Speech to dictate."
+        case .cloud:
+            settings.cloudURL == nil
+                ? "Add a transcription endpoint in Settings › Speech to dictate."
+                : nil
         }
     }
 
@@ -202,6 +248,38 @@ final class Dictation {
                 isListening = engine.isRecording
             }
             problem = engine.state.problem
+        case .cloud:
+            guard let endpoint = settings.cloudURL else {
+                problem = CloudTranscription.Failure.notConfigured.errorDescription
+                return
+            }
+            let engine = cloud ?? {
+                let made = CloudDictation()
+                cloud = made
+                return made
+            }()
+            if engine.isRecording {
+                engine.finish(
+                    endpoint: endpoint,
+                    token: settings.cloudToken,
+                    // Not `language(for:)`: that gates on the local model
+                    // being multilingual, which has nothing to do with what a
+                    // remote service can accept. The endpoint is told the
+                    // device's language and decides for itself.
+                    language: locale.language.languageCode?.identifier
+                )
+                isListening = false
+            } else {
+                engine.onResult = { [weak self] text in
+                    guard let self else { return }
+                    preview = ""
+                    isListening = false
+                    onUpdate?(.final(text))
+                }
+                engine.start()
+                isListening = engine.isRecording
+            }
+            problem = engine.state.problem
         }
     }
 
@@ -210,6 +288,8 @@ final class Dictation {
         case .apple: apple.stop()
         case .whisper, .parakeet:
             if whisper?.isRecording == true { whisper?.finish(language: nil) }
+        case .cloud:
+            cloud?.stop()
         }
         isListening = false
     }

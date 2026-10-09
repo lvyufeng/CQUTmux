@@ -30,20 +30,82 @@ struct SpeechSettingsView: View {
                 Text(settings.engine.detail)
             }
 
-            if settings.engine != .apple {
+            if settings.engine == .cloud {
+                cloudSection
+            } else if settings.engine != .apple {
                 modelSection
             }
 
             Section {
                 LabeledContent("Permission", value: "Microphone")
             } footer: {
-                Text("Audio is transcribed on this device and never uploaded. Models come from "
-                     + "Hugging Face: whisper.cpp models from ggerganov/whisper.cpp, Parakeet "
-                     + "from ggml-org/parakeet-GGUF.")
+                // The claim has to match the engine. Cloud posts audio to a
+                // service the user chose, so carrying the on-device line here
+                // would be exactly the kind of quiet untruth this app already
+                // went out of its way to avoid in the Apple engine.
+                if settings.engine == .cloud {
+                    Text("The recording is sent to the endpoint above over the network. "
+                         + "Use an HTTPS endpoint you trust.")
+                } else {
+                    Text("Audio is transcribed on this device and never uploaded. Models come from "
+                         + "Hugging Face: whisper.cpp models from ggerganov/whisper.cpp, Parakeet "
+                         + "from ggml-org/parakeet-GGUF.")
+                }
             }
         }
         .navigationTitle("Speech")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            #if DEBUG
+            // A UI run cannot work the picker, and the Cloud section only
+            // exists while Cloud is selected, so a screenshot of it needs the
+            // engine chosen from outside.
+            let environment = ProcessInfo.processInfo.environment
+            if let raw = environment["CQUT_DEV_SPEECH_ENGINE"],
+               let engine = SpeechSettings.Engine(rawValue: raw) {
+                settings.engine = engine
+            }
+            if let endpoint = environment["CQUT_DEV_CLOUD_URL"] {
+                settings.cloudEndpoint = endpoint
+            }
+            #endif
+        }
+    }
+
+    /// Endpoint and token for the Cloud engine.
+    ///
+    /// The screen says outright that Moshi hosts this service and this app does
+    /// not, because otherwise a user would read "Cloud" and assume it just
+    /// works. It is the same choice the rest of these settings make: describe
+    /// what is actually there.
+    @ViewBuilder
+    private var cloudSection: some View {
+        Section {
+            TextField("https://…/v1/audio/transcriptions", text: $settings.cloudEndpoint)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+            SecureField("Bearer token (optional)", text: tokenBinding)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        } header: {
+            Text("Endpoint")
+        } footer: {
+            if !settings.cloudEndpoint.isEmpty && settings.cloudURL == nil {
+                Text("That is not an http(s) URL yet, so dictation will refuse to start.")
+                    .foregroundStyle(themes.current.accentColor)
+            } else {
+                Text("POSTs a WAV recording and expects {\"text\": \"…\"} back. The token is kept "
+                     + "in the Keychain, not in the app's preferences. Moshi runs this endpoint "
+                     + "itself; this app has no service to offer, so bring your own.")
+            }
+        }
+    }
+
+    /// Reads through the Keychain on every keystroke and writes on every one,
+    /// which is why it is not `@State`: the token never sits in a view.
+    private var tokenBinding: Binding<String> {
+        Binding(get: { settings.cloudToken }, set: { settings.cloudToken = $0 })
     }
 
     @ViewBuilder

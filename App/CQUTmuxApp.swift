@@ -46,6 +46,9 @@ struct CQUTmuxApp: App {
                     if ProcessInfo.processInfo.environment["CQUT_DEV_TRANSCRIBE"] != nil {
                         Task.detached { await SpeechDiagnostics.runIfRequested() }
                     }
+                    if ProcessInfo.processInfo.environment["CQUT_DEV_CLOUD_TRANSCRIBE"] != nil {
+                        Task.detached { await SpeechDiagnostics.runCloudIfRequested() }
+                    }
                     // UI runs can skip the permission prompt, which otherwise
                     // covers every screenshot taken in the first seconds.
                     if ProcessInfo.processInfo.environment["CQUT_DEV_NO_NOTIFS"] == "1" { return }
