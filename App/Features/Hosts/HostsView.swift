@@ -107,28 +107,6 @@ private struct HostRow: View {
     }
 }
 
-struct TerminalPlaceholderView: View {
-    let host: Host
-    @Environment(ThemeStore.self) private var themes
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "terminal")
-                .font(.system(size: 44))
-                .foregroundStyle(themes.current.accentColor)
-            Text(host.target)
-                .font(.headline)
-            Text("Terminal surface lands in Phase 1 (SSH + tmux + SwiftTerm).")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-        }
-        .navigationTitle(host.displayName)
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
 #Preview {
     NavigationStack { HostsView() }
         .environment(HostStore())

@@ -7,7 +7,6 @@ struct SettingsView: View {
     enum Route: Hashable {
         case theme, font, cursor, icon, speech, sessions, security, notifications, sync
         case integrations
-        case standIn(String)
     }
 
     @Environment(ThemeStore.self) private var themes
@@ -87,11 +86,6 @@ struct SettingsView: View {
                 case .sync: SyncSettingsView()
                 case .speech: SpeechSettingsView()
                 case .integrations: IntegrationSettingsView()
-                case .standIn(let title): PlaceholderView(
-                    title: title,
-                    systemImage: "gear",
-                    message: "Not built yet."
-                )
                 }
             }
         }
