@@ -9,6 +9,8 @@ struct SettingsView: View {
         case integrations
         case input
         case mux
+        case toolbar
+        case support
     }
 
     @Environment(ThemeStore.self) private var themes
@@ -56,6 +58,9 @@ struct SettingsView: View {
                     NavigationLink(value: Route.cursor) {
                         Label("Cursor", systemImage: "cursorarrow.rays")
                     }
+                    NavigationLink(value: Route.toolbar) {
+                        Label("Toolbar", systemImage: "square.on.square")
+                    }
                     NavigationLink(value: Route.icon) {
                         Label("App Icon", systemImage: "app.badge")
                     }
@@ -78,6 +83,11 @@ struct SettingsView: View {
                         Label("Shell", systemImage: "terminal")
                     }
                 }
+                Section("Help") {
+                    NavigationLink(value: Route.support) {
+                        Label("Support", systemImage: "questionmark.circle")
+                    }
+                }
                 Section("About") {
                     LabeledContent("Version", value: Bundle.main.appVersion)
                     LabeledContent("Hook gateway", value: "127.0.0.1:24543")
@@ -98,6 +108,8 @@ struct SettingsView: View {
                 case .integrations: IntegrationSettingsView()
                 case .input: InputSettingsView()
                 case .mux: MuxSettingsView()
+                case .toolbar: ToolbarSettingsView()
+                case .support: SupportView()
                 }
             }
         }
@@ -119,7 +131,8 @@ struct SettingsView: View {
         guard let tab = ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] else { return nil }
         switch tab {
         case "theme", "font", "speech", "cursor", "icon", "sessions", "security",
-             "notifications", "sync", "integrations", "input", "mux":
+             "notifications", "sync", "integrations", "input", "mux", "toolbar",
+             "support":
             return tab
         default:
             return nil
@@ -140,13 +153,17 @@ struct SettingsView: View {
         case "integrations": IntegrationSettingsView()
         case "input": InputSettingsView()
         case "mux": MuxSettingsView()
+        case "toolbar": ToolbarSettingsView()
+        case "support": SupportView()
         default: SpeechSettingsView()
         }
     }
     #endif
 }
 
-private extension Bundle {
+/// "0.1.0 (1)". Not `private`: the Support screen reports the same string, and
+/// two implementations of it would be two things to keep in step.
+extension Bundle {
     var appVersion: String {
         let v = infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
         let b = infoDictionary?["CFBundleVersion"] as? String ?? "0"
@@ -157,4 +174,5 @@ private extension Bundle {
 #Preview {
     NavigationStack { SettingsView() }
         .environment(ThemeStore())
+        .environment(ToolbarSettings())
 }

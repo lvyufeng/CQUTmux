@@ -156,6 +156,29 @@ final class HookClient {
         }
     }
 
+    /// The gateway's `/health`, as the Support screen shows it.
+    ///
+    /// Kept here rather than assembled in the view because the request has to go
+    /// over the same tunnel the rest of the client uses, with the same bearer
+    /// token — a `URLSession` call from the view would reach the phone's own
+    /// loopback, where there is no gateway at all.
+    func health() async throws -> Health {
+        let payload = try await request("GET", "/health")
+        guard payload.status == 200 else { throw URLError(.badServerResponse) }
+        return try JSONDecoder().decode(Health.self, from: payload.body)
+    }
+
+    /// What `/health` reports. Every field is optional: this is a diagnostic,
+    /// and a gateway a version ahead of the app must still be reportable rather
+    /// than failing to decode at the one moment someone is trying to find out
+    /// what is wrong.
+    struct Health: Decodable {
+        var ok: Bool?
+        var events: Int?
+        var pendingApprovals: Int?
+        var uptime: Int?
+    }
+
     // MARK: - Polling
 
     private func pollLoop() {

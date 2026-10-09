@@ -52,6 +52,7 @@
 | 终端 | 主题 / 字体 / 图标、CJK 输入 | P4 ✅ 主题+字体+图标+CJK |
 | 终端 | **自定义字体导入**（Settings → Font → Import font…，`.ttf/.otf/.ttc`）：**拷贝**进 App 容器（不是引用文档选择器 URL —— 该 URL 只在回调期间有效，终端要天天重新解析），并用**字体自己的 PostScript 名**注册，而不是文件名 | P5 ✅ 规则实测（25）+ 端到端实测 |
 | 外观 | 主题驱动整个 App（chrome/选中/强调色）、主题导入（粘贴/QR/深链）、光标形状与闪烁、CJK 字形回退、备选 App 图标 | P4 ✅ 实测 |
+| 外观 | **Glass Effect**（Settings → Toolbar → Display）：关掉系统玻璃材质、改用主题自身颜色的不透明面。**iOS 26 上是真系统行为**（`.glassEffect` / `buttonStyle(.glass)` 是 26 独有）；**26 以下是诚实的部分生效**——系统自己画的导航栏材质没有关掉的开关，所以设置页直接写明"只影响键盘栏"，而那一条栏是**我们自己的视图**，任何版本都照着切。默认**开**（用 `object(forKey:)` 而非 `bool(forKey:)` 读取，否则未设置的键会读成 false，把每个存量安装的外观重置一遍） | P5 ✅ 规则实测（7）+ 同步配对检查 + 界面实测（开/关两种状态各截一次，预览与键盘栏都跟着变） |
 | 终端 | 鼠标滚轮手势（双指拖动转 wheel）、滚到底收键盘 | P5 ✅ |
 | 会话 | 会话持久化、切后台恢复、断线重连 | P1–P2 |
 | 多路复用 | tmux 集成、会话选择器、jump-to window | P2 |
@@ -78,6 +79,7 @@
 | 宿主 | 网关配置文件 `[gateway]`：发现/用量采集/嵌套 agent 抑制/扫描端口范围；标志优先于文件 | P5 ✅ 实测 |
 | 通知 | 通知设置页：权限状态、暂停（客户端强制）、测试通知、远程推送状态 | P4 ✅ 实测 |
 | 其他 | 远程剪贴板 OSC 52、Tailscale、iPad 分栏 | P5 |
+| 其他 | **Support 页**（Settings → Help → Support）：把报告要用的东西凑齐——App 版本、**硬件标识**（`uname` 的 machine 串，如 `iPhone17,1`；`UIDevice.model` 只肯说 "iPhone"，分不出有机子的那个和没机子的那个）、系统版本、已连接主机与传输方式、**网关健康**（`GET /health`，走已有的那条 SSH 通道，不另开连接）。规则是**先显示再复制**——报告文本以 monospace 原样列在页面上，因为它是从本机状态拼出来的，只有发的人能判断哪一行不该发出去。**不包括**网关 token 与 SSH 私钥，页脚明写 | P5 ✅ 界面实测（文本与设备行）+ `GET /health` 已实装 |
 
 ### 1b. 逐项复核（2026-10-09，对照 getmoshi.app 全部 42 个文档页）
 
@@ -544,6 +546,10 @@ Moshi 把它做成**自己托管的服务**——这是本 App 唯一无法靠�
 后者只能证明宿主和自己一致）；`scripts/pair-check.sh` **36 项**；`scripts/qr-check.sh` **33 项**；`scripts/qr-js-check.sh` **28 项**。
 模拟器截图确认确认页逐字段显示 host/port/user/name、密钥与 token 两项标注正确
 （过程中还学到：`simctl privacy grant camera` 在已安装的 app 上不生效，要全新安装或重启模拟器）。
+
+**Support 页去哪了**：Moshi 的 Support 是一个托管入口（他们的表单/邮箱）。**我们没有任何托管服务**，所以没有可填的邮箱、没有可投的表单——编一个 `support@…` 比留空更糟，因为那会让用户以为报告发出去了。落地为**指向本仓库 issue 追踪器的链接**（`https://github.com/lvyufeng/CQUTmux/issues/new`，真实可点、报告公开可见有人回），加上复制到剪贴板。未验证：真机上的 `uname` machine 串（模拟器里读出来的是宿主架构 `arm64`，不是 `iPhone17,1`——这正是它比 `UIDevice.model` 有用的地方，但我只在模拟器里跑过）。
+
+**顺带修掉一个真 bug**：App 的版本号一直是假的。`project.yml` 写 `MARKETING_VERSION: 0.1.0`，`App/Info.plist` 却把 `CFBundleShortVersionString` 硬编码成 `1.0`——手写的 Info.plist 不会被构建设置覆盖，所以**中途改的版本号一直没生效**，Support 页与设置页 About 里显示的都是这个编造出来的 `1.0`。改成 `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)` 后，构建产物自报 `0.1.0 (1)`，与工程文件一致。
 
 **未验证项（诚实记录）**：本地通知的**投递**无法在模拟器验证（`simctl` 不能授予通知权限，
 仅能确认授权弹窗出现、代码路径执行）；P4/P5 的 UI 均在模拟器以 shim 数据实测，尚未上真机；

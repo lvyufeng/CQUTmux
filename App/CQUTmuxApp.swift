@@ -14,6 +14,7 @@ struct CQUTmuxApp: App {
     @State private var cursor = CursorSettings()
     @State private var icons = AppIconStore()
     @State private var sessionLayout = SessionLayout()
+    @State private var toolbar = ToolbarSettings()
     @State private var security = SecuritySettings()
     @State private var gate = SecuritySettings.Gate()
     @State private var sync = SettingsSync()
@@ -35,6 +36,7 @@ struct CQUTmuxApp: App {
                 .environment(cursor)
                 .environment(icons)
                 .environment(sessionLayout)
+                .environment(toolbar)
                 .environment(security)
                 .environment(gate)
                 .environment(sync)
@@ -123,6 +125,7 @@ struct CQUTmuxApp: App {
             fonts: fonts,
             cursor: cursor,
             layout: sessionLayout,
+            toolbar: toolbar,
             speech: SpeechSettings(),
             integrations: IntegrationSettings(),
             input: InputSettings(),

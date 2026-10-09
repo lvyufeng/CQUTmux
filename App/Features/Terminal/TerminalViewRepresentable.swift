@@ -41,6 +41,7 @@ struct TerminalScreen: View {
     /// also reaches `.connected` — does not attach a second time.
     @State private var didFollowLink = false
     @Environment(ThemeStore.self) private var themes
+    @Environment(ToolbarSettings.self) private var toolbar
     @Environment(TerminalFontStore.self) private var fonts
     @Environment(AgentConnection.self) private var connection
 
@@ -281,7 +282,26 @@ struct TerminalScreen: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
         }
-        .background(.bar)
+        .background(barSurface)
+    }
+
+    /// The key bar's background: the system's material, or an opaque surface in
+    /// the theme's own colour when the glass is turned off.
+    ///
+    /// This is the one toolbar surface the setting can honour on every iOS
+    /// version, because the bar is a view of ours rather than one the system
+    /// draws. See `ToolbarSettings` for why the navigation bars cannot be.
+    ///
+    /// The two bars are stacked in one `safeAreaInset`, so both must agree —
+    /// switching only one leaves a visible seam between two surface treatments
+    /// where the user sees a single bar.
+    @ViewBuilder
+    private var barSurface: some View {
+        if toolbar.glassEffect {
+            Rectangle().fill(.bar)
+        } else {
+            themes.current.barSurface
+        }
     }
 
     private var accessoryBar: some View {
@@ -301,7 +321,7 @@ struct TerminalScreen: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
         }
-        .background(.bar)
+        .background(barSurface)
         .overlay(alignment: .top) {
             if !coordinator.dictationPreview.isEmpty {
                 Text(coordinator.dictationPreview)

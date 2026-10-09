@@ -23,6 +23,7 @@ struct SyncStores {
     let fonts: TerminalFontStore
     let cursor: CursorSettings
     let layout: SessionLayout
+    let toolbar: ToolbarSettings
     let speech: SpeechSettings
     let integrations: IntegrationSettings
     let input: InputSettings
@@ -44,6 +45,7 @@ extension SyncPayload {
         payload.cursorShape = stores.cursor.shape.rawValue
         payload.cursorBlinks = stores.cursor.blinks
         payload.sessionLayout = stores.layout.style.rawValue
+        payload.glassEffect = stores.toolbar.glassEffect
         payload.speechEngine = stores.speech.engine.rawValue
         payload.exportClientEnv = stores.integrations.exportClientEnv
 
@@ -100,6 +102,7 @@ extension SyncPayload {
         if let sessionLayout, let style = SessionLayout.Style(rawValue: sessionLayout) {
             stores.layout.style = style
         }
+        if let glassEffect { stores.toolbar.glassEffect = glassEffect }
         if let speechEngine, let engine = SpeechSettings.Engine(rawValue: speechEngine) {
             stores.speech.engine = engine
         }

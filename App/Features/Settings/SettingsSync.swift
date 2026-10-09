@@ -38,6 +38,10 @@ struct SyncPayload: Codable, Equatable {
     var cursorBlinks: Bool?
 
     var sessionLayout: String?
+    /// Whether the bars use the system's glass material. Travels even though
+    /// only iOS 26 can honour it: a device that cannot should remember the
+    /// choice for a device that can, not silently drop it.
+    var glassEffect: Bool?
     var speechEngine: String?
     /// Whether sessions export the client marker. A preference, not a secret,
     /// like everything else here — see `SyncStores` for what is deliberately

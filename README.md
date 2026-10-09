@@ -21,6 +21,7 @@ See plan: [PLAN.md](PLAN.md).
 | 5 | zellij + herdr, iPad sidebar, browser + simulator preview, gateway token | ✅ |
 | 5 | Easy Pair: `cqutmux pair` makes a key and prints a `cqutmux://pair` QR; the app scans it into a saved host | ✅ |
 | 6 | Apple Watch approvals | ✅ full round trip driven in the watchOS simulator (phone → wrist → approval → `POST /approve/<id>`) |
+| 6 | Glass Effect setting, Support screen | ✅ screens captured in both states; the report text and its destination were read back from the running app |
 
 Each phase was exercised in the simulator against a real sshd on a loopback
 port, with the host gateway live. `scripts/` holds a check script per area;

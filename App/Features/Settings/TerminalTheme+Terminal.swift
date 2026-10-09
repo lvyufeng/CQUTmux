@@ -80,6 +80,18 @@ extension TerminalTheme {
     /// how a theme ends up fighting dark mode instead of agreeing with it.
     var accentColor: SwiftUI.Color { SwiftUI.Color(hex: accent) }
 
+    /// The surface for a bar we draw ourselves when the glass is turned off.
+    ///
+    /// This is not the `chromeBackground` the note above rejects. That would be
+    /// a colour painted on *every* surface, which is how a theme ends up
+    /// disagreeing with the colour scheme it is in. This is one colour, for one
+    /// narrow case — a bar that must stop being translucent — and it is the
+    /// theme's own background, so an opaque bar is the terminal's colour rather
+    /// than a second guess at what "dark" is. The bar and the terminal it sits
+    /// over then share one surface, which is the whole point of the opaque
+    /// option.
+    var barSurface: SwiftUI.Color { backgroundColor }
+
     /// Behind a text selection. Derived when the theme names none: a blend of
     /// background and accent reads as "selected" in both dark and light themes
     /// without needing a constant per theme.
