@@ -48,6 +48,7 @@
 | 终端 | VT/xterm 仿真、滚动、选中、链接可点 | P1 |
 | 终端 | 自定义键盘附件栏 + 硬件键盘 ⌘K/⌘O/⌘1-9 | P1 |
 | 输入 | Option 当 Meta（`InputSettings.optionMeta`）、栏内按键增删排序、D-pad 四向 + 两角可绑定（Esc/Del/^C/收键盘）、接硬件键盘时自动收栏 | P5 ✅ 规则实测 + 端到端实测 |
+| 输入 | **Command History 键**（默认栏外，Settings → Input 可加；More 菜单同入口）：读宿主 `~/.zsh_history` / `~/.bash_history`，两种记录格式（extended/plain）在同一文件里混排都要认，分号按**第一个**切、反斜杠续行按**换行**接回。点选**只打字不回车**——列表是宿主拼的，先读再按 Return。**刻意不做**：与 `/recent-directories` 不同，此路由**不**受 `always_on_discovery` 约束（那是"未经请求就探宿主"，这里是用户自己按的键） | P5 ✅ 规则实测（33）+ 宿主端到端实测 + 界面实测 |
 | 终端 | 手势：swipe 切窗口、pinch 缩放、双击 Tab | P3 |
 | 终端 | 主题 / 字体 / 图标、CJK 输入 | P4 ✅ 主题+字体+图标+CJK |
 | 终端 | **自定义字体导入**（Settings → Font → Import font…，`.ttf/.otf/.ttc`）：**拷贝**进 App 容器（不是引用文档选择器 URL —— 该 URL 只在回调期间有效，终端要天天重新解析），并用**字体自己的 PostScript 名**注册，而不是文件名 | P5 ✅ 规则实测（25）+ 端到端实测 |

@@ -102,7 +102,7 @@ struct GoToDirectoryView: View {
     /// user has never opened look like one they had.
     @ViewBuilder
     private var discoveredSection: some View {
-        if let client {
+        if client != nil {
             if let board = discovered, board.enabled {
                 if !board.directories.isEmpty {
                     Section {

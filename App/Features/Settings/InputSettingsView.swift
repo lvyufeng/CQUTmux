@@ -113,6 +113,7 @@ struct InputSettingsView: View {
         case .clipboard: "doc.on.doc"
         case .pasteImage: "photo"
         case .sessions: "rectangle.grid.1x2"
+        case .history: "clock.arrow.circlepath"
         case .dictation: "mic"
         case .customKeys: "star"
         }

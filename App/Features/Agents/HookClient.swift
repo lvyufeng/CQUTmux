@@ -348,6 +348,19 @@ final class HookClient {
         return try JSONDecoder().decode(RecentDirectoryBoard.self, from: payload.body)
     }
 
+    // MARK: - Command history
+
+    /// The commands recently run on the host, newest first.
+    ///
+    /// Not gated on `always_on_discovery` the way recent directories are: the
+    /// history file is read to answer a question the user asked by pressing the
+    /// key, whereas discovery scans the disk on a timer whether or not anyone
+    /// is looking.
+    func commandHistory(limit: Int = 200) async throws -> CommandHistoryBoard {
+        let payload = try await request("GET", "/history?limit=\(limit)")
+        return try JSONDecoder().decode(CommandHistoryBoard.self, from: payload.body)
+    }
+
     // MARK: - Simulator preview
 
     func simulators() async throws -> SimulatorBoard {
@@ -492,6 +505,44 @@ struct RecentDirectoryBoard: Codable {
     var available: Bool = true
     var error: String?
     var directories: [Entry] = []
+}
+
+/// The commands recently run on the host, read from the shell's own history
+/// file. Typing a long command on a phone keyboard is the thing this exists to
+/// avoid, so the list is only useful if it is the *real* history — see
+/// `host/cqutmux-hook/history.mjs` for the parsing rules.
+struct CommandHistoryBoard: Codable {
+    struct Entry: Codable, Identifiable {
+        var command: String
+        /// Milliseconds since the epoch, or `null` for a plain-format record,
+        /// which carries no time. A missing time is not an error.
+        var at: Double?
+        /// Which shell's history file it came from.
+        var shell: String
+
+        // The command is the identity: the host deduplicates by it, so two
+        // rows with the same text would be the same row.
+        var id: String { command }
+
+        /// The first line, for a row label that does not collapse into a
+        /// multi-line blur. The rest is shown in the detail row.
+        var firstLine: String { command.split(separator: "\n").first.map(String.init) ?? command }
+
+        var isMultiline: Bool { command.contains("\n") }
+
+        /// The remaining lines, joined for a secondary label. Empty when the
+        /// command is a single line.
+        var continuation: String {
+            let lines = command.split(separator: "\n", omittingEmptySubsequences: false)
+            return lines.dropFirst().joined(separator: " ⏎ ")
+        }
+
+        var hasTime: Bool { at != nil }
+    }
+
+    var available: Bool = true
+    var error: String?
+    var commands: [Entry] = []
 }
 
 struct SimulatorBoard: Codable {

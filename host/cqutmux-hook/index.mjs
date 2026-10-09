@@ -29,6 +29,7 @@ import { createPushService } from './push.mjs'
 import { herdrStatus, herdrSnapshot, herdrApprove, herdrRead, herdrFocusPane } from './herdr.mjs'
 import { readTranscript } from './transcript.mjs'
 import { recentDirectories } from './recent.mjs'
+import { commandHistory } from './history.mjs'
 import { terminal as qrTerminal } from './qr.mjs'
 
 const run = promisify(execFile)
@@ -739,6 +740,23 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { enabled: false, available: true, ports: [] })
     }
     return json(res, 200, { enabled: true, ...(await listeningPorts()) })
+  }
+
+  if (req.method === 'GET' && url.pathname === '/history') {
+    // Deliberately *not* gated on `always-on-discovery`: that flag is about
+    // probing the host unasked, and this is the user asking for their own
+    // shell's history on a screen they just opened.
+    try {
+      const limit = Math.min(200, Number(url.searchParams.get('limit') || 200))
+      return json(res, 200, { available: true, ...(await commandHistory({ limit })) })
+    } catch (error) {
+      // A history file that cannot be read is an empty list, not a failed
+      // request: the screen it feeds is a picker, and the fallback — typing
+      // the command — is always available.
+      return json(res, 200, {
+        available: false, commands: [], error: String(error?.message || error),
+      })
+    }
   }
 
   if (req.method === 'GET' && url.pathname === '/recent-directories') {

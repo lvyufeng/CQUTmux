@@ -41,6 +41,7 @@ final class InputSettings {
         case dpad
         case clipboard, pasteImage
         case sessions
+        case history
         case dictation
         case customKeys
 
@@ -59,6 +60,7 @@ final class InputSettings {
             case .clipboard: "Paste"
             case .pasteImage: "Image"
             case .sessions: "Sessions"
+            case .history: "History"
             case .dictation: "Dictation"
             case .customKeys: "Custom keys"
             }
@@ -70,13 +72,22 @@ final class InputSettings {
         .control, .escape, .tab, .arrows, .clipboard, .pasteImage, .sessions, .dictation, .customKeys,
     ]
 
+    /// Items that exist but are not on a fresh bar.
+    ///
+    /// Kept separate from `defaultItems` so the default list stays exactly
+    /// Moshi's: the toolbar has one documented default, and adding a key to it
+    /// on a guess would make "Moshi's order" a claim this list no longer
+    /// supports. History is reachable from the bar's own settings and the
+    /// More menu, which is enough for a key not everyone needs.
+    static let optInItems: [Item] = [.history]
+
     /// Every item the bar can show, whether or not it is on by default.
     ///
     /// Kept in one place so the settings screen and `defaultItems` cannot drift:
     /// an item that exists but is missing from `defaultItems` is off for a new
     /// install and on for nobody, which is a switch nobody can turn on.
     static var allItems: [Item] {
-        var seen: [Item] = defaultItems
+        var seen: [Item] = defaultItems + optInItems
         for item in Item.allCases where !seen.contains(item) { seen.append(item) }
         return seen
     }

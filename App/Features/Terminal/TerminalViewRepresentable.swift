@@ -41,7 +41,11 @@ struct TerminalScreen: View {
     @State private var showGestures = false
     @State private var showJumpTo = false
     @State private var showHistory = false
-    @State private var showSpeech = false
+    /// The shell's command history, which is a separate list from the dictation
+    /// one above despite both being called "history": one is what was said out
+    /// loud and lives on the phone, the other is what was run and lives on the
+    /// host.
+    @State private var showCommandHistory = false
     /// Set once the link's attach command has been sent, so a reconnect — which
     /// also reaches `.connected` — does not attach a second time.
     @State private var didFollowLink = false
@@ -105,6 +109,13 @@ struct TerminalScreen: View {
                         } label: {
                             Label("Dictation History", systemImage: "waveform")
                         }
+                        if connection.client != nil {
+                            Button {
+                                showCommandHistory = true
+                            } label: {
+                                Label("Command History", systemImage: "clock.arrow.circlepath")
+                            }
+                        }
                         // Only herdr can be addressed by pane, so offering
                         // Jump To without a gateway connection would be a menu
                         // item that can only fail.
@@ -127,8 +138,20 @@ struct TerminalScreen: View {
             .sheet(isPresented: $showGestures) {
                 NavigationStack { GestureEditorView(store: gestures) }
             }
-            .sheet(isPresented: $showSpeech) {
-                NavigationStack { SpeechSettingsView() }
+            .sheet(isPresented: $showCommandHistory) {
+                if let client = connection.client {
+                    NavigationStack {
+                        CommandHistoryView(client: client) { command in
+                            // Typed, not run: the command lands in the shell's
+                            // line editor with the cursor after it, so it can be
+                            // read and edited before Return. Sending the newline
+                            // would run a command chosen from a list the host
+                            // assembled, which is one keystroke away from
+                            // running something the user did not read.
+                            coordinator.terminal?.sendRaw(Data(command.utf8))
+                        }
+                    }
+                }
             }
             .sheet(isPresented: $showHistory) {
                 NavigationStack {
@@ -238,6 +261,9 @@ struct TerminalScreen: View {
                 }
                 if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "history" {
                     showHistory = true
+                }
+                if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "command-history" {
+                    showCommandHistory = true
                 }
                 // Seeds the history sheet from the outside, so the screen can
                 // be checked without a working microphone and a working voice.
@@ -494,6 +520,24 @@ struct TerminalScreen: View {
         }
     }
 
+    /// Opens the list of commands recently run on the host.
+    ///
+    /// Only offered when there is a host to ask: the history lives on the
+    /// machine the shell runs on, and a button that opens an empty sheet on a
+    /// direct SSH connection would be a lie about where the list comes from.
+    @ViewBuilder
+    private var historyButton: some View {
+        if connection.client != nil {
+            Button { showHistory = true } label: {
+                Image(systemName: "clock.arrow.circlepath").frame(width: 40, height: 32)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.roundedRectangle(radius: 6))
+            .accessibilityLabel("Command history")
+            .accessibilityHint("Recent commands run on the host")
+        }
+    }
+
     @ViewBuilder
     private var sessionPicker: some View {
         if let client = connection.client {
@@ -589,6 +633,7 @@ struct TerminalScreen: View {
         case .clipboard: icon("doc.on.doc", CtrlKey.clipboard)
         case .pasteImage: pasteImageButton
         case .sessions: sessionsButton
+        case .history: historyButton
         case .dictation: dictationButton
         case .customKeys: customShortcutKeys
         }

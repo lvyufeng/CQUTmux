@@ -155,3 +155,18 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   switcher; a long one, or a fast flick, minimizes: disconnect and pop back to
   the host list. The host's tmux/zellij/herdr session is untouched, which is
   what makes minimizing safe to offer as a gesture.
+
+- **The Command History key** — a bar key and a More-menu entry that open the
+  host's own shell history, read from `~/.zsh_history` / `~/.bash_history` by a
+  new `GET /history`. Both record formats are handled, in the same file, since a
+  shell can be upgraded under a history file: the extended `: <epoch>:<dur>;cmd`
+  prefix is stripped by splitting on the *first* semicolon — a command may
+  contain several — and a line ending in a backslash is joined back with a
+  newline, because a `for` loop folded onto one line means something else. The
+  key is opt-in rather than on the default bar: Moshi documents one default bar
+  and adding a key to it on a guess would make that list no longer Moshi's.
+  Unlike `/recent-directories` the route is *not* gated on
+  `always_on_discovery` — that flag is about probing the host unasked, and this
+  is the user asking. A tapped command is typed into the line editor and not
+  run: it is one keystroke away from running something chosen from a list the
+  host assembled, so it is left to be read first.
