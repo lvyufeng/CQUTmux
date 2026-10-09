@@ -11,6 +11,7 @@ struct SettingsView: View {
         case mux
         case toolbar
         case support
+        case agents
     }
 
     @Environment(ThemeStore.self) private var themes
@@ -83,6 +84,11 @@ struct SettingsView: View {
                         Label("Shell", systemImage: "terminal")
                     }
                 }
+                Section("Agents") {
+                    NavigationLink(value: Route.agents) {
+                        Label("Agents", systemImage: "person.2.badge.gearshape")
+                    }
+                }
                 Section("Help") {
                     NavigationLink(value: Route.support) {
                         Label("Support", systemImage: "questionmark.circle")
@@ -110,6 +116,7 @@ struct SettingsView: View {
                 case .mux: MuxSettingsView()
                 case .toolbar: ToolbarSettingsView()
                 case .support: SupportView()
+                case .agents: AgentsSettingsView()
                 }
             }
         }
@@ -132,7 +139,7 @@ struct SettingsView: View {
         switch tab {
         case "theme", "font", "speech", "cursor", "icon", "sessions", "security",
              "notifications", "sync", "integrations", "input", "mux", "toolbar",
-             "support":
+             "support", "agents":
             return tab
         default:
             return nil
@@ -155,6 +162,7 @@ struct SettingsView: View {
         case "mux": MuxSettingsView()
         case "toolbar": ToolbarSettingsView()
         case "support": SupportView()
+        case "agents": AgentsSettingsView()
         default: SpeechSettingsView()
         }
     }

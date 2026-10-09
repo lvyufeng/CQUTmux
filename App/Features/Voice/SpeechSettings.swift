@@ -64,6 +64,45 @@ final class SpeechSettings {
     private static let key = "cqutmux.speech.engine"
     private static let modelKey = "cqutmux.speech.whisperModel"
     private static let parakeetModelKey = "cqutmux.speech.parakeetModel"
+    private static let languageKey = "cqutmux.speech.language"
+    private static let autoSendKey = "cqutmux.speech.autoSend"
+
+    /// A language pinned for dictation, or nil to follow the device.
+    ///
+    /// Stored as a BCP-47 language code ("en", "de"). Nil is the default and
+    /// means `Locale.current`, which is right for almost everyone: a person
+    /// dictating on their own phone speaks the phone's language. It exists for
+    /// the case where they do not — a bilingual user whose device is in one
+    /// language but who is dictating in another, where the engine would
+    /// otherwise transcribe into the wrong one and not say so.
+    ///
+    /// Only meaningful for engines that accept a language; Apple's recogniser
+    /// and the cloud endpoint get the locale, and a monolingual whisper model
+    /// ignores it. The screen says which is which rather than hiding the
+    /// control, because "why is this here" is a smaller problem than a setting
+    /// that appears on one engine and vanishes on another.
+    var languageCode: String? {
+        didSet { defaults.set(languageCode, forKey: Self.languageKey) }
+    }
+
+    /// Whether a finished transcription is submitted to the shell straight
+    /// away.
+    ///
+    /// On by default, which is what the feature has always done. Off leaves the
+    /// text in the input line for review before Return — the difference between
+    /// speaking a command and running one, which matters most when the phrase
+    /// was long enough that a misheard word is plausible.
+    var autoSend: Bool {
+        didSet { defaults.set(autoSend, forKey: Self.autoSendKey) }
+    }
+
+    /// The locale dictation should run in: the pinned language or the device's.
+    var dictationLocale: Locale {
+        guard let languageCode, !languageCode.isEmpty,
+              let locale = Locale(identifier: languageCode) as Locale?
+        else { return .current }
+        return locale
+    }
 
     var engine: Engine {
         didSet { defaults.set(engine.rawValue, forKey: Self.key) }
@@ -149,6 +188,11 @@ final class SpeechSettings {
             ?? WhisperModel.parakeetModels.first?.name
             ?? ""
         cloudEndpoint = defaults.string(forKey: Self.endpointKey) ?? ""
+        let storedLanguage = defaults.string(forKey: Self.languageKey)
+        languageCode = (storedLanguage?.isEmpty ?? true) ? nil : storedLanguage
+        // Default on, and read with `object(forKey:)`: the unset key must not
+        // flip everyone who has ever dictated to review-before-send.
+        autoSend = defaults.object(forKey: Self.autoSendKey) as? Bool ?? true
     }
 }
 
@@ -312,6 +356,13 @@ final class Dictation {
         guard settings.model.multilingual else { return nil }
         return locale.language.languageCode?.identifier
     }
+
+    /// The locale to dictate in: the user's pinned language, or the device's.
+    ///
+    /// `toggle` and `start` default to `.current`, so every caller that omits
+    /// the argument was getting the device locale and the language setting
+    /// would have been stored and never used. The callers here pass this.
+    var locale: Locale { settings.dictationLocale }
 }
 
 /// The `VoiceDictation` interface, narrowed to what `Dictation` needs.

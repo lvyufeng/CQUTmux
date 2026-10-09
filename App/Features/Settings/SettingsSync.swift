@@ -43,6 +43,14 @@ struct SyncPayload: Codable, Equatable {
     /// choice for a device that can, not silently drop it.
     var glassEffect: Bool?
     var speechEngine: String?
+    /// The pinned dictation language, or nil for the device's own. Both this
+    /// and `autoSend` travel: they are preferences about how one person
+    /// dictates, which does not change between their devices. (The Agents
+    /// screen's keep-awake and tab-visibility settings deliberately do *not*
+    /// sync — those describe how one particular phone is set up on a desk.)
+    var speechLanguage: String?
+    /// Whether a finished phrase is submitted without review.
+    var speechAutoSend: Bool?
     /// Whether sessions export the client marker. A preference, not a secret,
     /// like everything else here — see `SyncStores` for what is deliberately
     /// absent.

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The agent feed. Mirrors Moshi's Inbox: a host picker, pending approvals
 /// with Allow / Deny, and a running log of what agents have been doing.
@@ -6,6 +7,7 @@ struct InboxView: View {
     @Environment(ThemeStore.self) private var themes
     @Environment(HostStore.self) private var store
     @Environment(AgentConnection.self) private var connection
+    @Environment(AppSettings.self) private var app
 
     @State private var segment: Segment = .inbox
     @State private var activity = ActivityManager()
@@ -43,6 +45,16 @@ struct InboxView: View {
             }
         }
         .navigationTitle("Inbox")
+        // Held while this screen is in front, released the moment it is not —
+        // via the `onChange` as well as `onDisappear`, because a tab switch does
+        // not always run the disappearance before the next appearance, and a
+        // phone left awake by a screen nobody is looking at is the exact failure
+        // this setting is meant to avoid.
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = app.keepScreenOn }
+        .onChange(of: app.keepScreenOn) { _, on in
+            UIApplication.shared.isIdleTimerDisabled = on
+        }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .task {
             #if DEBUG
             if connection.client == nil,

@@ -36,6 +36,18 @@ struct SpeechSettingsView: View {
                 modelSection
             }
 
+            languageSection
+
+            Section {
+                Toggle("Send after dictating", isOn: $settings.autoSend)
+            } header: {
+                Label("After dictating", systemImage: "text.badge.checkmark")
+            } footer: {
+                Text("On, a finished phrase is run as soon as you stop speaking. Off, "
+                     + "it is typed into the line and waits for Return, so you can fix "
+                     + "a misheard word before the shell sees it.")
+            }
+
             Section {
                 LabeledContent("Permission", value: "Microphone")
             } footer: {
@@ -101,6 +113,68 @@ struct SpeechSettingsView: View {
             }
         }
     }
+
+    /// The language dictation listens in: automatic, or pinned.
+    ///
+    /// Shown for every engine, because hiding it above one and revealing it
+    /// below another is how a setting becomes folklore. What each engine does
+    /// with it differs, and the footer says which is which rather than letting
+    /// someone pin a language on a monolingual model and hear nothing change.
+    private var languageSection: some View {
+        Section {
+            Picker("Language", selection: languageBinding) {
+                Text("Automatic (device language)").tag(String?.none)
+                ForEach(Self.languages, id: \.code) { language in
+                    Text(language.name).tag(String?.some(language.code))
+                }
+            }
+        } header: {
+            Label("Language", systemImage: "globe")
+        } footer: {
+            Text(languageFooter)
+        }
+    }
+
+    private var languageBinding: Binding<String?> {
+        Binding(get: { settings.languageCode }, set: { settings.languageCode = $0 })
+    }
+
+    private var languageFooter: String {
+        switch settings.engine {
+        case .apple:
+            return "Apple's recogniser follows the keyboard and device settings; "
+                + "pinning a language here overrides the locale it is asked for."
+        case .cloud:
+            return "Sent to your endpoint with the request. Whether it is honoured "
+                + "depends on the service."
+        case .parakeet:
+            return "Parakeet is trained on English and European languages."
+        case .whisper:
+            // The one place the model choice and the language choice are the
+            // same decision, so it is worth saying outright.
+            return settings.model.multilingual
+                ? "The selected model is multilingual, so a pinned language is passed to it."
+                : "The selected model is English-only (its name ends in .en), so it "
+                    + "ignores this and transcribes English whatever you pick."
+        }
+    }
+
+    /// The languages worth offering. Not the full BCP-47 list: a picker with
+    /// six hundred entries is one nobody scrolls, and these are the ones the
+    /// bundled models can actually serve.
+    private static let languages: [(code: String, name: String)] = [
+        ("en", "English"),
+        ("de", "German"),
+        ("fr", "French"),
+        ("es", "Spanish"),
+        ("it", "Italian"),
+        ("pt", "Portuguese"),
+        ("nl", "Dutch"),
+        ("ru", "Russian"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+        ("zh", "Chinese"),
+    ]
 
     /// Reads through the Keychain on every keystroke and writes on every one,
     /// which is why it is not `@State`: the token never sits in a view.

@@ -7,6 +7,7 @@ struct RootView: View {
     @Environment(HostStore.self) private var store
     @Environment(AgentConnection.self) private var connection
     @Environment(ThemeStore.self) private var themes
+    @Environment(AppSettings.self) private var app
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     enum Tab: String, CaseIterable, Hashable {
@@ -107,9 +108,23 @@ struct RootView: View {
         return true
     }
 
+    /// The tabs to show, in `Tab.allCases` order.
+    ///
+    /// The Code panel is the one that can be hidden, and hiding is what
+    /// `AppSettings.hidesCodeTab` means. If the selected tab is the one being
+    /// hidden the selection is moved off it, or the app would show a tab it no
+    /// longer lists.
+    private var visibleTabs: [Tab] {
+        let all = Tab.allCases.filter { $0 != .code || !app.hidesCodeTab }
+        if !all.contains(selection), let first = all.first {
+            DispatchQueue.main.async { self.selection = first }
+        }
+        return all
+    }
+
     private var tabs: some View {
         TabView(selection: $selection) {
-            ForEach(Tab.allCases, id: \.self) { tab in
+            ForEach(visibleTabs, id: \.self) { tab in
                 destination(tab)
                     .tabItem { Label(tab.title, systemImage: tab.symbol) }
                     .tag(tab)
@@ -120,7 +135,7 @@ struct RootView: View {
     private var sidebar: some View {
         NavigationSplitView {
             List {
-                ForEach(Tab.allCases, id: \.self) { tab in
+                ForEach(visibleTabs, id: \.self) { tab in
                     Button {
                         selection = tab
                     } label: {
@@ -159,7 +174,7 @@ struct RootView: View {
         case "usages": return .usages
         case "theme", "font", "speech", "settings", "cursor", "icon", "sessions",
              "security", "notifications", "sync", "integrations", "input", "mux",
-             "toolbar", "support":
+             "toolbar", "support", "agents":
             return .settings
         default: break
         }

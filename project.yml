@@ -131,6 +131,14 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: CQUTmux
+        # The file XcodeGen writes is the app's real Info.plist — it is not
+        # merged with one checked in elsewhere — so a version written by hand
+        # into App/Info.plist is overwritten on the next generate. That is how
+        # this app spent its life reporting a version of `1.0` that nobody had
+        # set while project.yml said 0.1.0. These two lines are the only place
+        # the version is written; both read the build settings above.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         # The preview loads http://127.0.0.1:<bridged port>, which ATS blocks by
         # default. It is loopback-only and the bytes are carried inside the SSH
         # session, so allowing local networking here exposes nothing.

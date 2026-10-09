@@ -181,7 +181,16 @@ struct TerminalScreen: View {
                             // dictated text and not typed or pasted text, which
                             // is what keeps a password out of the history.
                             transcriptionHistory.record(text)
-                            coordinator.terminal?.sendDictatedLine(text)
+                            // With auto-send off the phrase is typed into the
+                            // line and left there: the user is asking to read
+                            // what was heard before it runs, so submitting it
+                            // would be the one thing the setting exists to
+                            // prevent.
+                            if settings.autoSend {
+                                coordinator.terminal?.sendDictatedLine(text)
+                            } else {
+                                coordinator.terminal?.typeText(text)
+                            }
                         }
                     }
                     dictation = engine
@@ -498,7 +507,7 @@ struct TerminalScreen: View {
         // and a button that claimed otherwise would invite a second press.
         let listening = dictation?.isListening ?? false
         return Button {
-            dictation?.toggle()
+            dictation?.toggle(locale: dictation?.locale ?? .current)
         } label: {
             Image(systemName: listening ? "waveform" : "mic")
                 .symbolEffect(.variableColor, isActive: listening)
@@ -519,7 +528,7 @@ struct TerminalScreen: View {
             if dictation?.isListening == true { dictation?.stop() }
         } onPressingChanged: { pressing in
             if pressing {
-                if dictation?.isListening == false { dictation?.start() }
+                if dictation?.isListening == false { dictation?.start(locale: dictation?.locale ?? .current) }
             } else if dictation?.isListening == true {
                 dictation?.stop()
             }

@@ -47,6 +47,8 @@ extension SyncPayload {
         payload.sessionLayout = stores.layout.style.rawValue
         payload.glassEffect = stores.toolbar.glassEffect
         payload.speechEngine = stores.speech.engine.rawValue
+        payload.speechLanguage = stores.speech.languageCode
+        payload.speechAutoSend = stores.speech.autoSend
         payload.exportClientEnv = stores.integrations.exportClientEnv
 
         payload.optionIsMeta = stores.input.optionIsMeta
@@ -110,6 +112,10 @@ extension SyncPayload {
             stores.layout.style = style
         }
         if let glassEffect { stores.toolbar.glassEffect = glassEffect }
+        if let speechLanguage {
+            stores.speech.languageCode = speechLanguage.isEmpty ? nil : speechLanguage
+        }
+        if let speechAutoSend { stores.speech.autoSend = speechAutoSend }
         if let speechEngine, let engine = SpeechSettings.Engine(rawValue: speechEngine) {
             stores.speech.engine = engine
         }
