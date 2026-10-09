@@ -13,6 +13,8 @@ trap 'rm -rf "$OUT"' EXIT
 
 cp "$ROOT/App/Features/Terminal/ShortcutGrammar.swift" "$OUT/"
 cp "$ROOT/App/Features/Terminal/GestureBinding.swift" "$OUT/"
+cp "$ROOT/App/Features/Code/RecentDirectories.swift" "$OUT/"
+cp "$ROOT/App/Features/Hosts/Host.swift" "$OUT/"
 
 swiftc -O -o "$OUT/check" \
   "$OUT/ShortcutGrammar.swift" \
@@ -25,8 +27,15 @@ swiftc -O -o "$OUT/gestures" \
   "$OUT/GestureBinding.swift" \
   "$ROOT/scripts/shortcut-grammar/gestures.swift"
 
+# Recents needs `Host` for the per-host key, and nothing else from the app.
+swiftc -O -o "$OUT/recents" \
+  "$OUT/RecentDirectories.swift" \
+  "$OUT/Host.swift" \
+  "$ROOT/scripts/shortcut-grammar/recents.swift"
+
 "$OUT/check" | tee "$OUT/results"
 "$OUT/gestures" | tee -a "$OUT/results"
+"$OUT/recents" | tee -a "$OUT/results"
 
 if grep -q '^FAIL' "$OUT/results"; then
   echo

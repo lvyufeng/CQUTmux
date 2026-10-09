@@ -79,7 +79,13 @@ herdr 宿主侧对接 + **App 侧会话选择器与 Jump To 树**（含直连 so
 `DeepLink` 解析 + `CFBundleURLTypes` + `onOpenURL` → 切到终端页 → 解析主机 → 导航进会话 → 连上后自动 attach，
 `scripts/deeplink-test.sh` 端到端实测：宿主 shell 确实执行了 attach 命令；非法路由弹「无法打开链接」且不切页）。
 **顺带修掉另一个真实缺陷**：快捷键编辑器此前**只有调试环境变量能打开**，也就是用户在 App 里根本进不去；
-现在终端页右上角有了真正入口（Custom Keys / Gestures）。
+现在终端页右上角有了真正入口（Custom Keys / Gestures / Jump To）。
+
+**又修掉一个跨页缺陷**：Terminal 页与 Code 页此前**都不会自己建连**，只靠 `RootView` 的启动 task，
+而该 task 与「从磁盘读 HostStore」存在竞态；竞态输了时，先进这两个页会让会话选择器、图片粘贴、
+以及 Code 页的整个文件面板**整场不可用**（只有 Inbox 页自己会连）。现两页各自保证：
+Terminal 页 `connection.client == nil` 时连到当前主机；Code 页在**只有一个主机**时自动连
+（多个时保留选择器——替用户猜该浏览哪台机器比让他点一下更糟）。
 
 **再修掉一个隐私缺陷（听写）**：原实现写着"音频与转写不出设备"，但 `requiresOnDeviceRecognition` 只是**请求**——
 当该语言没有装离线模型时，识别器**不会报错**，而是静默回退到 Apple 服务器上传音频。
@@ -93,10 +99,14 @@ herdr 宿主侧对接 + **App 侧会话选择器与 Jump To 树**（含直连 so
 （Inbox 页自己会连，所以只在 Terminal 页暴露）。改为由需要这条隧道的 Terminal 页自己保证。
 
 **仍未做**：端侧听写只有 Apple Speech（无 whisper/parakeet 本地模型；
-且已改为**离线模型不可用即拒绝启动**，见下）、
-无最近目录、无原生 Windows、无 macOS 菜单栏 / Moshi Desktop（属另一产品）；
-herdr 的 **Jump To 树**已接（见下表）：workspace→tab→pane 三级，并把焦点真正落到选中的 pane；
-Tailscale 不需集成（Moshi 文档亦确认：它工作在系统层，用 100.x 地址直连即可）。
+且已改为**离线模型不可用即拒绝启动**，见下）；
+无原生 Windows、无 macOS 菜单栏 / Moshi Desktop（属另一产品）；
+Tailscale 不需集成（Moshi 文档亦确认：它工作在系统层，用 100.x 地址直连即可）；
+SSH agent forwarding 与 APNs 投递受环境所限（见下表），非代码问题。
+
+**最近目录已接并实测**：`RecentDirectoryStore`（按 `host:port` 分机存储，最多 12 条，
+重访上浮去重，`.` 与空串不记）+ `GoToDirectoryView`（可直接输路径，或从最近列表点选），
+入口在 Code 页的 Preview 菜单里；点目录进入时也会记录。13 项用例无需模拟器。
 
 ## 2. 技术选型
 

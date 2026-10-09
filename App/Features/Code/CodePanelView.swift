@@ -16,6 +16,8 @@ struct CodePanelView: View {
     @State private var path = "."
     @State private var showPreview = false
     @State private var showSimulator = false
+    @State private var showGoTo = false
+    @State private var recents = RecentDirectoryStore()
 
     private enum Mode: String, CaseIterable { case files = "Files", changes = "Changes", history = "History" }
 
@@ -53,10 +55,23 @@ struct CodePanelView: View {
         }
         .navigationTitle("Code")
         .navigationBarTitleDisplayMode(.inline)
+        // With one host there is no choice to make, so the tab connects
+        // instead of asking. With several it keeps the picker: guessing which
+        // machine to browse would be worse than a tap.
+        .task {
+            if connection.client == nil, store.hosts.count == 1, let only = store.hosts.first {
+                connection.connect(to: only)
+            }
+        }
         .toolbar {
             if connection.client != nil {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
+                        Button {
+                            showGoTo = true
+                        } label: {
+                            Label("Go to directory", systemImage: "arrow.right.to.line")
+                        }
                         Button {
                             showPreview = true
                         } label: {
@@ -70,6 +85,40 @@ struct CodePanelView: View {
                     } label: {
                         Label("Preview", systemImage: "play.rectangle")
                     }
+                }
+            }
+        }
+        .task {
+            #if DEBUG
+            // Recents cannot be built by tapping in a script, so a run can
+            // seed a directory the same way the tap path would record it.
+            if let seeded = ProcessInfo.processInfo.environment["CQUT_DEV_RECENT"] {
+                for _ in 0..<40 where connection.host == nil {
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
+                if let host = connection.host {
+                    seeded.split(separator: ",").map(String.init).forEach {
+                        recents.record($0, for: host)
+                    }
+                }
+            }
+            // Opened only once a host is known: the sheet is built around the
+            // connected host, and presenting it before the connection lands
+            // gives an empty sheet rather than an error.
+            if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "goto" {
+                for _ in 0..<40 where connection.host == nil {
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
+                showGoTo = connection.host != nil
+            }
+            #endif
+        }
+        .sheet(isPresented: $showGoTo) {
+            if let host = connection.host {
+                GoToDirectoryView(host: host, current: path, recents: recents) { next in
+                    path = next
+                    recents.record(next, for: host)
+                    Task { if let client = connection.client { await loadFiles(client) } }
                 }
             }
         }
@@ -139,6 +188,10 @@ struct CodePanelView: View {
                         let next = listing.path == "." ? entry.name : "\(listing.path)/\(entry.name)"
                         if entry.dir {
                             path = next
+                            // Recorded here as well as from "Go to": a
+                            // directory reached by tapping is one the user is
+                            // just as likely to want back.
+                            if let host = connection.host { recents.record(next, for: host) }
                             Task { await loadFiles(client) }
                         } else {
                             Task { openFile = try? await client.readFile(path: next) }
