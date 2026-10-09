@@ -362,15 +362,26 @@ CQUTmux/
 | P5b Jump host | ✅ 已合并并**实测** | 在跳跃主机上开 `direct-tcpip` 到目标的 22 端口，把目标 SSH 连接跑在该通道内（`ByteBufferToSSHDataHandler` / `SSHDataToByteBufferHandler` 做 `ByteBuffer`↔`SSHChannelData` 互转）。实测：两条本机 sshd (`:2222` 为跳板，`:2233` 为目标)，`lsof` 确认应用只连 `:2222`、`:2222`→`:2233` 由 sshd 转发；杀掉跳板会话后 UI 报 `jump host … Connection refused` 并自动重连成功；不带跳板的直连路径回归通过 |
 | P6 Apple Watch | ✅ 已在 watchOS 模拟器**实测** | `CQUTmuxWatch` watchOS target：待审批列表 + 批准/拒绝，经 `WCSession` 与手机同步，决定回落到手机上的 `HookClient.resolve`。**已跑通完整回路**：手机 Inbox 的待审批经 `updateApplicationContext` 推到表盘并渲染；表盘上的决定经 `sendMessage` 回到手机，手机发出 `POST /approve/3`，网关侧 `decision=allow` + `resolvedAt` 落库。**模拟器限制（非 App 缺陷）**：`simctl` 只把 watch app 装进表盘容器，不会执行真机上的"手机代表表盘安装"那一步握手，于是 phone 侧 WCD 的 `WCDStoredInstalledWatchApps` 始终为空，`updateApplicationContext` 直接以 `WCErrorCodeWatchAppNotInstalled` 失败（`appInstalled: NO`）。实测前需先手工补上该记录并重启 `com.apple.wcd`；代码本身无需改动。真机由系统完成该握手，不存在此问题 |
 
-**已知构建缺陷（真机 iOS 构建，非代码问题，模拟器不受影响）**：`xcodebuild -destination 'generic/platform=iOS'` 失败于
-`Watch/Assets.xcassets: error: The stickers icon set, app icon set, or icon stack named "AppIcon" did not have any applicable content`。
-**已确诊根因**：watch target 的 product type 是泛用的 `com.apple.product-type.application`（应为 watch 专用类型），
-于是真机嵌入步骤用 **iphoneos 平台**去编 watch 的 asset catalog（actool 收到 `--platform iphoneos --target-device iphone/ipad`），
-watch 图标集在 iOS 平台下"没有适用内容"。**试过的修法都不成立**：改用 `application.watchapp2` 后
-模拟器构建反而坏掉（`Multiple commands produce .../Debug-watchsimulator/CQUTmuxWatch.app/CQUTmuxWatch`，
-`CreateUniversalBinary normal arm64 x86_64` 与某个 `CopyAndPreserveArchs` 命令争同一个输出）；
-加 `ARCHS: arm64_32` 则模拟器切片无效。**这是已存在的缺陷，不是本轮引入**（`git stash -u` 后 HEAD 复现同样错误），
-模拟器上的 `scripts/build.sh` 全绿。要修得整体重做 watch 的嵌入方式，不是本轮的范围。
+**真机构建：此前记的"已知缺陷"是错的，本轮撤回。**
+旧记载说 `generic/platform=iOS` 失败于
+`AppIcon did not have any applicable content`，根因归为 watch target 的 product type 是泛用的
+`com.apple.product-type.application`（应为 watch 专用类型），导致真机嵌入步骤用 **iphoneos 平台**去编 watch 的 asset catalog。
+**本轮重测：不成立。**留在此处的旧派生目录会把这个错误喂回来，删掉后：
+
+- `rm -rf build && scripts/build.sh`（模拟器）→ **BUILD SUCCEEDED**
+- `xcodebuild -destination 'generic/platform=iOS'`（全新 `-derivedDataPath`）→ **BUILD SUCCEEDED**，
+  产物 `CQUTmux.app/CQUTmux` 为 arm64，`CQUTmux.app/Watch/CQUTmuxWatch.app` 正确嵌入，
+  watch 二进制的 Info.plist 带 `WKApplication=true`、`CFBundleIdentifier=app.cqutmux.ios.watchkitapp`，
+  架构 fat（arm64 + arm64_32）——即真机切片是齐的。
+- 把同样的真机构建放进**已经被模拟器构建用过的** `build/` 目录，也成功。
+
+即：这不是缺陷，是一份旧派生数据。当时"非本轮引入、模拟器全绿"的自证（`git stash -u` 后 HEAD 复现）**没能区分"HEAD 有缺陷"与"HEAD 加脏派生数据有缺陷"**，
+而这两者恰恰是这次要分清的东西。教训记在这里：复现构建错误前先清派生目录，否则复现的是缓存。）
+
+**唯一仍然成立的一半**：`type: application.watchapp2` 确实会让**模拟器**构建坏在
+`Multiple commands produce .../Debug-watchsimulator/CQUTmuxWatch.app/CQUTmuxWatch`（本轮重测复现，去掉 `embed: true` 也一样）。
+但既然当前泛用类型两边都能编，这一条就没有要修的对象了——**保持现状**。
+（真正没验证过的是**签名后的真机安装**：本机无付费账号，`CODE_SIGNING_ALLOWED=NO` 只能证明到"编译与嵌入正确"这一步。）
 
 **环境事实**：本机工具链为 Swift 6.4 / Xcode 27 / Node 22，**且 clang（Apple clang 21）一直都在**——
 此前"无 C 编译工具链"的记载是错的，缺的只是构建工具（cmake/protoc 等，pip 可装），这正是 Mosh 一度被误判为受阻的原因。
