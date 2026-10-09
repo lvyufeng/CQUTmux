@@ -11,6 +11,14 @@ struct InboxView: View {
     @State private var activity = ActivityManager()
     @State private var ledger = NotificationLedger()
     @State private var sawFirstPage = false
+    /// Rows the user swiped away. Kept here rather than discarded, because the
+    /// row is rebuilt from the event list on every poll and would otherwise
+    /// come straight back.
+    @State private var archived: Set<String> = []
+    /// Archived rows are behind a disclosure rather than gone: "Archived" is a
+    /// place to check what happened, and a row that vanishes with no way to
+    /// look it up is how the inbox becomes untrustworthy.
+    @State private var showArchived = false
 
     private enum Segment: String, CaseIterable { case inbox = "Inbox", usages = "Usages" }
 
@@ -98,13 +106,14 @@ struct InboxView: View {
                         }
                     }
                 }
-                ForEach(client.events) { event in
-                    EventRow(
-                        event: event,
-                        resolve: { allow in client.resolve(event, allow: allow) },
-                        answer: { value in client.resolve(event, answer: value) }
-                    )
-                }
+                let board = InboxBoard(events: client.events, manuallyArchived: archived)
+                BoardView(
+                    board: board,
+                    resolve: { event, allow in client.resolve(event, allow: allow) },
+                    answer: { event, value in client.resolve(event, answer: value) },
+                    archive: { archived.insert($0.id) },
+                    showArchived: $showArchived
+                )
             }
             .listStyle(.insetGrouped)
             .onChange(of: client.events) { _, events in
@@ -124,92 +133,229 @@ struct InboxView: View {
     }
 }
 
-private struct EventRow: View {
-    let event: AgentEvent
-    let resolve: (Bool) -> Void
-    /// Answers a question by choosing an option.
-    var answer: (String) -> Void = { _ in }
+/// The board: three columns, one row per session, and an archive underneath.
+///
+/// Moshi's shape, and the reason for it is that the flat list it replaced made
+/// the user do the reading. Twenty events from one session were twenty rows, so
+/// the one thing waiting on an answer sat somewhere among them, and it never
+/// left the list afterwards either.
+private struct BoardView: View {
+    let board: InboxBoard
+    let resolve: (AgentEvent, Bool) -> Void
+    let answer: (AgentEvent, String) -> Void
+    let archive: (InboxBoard.Row) -> Void
+    @Binding var showArchived: Bool
+
+    var body: some View {
+        ForEach(InboxBoard.Column.allCases) { column in
+            let groups = board.groups(in: column)
+            // A column with nothing in it is not drawn at all: three headings,
+            // two of them empty, is a screen that looks broken rather than
+            // quiet. `groups` is never empty for a column with no rows — it
+            // returns one empty group, so emptiness has to be judged on the
+            // rows.
+            if !groups.flatMap(\.rows).isEmpty {
+                Section(column.title) {
+                    ForEach(groups, id: \.project) { group in
+                        // A header only when the column really spans projects.
+                        // One unnamed group means there is nothing to separate,
+                        // and a lone heading over every row is noise.
+                        if !group.project.isEmpty && groups.count > 1 {
+                            Text(group.project)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(group.rows) { row in
+                            SessionRow(row: row, resolve: resolve, answer: answer)
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        archive(row)
+                                    } label: {
+                                        Label("Archive", systemImage: "archivebox")
+                                    }
+                                }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !board.archived.isEmpty {
+            Section {
+                if showArchived {
+                    ForEach(board.archived) { row in
+                        SessionRow(row: row, resolve: resolve, answer: answer)
+                    }
+                }
+            } header: {
+                // A disclosure rather than a second screen: the archive is
+                // consulted, not lived in.
+                Button {
+                    withAnimation { showArchived.toggle() }
+                } label: {
+                    Label(
+                        showArchived ? "Hide archived" : "Archived (\(board.archived.count))",
+                        systemImage: showArchived ? "chevron.down" : "chevron.right"
+                    )
+                }
+                .textCase(nil)
+            }
+        }
+    }
+}
+
+/// One session's row: what it is, what it needs, and the history folded away.
+private struct SessionRow: View {
+    let row: InboxBoard.Row
+    let resolve: (AgentEvent, Bool) -> Void
+    let answer: (AgentEvent, String) -> Void
+    @State private var expanded = false
     @Environment(ThemeStore.self) private var themes
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .foregroundStyle(event.isPending ? .orange : themes.current.accentColor)
+                Image(systemName: row.pending != nil ? "hand.raised.fill" : icon)
+                    .foregroundStyle(row.pending != nil ? .orange : themes.current.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(event.displayTitle.isEmpty ? event.sourceLabel : event.displayTitle)
-                        .font(.subheadline.weight(.medium))
-                    Text(trailingLabel)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    Text(row.title).font(.subheadline.weight(.medium))
+                    // The newest event is the row's own summary; the count says
+                    // how much is folded behind it, so a row is never mistaken
+                    // for a conversation of one.
+                    Text(summary).font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
-            if !event.displayBody.isEmpty {
-                Text(event.displayBody)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(4)
+
+            if let event = row.pending {
+                EventActions(event: event, resolve: resolve, answer: answer)
             }
-            if event.isPending {
-                // A question is answered by picking one of its options; asking
-                // it as Allow/Deny would throw away the choice it was asked to
-                // make. Stacked rather than in a row because option labels are
-                // sentences, and a row of sentences truncates into ambiguity.
-                if event.isQuestion {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(event.options) { option in
-                            Button(option.label) { answer(option.value) }
-                                .buttonStyle(.bordered)
-                        }
-                    }
-                    .controlSize(.small)
-                } else {
-                    HStack(spacing: 10) {
-                        Button("Allow") { resolve(true) }
-                            .buttonStyle(.borderedProminent)
-                            .tint(themes.current.accentColor)
-                        Button("Deny", role: .destructive) { resolve(false) }
-                            .buttonStyle(.bordered)
-                    }
-                    .controlSize(.small)
+
+            if row.events.count > 1 {
+                Button {
+                    withAnimation { expanded.toggle() }
+                } label: {
+                    Label(
+                        expanded ? "Hide \(row.events.count) events" : "\(row.events.count) events",
+                        systemImage: expanded ? "chevron.down" : "chevron.right"
+                    )
+                    .font(.caption2)
                 }
-            } else if let chosen = event.chosenOption {
-                Label("Chose: \(chosen.label)", systemImage: "checkmark.circle")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else if let decision = event.decision {
-                Label(decision == "allow" ? "Approved" : "Denied",
-                      systemImage: decision == "allow" ? "checkmark.circle" : "xmark.circle")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+
+                if expanded {
+                    // Oldest last, which is the order a log is read in. The
+                    // pending event is left out: it is already on the row in
+                    // full, and repeating it inside the history would suggest
+                    // two things are waiting.
+                    ForEach(row.events.filter { $0.id != row.pending?.id }) { event in
+                        CompactEventRow(event: event, resolve: resolve, answer: answer)
+                    }
+                }
             }
         }
         .padding(.vertical, 2)
     }
 
-    /// Who sent it and when. A teammate gets its own label — the name of the
-/// teammate, then the agent it is a teammate *of* — because "Claude Code ·
-/// 2m ago" on a message the main agent never wrote is the kind of wrong that
-/// reads as right.
-    private var trailingLabel: String {
-        if let teammate = event.teammateName {
-            return "Team \(teammate) · \(event.sourceLabel) · \(relativeTime)"
-        }
-        return "\(event.sourceLabel) · \(relativeTime)"
-    }
-
     private var icon: String {
-        guard !event.isTeammateMessage else { return "person.2" }
-        return switch event.kind {
-        case .approval: "hand.raised"
-        case .notice: "bell"
+        switch row.column {
+        case .needsYou: "hand.raised"
+        case .working: "gearshape.2"
+        case .done: "checkmark.circle"
         }
     }
 
-    private var relativeTime: String {
-        guard let date = event.date else { return "" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
+    private var summary: String {
+        guard let newest = row.events.first else { return row.subtitle }
+        let when = relative(newest.date)
+        let who = newest.sourceLabel
+        let what = newest.displayTitle.isEmpty ? "activity" : newest.displayTitle
+        return when.isEmpty ? "\(who) · \(what)" : "\(who) · \(what) · \(when)"
     }
+}
+
+/// A folded event: enough to recognise it, not enough to take the row over.
+private struct CompactEventRow: View {
+    let event: AgentEvent
+    let resolve: (AgentEvent, Bool) -> Void
+    let answer: (AgentEvent, String) -> Void
+    @Environment(ThemeStore.self) private var themes
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: event.isPending ? "hand.raised" : event.kind == .approval ? "checkmark.circle" : "bell")
+                    .font(.caption2)
+                    .foregroundStyle(event.isPending ? .orange : themes.current.accentColor)
+                Text(event.displayTitle.isEmpty ? event.sourceLabel : event.displayTitle)
+                    .font(.caption)
+                    .lineLimit(2)
+                Spacer(minLength: 6)
+                Text(relative(event.date)).font(.caption2).foregroundStyle(.secondary)
+            }
+            if !event.displayBody.isEmpty {
+                Text(event.displayBody).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+            }
+            if event.isPending {
+                EventActions(event: event, resolve: resolve, answer: answer)
+            } else if let chosen = event.chosenOption {
+                Text("Chose: \(chosen.label)").font(.caption2).foregroundStyle(.secondary)
+            } else if let decision = event.decision {
+                Text(decision == "allow" ? "Approved" : "Denied")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.leading, 14)
+        .padding(.vertical, 2)
+    }
+}
+
+/// The controls for answering an event, shared by the row's own pending event
+/// and by a pending one found inside the expanded history.
+private struct EventActions: View {
+    let event: AgentEvent
+    let resolve: (AgentEvent, Bool) -> Void
+    let answer: (AgentEvent, String) -> Void
+    @Environment(ThemeStore.self) private var themes
+
+    var body: some View {
+        // A question is answered by picking one of its options; asking it as
+        // Allow/Deny would throw away the choice it was asked to make. Stacked
+        // rather than in a row because option labels are sentences, and a row
+        // of sentences truncates into ambiguity.
+        if event.isQuestion {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(event.options) { option in
+                    Button(option.label) { answer(event, option.value) }
+                        .buttonStyle(.bordered)
+                }
+            }
+            .controlSize(.small)
+        } else {
+            HStack(spacing: 10) {
+                Button("Allow") { resolve(event, true) }
+                    .buttonStyle(.borderedProminent)
+                    .tint(themes.current.accentColor)
+                Button("Deny", role: .destructive) { resolve(event, false) }
+                    .buttonStyle(.bordered)
+            }
+            .controlSize(.small)
+        }
+    }
+}
+
+/// Relative time, or empty when the timestamp could not be read — a blank is
+/// better than "now", which is what a nil-relative fallback would claim.
+///
+/// A timestamp in the future is read as "now". The host writes these, and a
+/// device whose clock is a few seconds behind it turns every event that has
+/// just arrived into "in 3s" — which reads as a countdown to something that has
+/// already happened.
+func relative(_ date: Date?) -> String {
+    guard let date else { return "" }
+    let now = Date()
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .abbreviated
+    return formatter.localizedString(for: min(date, now), relativeTo: now)
 }

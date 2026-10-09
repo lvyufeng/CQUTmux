@@ -61,6 +61,7 @@
 | Agent 层 | Chat View（Inbox）、approvals、teammate 卡片 | P3 |
 | Agent 层 | Diff Viewer、文件浏览器、浏览器预览、模拟器预览 | P3 |
 | Agent 层 | Usages 看板（5h/7d 用量与 burn pace） | P4 |
+| Agent 层 | **Inbox 看板**：Needs you / Working / Done 三栏、**一个会话一行**（新事件并入而不是堆行）、按项目分组、**归档**（完成 10 分钟、任何东西 6 小时、左滑立即归档） | P5 ✅ 规则实测（58）+ 端到端实测 |
 | 通知 | 本地/远程推送、webhook 告警 | P4 |
 | 系统 | Live Activity / Dynamic Island / Apple Watch | P4 / P6 ✅ 表盘实测 |
 | 系统 | **Apple Watch 两个页签**：Inbox（原有）+ **Usage**（每账号限额环、显示最紧的窗口、色带绿/橙/红、含"更新于"）；手机每 3 分钟推一次用量到 `applicationContext`，与审批各自独立 | P6 ✅ 界面实测 + 端到端回归 |
@@ -121,6 +122,39 @@ Option 想修饰的那个字母。因此「含任何 ASCII 就整串放行」是
 里记录，**不挂在终端输入通路上**——后者会把用户在 `sudo` 提示符下键入的密码也收进去，而没有人要"听写历史"时
 期望是这个。`scripts/history-check.sh` 24 项覆盖上限（含"正好等于上限时不丢"）、折叠、重启往返、以及
 **存储损坏时退化为空而不是崩溃**。
+
+**Inbox 看板**（Moshi `docs/agents-usages`：三栏板 + 会话合并 + 归档）。此前 Inbox 是**一条事件一行的流水**，
+那等于把阅读的活交给用户：一个会话二十条事件就是二十行，真正在等你回答的那条混在中间，而且从此永不消失。
+现按 Moshi 的规则重做——`InboxBoard.swift`（只依赖 Foundation，故 58 项规则可无宿主驱动）：
+
+- **三栏**：有待答 approval/问题 → Needs you；**已答的 approval → Working 而非 Done**（答了意味着 agent 刚开始做，
+  不是做完）；其余 → Done。本 App 自己的"approval allow"通知**不参与定栏**——它是完成形状的，读成完成会让每行
+  在刚被回答的瞬间跳进 Done，Working 永远看不到。
+- **一行一会话**：按 `data.session` 合并（agent 的 hook 本来就在发）；没有 session 的旧 hook 退化成"每个 source 一行"，
+  而不是每条事件一行。新的在前，**读不出时间戳的行排最后**（放进一个损坏的行比漏掉它更糟）。
+- **归档**：完成 10 分钟、任何东西 6 小时封顶、左滑立即归档；**待答的行不受 10 分钟约束**——
+  Moshi 的规则是它一直 Active 直到被回答或宿主超时，六小时是"宿主超时"的替身。
+- **按项目分组**：用 hook 里的 `cwd` 的**最后一段**（`/Users/…/work/api` → `api`；表头要说的是哪个仓库，不是完整路径）。
+  只有一个项目时不画表头——一行分组标题盖住每一行只是噪音。
+
+**这一轮抓到三个真 bug，其中两个只有真机跑起来才会露出来**：
+
+1. **给 `Payload` 加 `CodingKeys` 时漏了 `options`**。Swift 里一旦手写 `CodingKeys` 就必须列全，漏掉的键**静默变成 nil**
+   ——于是每个"多选问题"都渲染成 Allow/Deny。它看起来和"agent 没给选项"完全一样，所以 47 项单测全绿也照样错；
+   **是我看截图才发现的**（`scripts/inbox/main.swift` 里的检查是**直接构造 Payload**，根本不走 decode，看不见这类错）。
+   现在补了一段**按网关真实写法 decode** 的用例，这条路由才有人守。
+2. **别处回答的 approval 永远卡在 Needs you**。轮询是 `id > lastId`，**已经在本地的事件永远不会被重发**，
+   所以"后台去看表盘/另一台手机回答/宿主超时"之后，这个设备只收到一条网关的 notice，而那条 notice 原本只带 `for: id`。
+   真机实测：后台点掉 approval 1，回来那行**仍在 Needs you**。修法是两层：网关把 `decision`/`answer`/`session`
+   带在 notice 上，App 侧再把 notice 折回它指向的那条事件（`InboxBoard.folding`），然后**把 notice 本身丢掉**——
+   它是我们的记账，不是用户会话里发生的事，留在行里会抢占行摘要（截图上一行写着 "CQUTmux · approval allow"）。
+3. **`HookClient.resolve` 把网关返回的那条已更新记录扔了**。`/approve/:id` 返回的是**改过的**那条，客户端却忽略了返回值；
+   加上轮询不会再发旧 id，本机自己点的回答也不会反映到自己界面上。现在合并回来。
+
+另外顺手修掉 `relative()` 把"未来几秒"显示成 "in 3s" 的问题（设备时钟比宿主慢几秒，刚到的每条事件都成了倒计时）。
+
+**One honest limit**: the 10-minute and 6-hour expiries are checked as rules but not observed live — none of the live
+screenshots ran for ten minutes, so "an old row archives itself" is reasoned and unit-checked, not seen.
 
 **自定义字体导入**（Moshi 的 Settings → Terminal Fonts → Import font…，Pro 功能）。
 两处取舍都会**先能跑、以后再坏**，所以都写进了检查脚本：

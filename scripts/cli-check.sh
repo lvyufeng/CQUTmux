@@ -274,6 +274,30 @@ assert e.get('answer') == 'say \"hi\"', 'a quoted option value did not survive: 
 " || fail "an option value containing a quote did not survive"
 ok "an option value containing a quote survives the round trip"
 
+# The notice the gateway emits beside the decision is what tells the *other*
+# devices. The poll asks for `id > lastId`, so an approval a device already
+# holds is never re-sent with its decision on it: an approval answered on the
+# watch left the row on the phone in "Needs you" forever. The decision therefore
+# has to ride on the notice, along with the session so the row it belongs to can
+# be found.
+post '{"source":"claude-code","kind":"approval","title":"ship it?","data":{"session":"sess-zz"}}' > "$OUT/r.json"
+RID="$(python3 -I -c "import json;print(json.load(open('$OUT/r.json'))['id'])")"
+curl -s -X POST -H 'content-type: application/json' -d '{"decision":"deny"}' \
+  "http://127.0.0.1:$CFG_PORT/approve/$RID" > /dev/null
+curl -s "http://127.0.0.1:$CFG_PORT/events" | python3 -I -c "
+import json, sys
+events = json.load(sys.stdin)['events']
+notice = [e for e in events if e.get('source') == 'app' and e.get('data', {}).get('for') == int('$RID')]
+assert notice, 'resolving an approval emitted no notice for the other devices'
+data = notice[0]['data']
+assert data.get('decision') == 'deny', \
+    'the notice does not say how it was decided: ' + json.dumps(data)
+assert data.get('session') == 'sess-zz', \
+    'the notice does not say which session it belongs to: ' + json.dumps(data)
+" || fail "the resolution notice does not carry what other devices need"
+ok "the resolution notice carries the decision and the session"
+
+
 # The suppression must be off by default, or every existing install changes
 # behaviour on upgrade.
 DEFAULT_PORT=$((PORT + 4))

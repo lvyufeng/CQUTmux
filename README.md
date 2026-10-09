@@ -58,7 +58,7 @@ and simulator previews.
 ```
 App/                    SwiftUI app (features grouped by domain)
   Features/Terminal/    the terminal, accessory bar, session picker, Jump To
-  Features/Agents/      inbox, gateway client, notifications, Live Activity
+  Features/Agents/      inbox board (Needs you / Working / Done), gateway client, notifications, Live Activity
   Features/Code/        files, diffs, git history, pasted files
   Features/Preview/     browser bridge and simulator preview
   Features/Security/    Keychain, key management

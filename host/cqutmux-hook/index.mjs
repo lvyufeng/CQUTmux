@@ -872,7 +872,16 @@ const server = createServer(async (req, res) => {
     if (answer) target.answer = answer
     target.resolvedAt = new Date().toISOString()
     if (target.kind === 'approval') pendingApprovals = Math.max(0, pendingApprovals - 1)
-    emit({ source: 'app', kind: 'notice', title: `approval ${decision}`, data: { for: id } })
+    // Carry the resolved event's session along with its id. The id is enough to
+    // tie the notice to what it resolves, but the session is what a board
+    // merges rows on, and a client that only looks at sessions would otherwise
+    // open a second row for the answer.
+    emit({
+      source: 'app',
+      kind: 'notice',
+      title: `approval ${decision}`,
+      data: { for: id, session: target.data?.session ?? null, decision, answer: answer || null },
+    })
     return json(res, 200, target)
   }
 

@@ -231,7 +231,16 @@ final class HookClient {
             // nothing", with nothing to see.
             struct Body: Encodable { let decision: String; let answer: String? }
             guard let body = try? JSONEncoder().encode(Body(decision: decision, answer: answer)) else { return }
-            _ = try? await self.request("POST", "/approve/\(event.id)", body: body)
+            guard let payload = try? await self.request("POST", "/approve/\(event.id)", body: body) else { return }
+            // The gateway answers with the *mutated* record, and this used to
+            // throw it away. That left the local copy pending forever: the poll
+            // asks for `id > lastId`, so an event the client already holds is
+            // never re-sent, and an approval answered on the phone stayed in
+            // "Needs you" until the app was relaunched. The one screen a user
+            // acts on was the one that did not reflect their action.
+            if let updated = try? JSONDecoder().decode(AgentEvent.self, from: payload.body) {
+                self.merge([updated])
+            }
         }
     }
 
