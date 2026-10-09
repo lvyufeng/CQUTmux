@@ -121,7 +121,26 @@ export function messageFromRecord(record) {
     at: record.timestamp || null,
     blocks,
     model: record.message?.model || null,
+    usage: numericUsage(record.message?.usage),
   }
+}
+
+/**
+ * The token counts on an assistant turn, as numbers.
+ *
+ * Passed through wholesale rather than picked apart here: the key set belongs
+ * to the agent and drifts between releases, and the app's `ContextWindow` reads
+ * only the four it knows. Numbers only — a string where a count is expected
+ * would be carried to the phone and then summed as zero, which reads as an
+ * empty context window rather than as a malformed field.
+ */
+function numericUsage(usage) {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return null
+  const out = {}
+  for (const [key, value] of Object.entries(usage)) {
+    if (typeof value === 'number' && Number.isFinite(value)) out[key] = value
+  }
+  return Object.keys(out).length ? out : null
 }
 
 /** Parses a whole transcript file's text. Never throws. */

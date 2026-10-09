@@ -72,7 +72,7 @@ These are ordinary features that simply have not been built:
 - Chat View: Markdown/code/image rendering, approval bar, mini-diffs. (Composer now exists as Chat Mode — see the progress list.)
 - Diff viewer: side-by-side layout, syntax highlighting, commit browsing,
   remembering the open file, terminal-font reuse.
-- Watch: grouping, usage complication, freshness.
+- Watch: grouping, usage complication, freshness (the context ring now feeds the data the complication would show).
 - Voice: language picker, auto-send toggle.
 - Command-history key, keyboard show/hide key (the latter now added).
 - Windows host support (PowerShell/herdr.exe probe).
@@ -424,3 +424,35 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   against a real sshd: `CQUT_DEV_COMPOSE` drives the view's own `sendComposed`
   and the host runs the command, and `CQUT_DEV_CHAT_MODE=1` screenshots the
   composer in place of the key bar.
+
+- **The Inbox context-window ring.** Each row now carries a small ring and a
+  percentage showing how full the agent's context window is. The number is not
+  in the events the gateway emits — those carry no token counts — so it is read
+  from the agent's own transcript log, the same log the Chat view reads.
+
+  The arithmetic is the part worth getting right, and it lives in a
+  Foundation-only `ContextWindow` for that reason. The window is the **last**
+  turn's `input_tokens + cache_read + cache_creation + output_tokens`, not a sum
+  across turns: input tokens are re-sent every turn, so adding them up counts
+  the same window once per message and shows a healthy session as permanently
+  full — a ring that is useless while looking plausible. A turn reporting only
+  zeros is skipped rather than drawn at 0% (an agent mid-compaction would
+  otherwise claim an empty context), the fraction clamps to 1 so an over-limit
+  reading reads as full rather than past the end, and a zero limit yields
+  nothing rather than dividing by zero.
+
+  The denominator is the one honest assumption: the log records how many tokens
+  each turn used but never how many fit. So the window size is a setting
+  (Settings → Agents → Context window, default 200k, zero hides the ring), and
+  the footer says outright that it is an assumption to set to your model.
+
+  The ring appears only once a reading has arrived. A session whose log the
+  gateway cannot read leaves the slot empty rather than drawing against a number
+  nobody measured. Readings are cached one per directory, because a transcript
+  read is a file read on the host and the Inbox polls every few seconds — a
+  per-row fetch would be a lot of traffic for a number that changes once per
+  agent turn. Verified on the simulator against a real gateway and a real
+  transcript log: the row shows 91% in the warning colour for a turn of 181k of
+  200k tokens. `scripts/context-window-check.sh` pins the arithmetic, and
+  `scripts/transcript-check.sh` gained the cases that ensure the gateway passes
+  numeric usage through and drops a count that arrives as a string.

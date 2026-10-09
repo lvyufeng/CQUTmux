@@ -124,6 +124,38 @@ const errored = parseTranscript(JSON.stringify({ type: 'user', uuid: 'u11', mess
   { type: 'tool_result', tool_use_id: 't11', content: 'boom', is_error: true } ] } }))
 ok(errored[0].blocks[0].isError === true, 'a failed tool result is marked as an error')
 
+// MARK: - Token usage rides along
+
+// The Inbox context ring reads tokens from here, not from the events the
+// gateway emits — the events carry no counts. So the usage block has to come
+// through on assistant turns.
+const withUsage = parseTranscript(JSON.stringify({ type: 'assistant', uuid: 'a12',
+  message: { role: 'assistant', model: 'claude', content: [{ type: 'text', text: 'done' }],
+    usage: { input_tokens: 100, cache_read_input_tokens: 20, cache_creation_input_tokens: 5,
+             output_tokens: 7, service_tier: 'standard', iterations: [1, 2] } } }))
+ok(withUsage[0].usage && withUsage[0].usage.input_tokens === 100,
+   'an assistant turn carries its usage block')
+ok(withUsage[0].usage.cache_read_input_tokens === 20
+   && withUsage[0].usage.cache_creation_input_tokens === 5
+   && withUsage[0].usage.output_tokens === 7,
+   'and every token count, not just the first')
+ok(withUsage[0].usage.service_tier === undefined && withUsage[0].usage.iterations === undefined,
+   'non-numeric usage fields are dropped, not carried as-is')
+
+// A count that arrives as a string would be summed as zero on the phone, which
+// reads as an empty context window rather than as a malformed field.
+const stringy = parseTranscript(JSON.stringify({ type: 'assistant', uuid: 'a13',
+  message: { role: 'assistant', content: [{ type: 'text', text: 'x' }],
+    usage: { input_tokens: '100', output_tokens: 7 } } }))
+ok(stringy[0].usage && stringy[0].usage.input_tokens === undefined
+   && stringy[0].usage.output_tokens === 7,
+   'a numeric-looking string is dropped while the real numbers survive')
+
+// A turn with no usage must not sprout one.
+const noUsage = parseTranscript(JSON.stringify({ type: 'user', uuid: 'u14',
+  message: { role: 'user', content: 'hello' } }))
+ok(noUsage[0].usage === null, 'a message with no usage reports none')
+
 console.log('')
 console.log('TRANSCRIPT_PASS  (' + pass + ' checks)')
 " || fail "the transcript reader did not pass its checks"

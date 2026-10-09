@@ -52,6 +52,11 @@ struct InboxBoard {
         var title: String
         var subtitle: String
         var project: String?
+        /// The session's working directory on the host, when it reported one.
+        /// Kept in full rather than only its last component, because it is what
+        /// the transcript is read by — the context-window ring needs the whole
+        /// path while the header only needs the project name.
+        var directory: String?
         var column: Column
         /// Newest first.
         var events: [AgentEvent]
@@ -276,6 +281,7 @@ struct InboxBoard {
         }
 
         let project = byRecency.last { $0.projectName != nil }?.projectName
+        let directory = byRecency.last { $0.data?.cwd?.isEmpty == false }?.data?.cwd
         let source = deciding?.sourceLabel ?? "Host"
 
         return Row(
@@ -283,6 +289,7 @@ struct InboxBoard {
             title: project ?? source,
             subtitle: project == nil ? (newest?.sourceLabel ?? "") : source,
             project: project,
+            directory: directory,
             column: column,
             events: byRecency.reversed(),
             pending: pending,

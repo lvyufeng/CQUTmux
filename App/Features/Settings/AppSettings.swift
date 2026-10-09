@@ -12,6 +12,7 @@ final class AppSettings {
         static let hidesCodeTab = "cqutmux.home.hidesCodeTab"
         static let hidesFiles = "cqutmux.code.hidesFiles"
         static let keepAwake = "cqutmux.agents.keepScreenOn"
+        static let contextLimit = "cqutmux.agents.contextLimit"
     }
 
     private let store: UserDefaults
@@ -46,10 +47,28 @@ final class AppSettings {
         didSet { store.set(hidesFiles, forKey: Key.hidesFiles) }
     }
 
+    /// The context-window size the Inbox ring measures against.
+    ///
+    /// Not discoverable from the agent's log, which records how many tokens each
+    /// turn used but never how many fit. A wrong denominator shows the ring at
+    /// the wrong fullness with nothing to indicate it, so the value is editable
+    /// and the settings screen says outright that it is an assumption. Zero
+    /// means "do not draw the ring", which is also how the row reads when the
+    /// number is not wanted.
+    var contextLimit: Int {
+        didSet { store.set(contextLimit, forKey: Key.contextLimit) }
+    }
+
     init(store: UserDefaults = .standard) {
         self.store = store
         hidesCodeTab = store.bool(forKey: Key.hidesCodeTab)
         hidesFiles = store.bool(forKey: Key.hidesFiles)
         keepScreenOn = store.bool(forKey: Key.keepAwake)
+        // Absent and zero must not collapse: absent means "never chosen" and
+        // has to default to the assumed window, while an explicit zero means
+        // the user turned the ring off. `integer(forKey:)` cannot tell them
+        // apart, and reading a deliberate zero as unset would turn the ring
+        // back on at every relaunch.
+        contextLimit = store.object(forKey: Key.contextLimit) as? Int ?? ContextWindow.defaultLimit
     }
 }

@@ -46,6 +46,11 @@ struct AgentMessage: Codable, Identifiable, Hashable {
     var at: String?
     var blocks: [AgentBlock]
     var model: String?
+    /// The token usage this turn reported, when it reported any. Carried as a
+    /// free-form map rather than four named fields because the agent's key set
+    /// drifts between releases; `ContextWindow.tokens(from:)` reads the keys it
+    /// knows and ignores the rest. Absent on user and tool messages.
+    var usage: [String: Int]?
 
     var date: Date? { at.flatMap(ISODate.parse) }
 

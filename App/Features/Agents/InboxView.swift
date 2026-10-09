@@ -12,6 +12,7 @@ struct InboxView: View {
     @State private var segment: Segment = .inbox
     @State private var activity = ActivityManager()
     @State private var ledger = NotificationLedger()
+    @State private var context = ContextStore()
     @State private var sawFirstPage = false
     /// Rows the user swiped away. Kept here rather than discarded, because the
     /// row is rebuilt from the event list on every poll and would otherwise
@@ -128,10 +129,27 @@ struct InboxView: View {
                     resolve: { event, allow in client.resolve(event, allow: allow) },
                     answer: { event, value in client.resolve(event, answer: value) },
                     archive: { archived.insert($0.id) },
-                    showArchived: $showArchived
+                    showArchived: $showArchived,
+                    context: context
                 )
+                // The ring reads the agent's transcript for tokens the events
+                // do not carry, so it is fetched here once per session rather
+                // than per row per poll. Driven off the board's own rows so it
+                // follows the sessions actually on screen, not the whole host.
+                .task(id: contextKey(board)) {
+                    await context.refresh(
+                        directories: board.active.compactMap(\.directory),
+                        via: client,
+                        limit: app.contextLimit
+                    )
+                }
             }
             .listStyle(.insetGrouped)
+            .onChange(of: app.contextLimit) { _, _ in
+                // A new denominator invalidates every fraction, so the readings
+                // are dropped and the task above refetches against the new one.
+                context.invalidate()
+            }
             .onChange(of: client.events) { _, events in
                 let hostName = connection.host?.displayName ?? "Host"
                 activity.update(hostName: hostName, events: events)
@@ -147,6 +165,13 @@ struct InboxView: View {
             }
         }
     }
+
+    /// Identity for the fetch task: the set of directories currently on the
+    /// board, so a session appearing or leaving re-runs the pass and a repaint
+    /// that changes nothing does not.
+    private func contextKey(_ board: InboxBoard) -> String {
+        board.active.compactMap(\.directory).sorted().joined(separator: "|") + "#\(app.contextLimit)"
+    }
 }
 
 /// The board: three columns, one row per session, and an archive underneath.
@@ -161,6 +186,9 @@ private struct BoardView: View {
     let answer: (AgentEvent, String) -> Void
     let archive: (InboxBoard.Row) -> Void
     @Binding var showArchived: Bool
+    /// Shared, so a reading fetched for one row is there for its group header
+    /// and for the row again after a repaint, rather than once per appearance.
+    let context: ContextStore
 
     var body: some View {
         ForEach(InboxBoard.Column.allCases) { column in
@@ -182,7 +210,7 @@ private struct BoardView: View {
                                 .foregroundStyle(.secondary)
                         }
                         ForEach(group.rows) { row in
-                            SessionRow(row: row, resolve: resolve, answer: answer)
+                            SessionRow(row: row, resolve: resolve, answer: answer, context: context)
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) {
                                         archive(row)
@@ -200,7 +228,7 @@ private struct BoardView: View {
             Section {
                 if showArchived {
                     ForEach(board.archived) { row in
-                        SessionRow(row: row, resolve: resolve, answer: answer)
+                        SessionRow(row: row, resolve: resolve, answer: answer, context: context)
                     }
                 }
             } header: {
@@ -225,6 +253,7 @@ private struct SessionRow: View {
     let row: InboxBoard.Row
     let resolve: (AgentEvent, Bool) -> Void
     let answer: (AgentEvent, String) -> Void
+    let context: ContextStore
     @State private var expanded = false
     @Environment(ThemeStore.self) private var themes
 
@@ -240,6 +269,14 @@ private struct SessionRow: View {
                     // for a conversation of one.
                     Text(summary).font(.caption2).foregroundStyle(.secondary)
                         .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                // Only once a reading has arrived. A session the gateway cannot
+                // read leaves the slot empty rather than drawing a ring against
+                // a number nobody measured.
+                if let directory = row.directory,
+                   let usage = context.reading(for: directory) {
+                    ContextRing(usage: usage)
                 }
             }
 
