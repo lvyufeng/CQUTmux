@@ -53,6 +53,7 @@
 | 终端 | 鼠标滚轮手势（双指拖动转 wheel）、滚到底收键盘 | P5 ✅ |
 | 会话 | 会话持久化、切后台恢复、断线重连 | P1–P2 |
 | 多路复用 | tmux 集成、会话选择器、jump-to window | P2 |
+| 多路复用 | **tmux prefix 可配置**（Settings → Multiplexer，Ctrl-B / Ctrl-A / Ctrl-Space）：Jump-To 与 ⌘数字是**发前缀键**而不是敲命令，故前缀必须与宿主 `tmux.conf` 一致 | P5 ✅ 规则实测 + 端到端实测 |
 | 多路复用 | zellij / herdr 支持 | P5 |
 | Agent 层 | cqutmux-hook 网关 + agent 事件捕获 | P3 |
 | Agent 层 | Chat View（Inbox）、approvals、teammate 卡片 | P3 |
@@ -95,6 +96,14 @@ Option 想修饰的那个字母。因此「含任何 ASCII 就整串放行」是
 故新增 `CQUT_DEV_TYPE_COMPOSED` 逐字符调用 delegate（键盘真实的调用形状），
 实测宿主 `cat -v` 打出 `^[e`——即线上确实是 ESC + e。
 `scripts/input-check.sh` 66 项覆盖以上全部规则（含「普通打字不会被改写」这条最要命的）。
+
+**又补上一处会静默出错的缺陷：tmux prefix**。Jump-To 与 ⌘1-9 打开窗口的方式是**发前缀键**
+（让 tmux 去解释，而不是把命令敲进可能正被 agent 占用的 pane），可前缀此前**硬编码 Ctrl-b**——
+用户 `tmux.conf` 里写了 `set -g prefix C-a` 的话，跳转会：tmux 收不到有效指令、而那个数字
+**落进当前正在跑的程序**（通常是 agent）。无日志、无报错，症状只是"跳不过去，而且好像多打了什么"。
+现 `MuxSettings.Prefix` 三选一，`selectWindow` 带上前缀，⌘p/⌘n 与 ⌘数字也一并改用它。
+端到端实测：宿主 `cat -v` 在 Ctrl-A 下发 `^A3`、Ctrl-B 下发 `^B3`。
+`scripts/mux-check.sh` 20 项覆盖字节算术（`key & 0x1F`）、去重、以及**未知前缀回退而非失败**。
 
 **顺带修掉一个测试自身的缺陷**：`InputSettings` 原本硬写 `UserDefaults.standard`，
 于是 `scripts/input-check.sh` 既会**改掉跑它的人的设置**，又会把上一次跑剩下的值读回来当输入，

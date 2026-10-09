@@ -8,6 +8,7 @@ struct SettingsView: View {
         case theme, font, cursor, icon, speech, sessions, security, notifications, sync
         case integrations
         case input
+        case mux
     }
 
     @Environment(ThemeStore.self) private var themes
@@ -63,6 +64,9 @@ struct SettingsView: View {
                     NavigationLink(value: Route.sessions) {
                         Label("Sessions layout", systemImage: "rectangle.grid.1x2")
                     }
+                    NavigationLink(value: Route.mux) {
+                        Label("Multiplexer", systemImage: "coloncurrencysign.circle")
+                    }
                 }
                 Section("Input") {
                     NavigationLink(value: Route.input) {
@@ -93,6 +97,7 @@ struct SettingsView: View {
                 case .speech: SpeechSettingsView()
                 case .integrations: IntegrationSettingsView()
                 case .input: InputSettingsView()
+                case .mux: MuxSettingsView()
                 }
             }
         }
@@ -114,7 +119,7 @@ struct SettingsView: View {
         guard let tab = ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] else { return nil }
         switch tab {
         case "theme", "font", "speech", "cursor", "icon", "sessions", "security",
-             "notifications", "sync", "integrations", "input":
+             "notifications", "sync", "integrations", "input", "mux":
             return tab
         default:
             return nil
@@ -134,6 +139,7 @@ struct SettingsView: View {
         case "sync": SyncSettingsView()
         case "integrations": IntegrationSettingsView()
         case "input": InputSettingsView()
+        case "mux": MuxSettingsView()
         default: SpeechSettingsView()
         }
     }

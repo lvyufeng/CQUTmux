@@ -28,6 +28,7 @@ struct TerminalScreen: View {
     @State private var gestures = GestureStore()
     @State private var cursor = CursorSettings()
     @State private var input = InputSettings()
+    @State private var mux = MuxSettings()
     /// Whether a hardware keyboard is attached, inferred from the software
     /// keyboard's absence. See `InputSettings.showsBar`.
     @State private var hardwareKeyboard = false
@@ -50,7 +51,8 @@ struct TerminalScreen: View {
                 fonts: fonts,
                 gestures: gestures,
                 cursor: cursor,
-                input: input
+                input: input,
+                mux: mux
             )
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationTitle(host.displayName)
@@ -133,7 +135,8 @@ struct TerminalScreen: View {
                     // shell the attach is still replacing.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                         coordinator.terminal?.selectWindow(
-                            mux: session.mux, session: session.name, selector: window
+                            mux: session.mux, session: session.name, selector: window,
+                            tmuxPrefix: mux.tmuxPrefix
                         )
                     }
                 }
@@ -364,7 +367,10 @@ struct TerminalScreen: View {
                 case .attach(let mux, let name):
                     coordinator.terminal?.attachSession(mux: mux, name: name)
                 case .window(let mux, let session, let selector):
-                    coordinator.terminal?.selectWindow(mux: mux, session: session, selector: selector)
+                    coordinator.terminal?.selectWindow(
+                        mux: mux, session: session, selector: selector,
+                        tmuxPrefix: self.mux.tmuxPrefix
+                    )
                 }
             }
         }
@@ -519,6 +525,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
     let gestures: GestureStore
     let cursor: CursorSettings
     let input: InputSettings
+    let mux: MuxSettings
 
     /// Remembers what the view was last painted with. A `UIViewRepresentable`
     /// has no way to compare its own inputs between updates, and repainting the
@@ -581,6 +588,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         )
         view.gestures = gestures
         view.optionIsMeta = input.optionIsMeta
+        view.muxPrefix = mux.tmuxPrefix
         view.onStatus = { status in coordinator.status = status }
         // A pinch resizes the terminal and becomes the saved preference, so the
         // next session opens at the size the user settled on.
@@ -605,6 +613,11 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         // Option press, so the Meta rewrite is exercised through this instead.
         if let composed = ProcessInfo.processInfo.environment["CQUT_DEV_TYPE_COMPOSED"] {
             DebugSeed.typeComposedWhenConnected(view: view, text: composed)
+        }
+        // Fires a tmux jump so the configured prefix is the one on the wire;
+        // the host's `cat -v` then shows it as `^B` or `^A`.
+        if let index = ProcessInfo.processInfo.environment["CQUT_DEV_JUMP_WINDOW"] {
+            DebugSeed.jumpWindowWhenConnected(view: view, index: index)
         }
         // Same idea for a custom shortcut: the bar cannot be tapped from a
         // script, so the binding is pressed for it and the bytes travel the
@@ -633,6 +646,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         // A live setting: flipping it should take effect on the next key, not
         // on the next connection.
         uiView.optionIsMeta = input.optionIsMeta
+        uiView.muxPrefix = mux.tmuxPrefix
     }
 }
 

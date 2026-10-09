@@ -108,7 +108,8 @@ struct CQUTmuxApp: App {
             layout: sessionLayout,
             speech: SpeechSettings(),
             integrations: IntegrationSettings(),
-            input: InputSettings()
+            input: InputSettings(),
+            mux: MuxSettings()
         )
         await coordinator.run(stores: stores)
     }

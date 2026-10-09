@@ -47,6 +47,11 @@ struct SyncPayload: Codable, Equatable {
     var barItems: [String]?
     var dpadCorners: [String: String]?
 
+    /// The host's tmux prefix. Worth syncing for the same reason it is a
+    /// setting at all: it describes the *host*, and a user's hosts are set up
+    /// the same way from every device they own.
+    var tmuxPrefix: String?
+
     /// When this device last wrote the payload. Used only to decide which side
     /// is newer when both have changed; the clock is the device's, so a badly
     /// wrong clock loses that comparison. That is acceptable here because the

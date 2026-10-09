@@ -26,6 +26,7 @@ struct SyncStores {
     let speech: SpeechSettings
     let integrations: IntegrationSettings
     let input: InputSettings
+    let mux: MuxSettings
 }
 
 extension SyncPayload {
@@ -57,6 +58,7 @@ extension SyncPayload {
             if action != InputSettings.defaultCorner(slot) { out[slot.rawValue] = action.rawValue }
         }
         if !corners.isEmpty { payload.dpadCorners = corners }
+        payload.tmuxPrefix = stores.mux.tmuxPrefix.rawValue
         payload.updatedAt = Date()
         return payload
     }
@@ -120,6 +122,9 @@ extension SyncPayload {
         if let barItems {
             let restored = barItems.compactMap(InputSettings.Item.init(rawValue:))
             if !restored.isEmpty { stores.input.items = restored }
+        }
+        if let tmuxPrefix, let prefix = MuxSettings.Prefix(rawValue: tmuxPrefix) {
+            stores.mux.tmuxPrefix = prefix
         }
         if let dpadCorners {
             for slot in InputSettings.Corner.allCases {

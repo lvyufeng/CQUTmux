@@ -113,6 +113,29 @@ enum DebugSeed {
         }
     }
 
+    /// Runs a tmux window jump once the session is live. Test-only.
+    ///
+    /// Goes through the view's own `selectWindow`, so the prefix the user
+    /// configured is the one under test — a jump built here would prove nothing
+    /// about whether the setting is actually read. Pairs with `cat -v` on the
+    /// host, which renders the prefix as `^B` or `^A` and so makes the byte
+    /// visible instead of leaving it to a tmux that would just ignore it.
+    static func jumpWindowWhenConnected(view: CQUTTerminalView, index: String, attempt: Int = 0) {
+        guard attempt < 60 else { return }
+        guard view.isLiveForTesting else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                jumpWindowWhenConnected(view: view, index: index, attempt: attempt + 1)
+            }
+            return
+        }
+        // Longer than the typed command's own delay, because the byte under
+        // test is meant to be read by a program on the host (`cat -v`) rather
+        // than by a shell prompt — arriving first would let the shell eat it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            view.selectWindowForTesting(mux: "tmux", session: "", selector: index)
+        }
+    }
+
     static func pressShortcutWhenConnected(
         view: CQUTTerminalView, bytes: [UInt8], attempt: Int = 0
     ) {
