@@ -854,11 +854,22 @@ const server = createServer(async (req, res) => {
     const target = events.find(e => e.id === id)
     if (!target) return json(res, 404, { error: 'no such event' })
     let decision = 'allow'
+    let answer = ''
     try {
       const body = await readBody(req)
-      if (body.length) decision = JSON.parse(body.toString('utf8')).decision || decision
+      if (body.length) {
+        const parsed = JSON.parse(body.toString('utf8'))
+        decision = parsed.decision || decision
+        // A question with options is answered by choosing one, not by
+        // allowing or denying. The choice rides alongside `decision` rather
+        // than replacing it so a client that does not know about options —
+        // an older build, a webhook consumer — still reads a resolution it
+        // understands.
+        if (typeof parsed.answer === 'string') answer = parsed.answer
+      }
     } catch { /* default to allow */ }
     target.decision = decision
+    if (answer) target.answer = answer
     target.resolvedAt = new Date().toISOString()
     if (target.kind === 'approval') pendingApprovals = Math.max(0, pendingApprovals - 1)
     emit({ source: 'app', kind: 'notice', title: `approval ${decision}`, data: { for: id } })

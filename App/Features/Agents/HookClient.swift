@@ -212,9 +212,25 @@ final class HookClient {
     }
 
     func resolve(_ event: AgentEvent, allow: Bool) {
+        send(decision: allow ? "allow" : "deny", answer: nil, for: event)
+    }
+
+    /// Answers a question by choosing one of its options. The decision is
+    /// recorded as "allow" so a consumer that knows nothing about options
+    /// still reads the question as answered rather than left hanging.
+    func resolve(_ event: AgentEvent, answer: String) {
+        send(decision: "allow", answer: answer, for: event)
+    }
+
+    private func send(decision: String, answer: String?, for event: AgentEvent) {
         Task { [weak self] in
             guard let self else { return }
-            let body = Data("{\"decision\":\"\(allow ? "allow" : "deny")\"}".utf8)
+            // Encoded, not interpolated: an option value is agent-supplied text
+            // and one containing a quote or a backslash would otherwise produce
+            // a body the gateway cannot parse — which fails as "the answer did
+            // nothing", with nothing to see.
+            struct Body: Encodable { let decision: String; let answer: String? }
+            guard let body = try? JSONEncoder().encode(Body(decision: decision, answer: answer)) else { return }
             _ = try? await self.request("POST", "/approve/\(event.id)", body: body)
         }
     }
@@ -350,7 +366,7 @@ struct UploadBoard: Codable {
         var at: String
 
         var id: String { name }
-        var date: Date? { ISO8601DateFormatter().date(from: at) }
+        var date: Date? { ISODate.parse(at) }
 
         /// Whether a thumbnail is worth asking the host for.
         var isImage: Bool {
@@ -534,7 +550,7 @@ struct LogResult: Codable {
         var refs: String
         var id: String { hash }
 
-        var dateValue: Date? { ISO8601DateFormatter().date(from: date) }
+        var dateValue: Date? { ISODate.parse(date) }
     }
     var isRepo: Bool
     var commits: [Commit]

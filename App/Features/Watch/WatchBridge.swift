@@ -16,6 +16,8 @@ final class WatchBridge: NSObject {
 
     /// Set by the app once a host connection exists. Called on the main queue.
     @ObservationIgnored var onDecision: ((Int, Bool) -> Void)?
+    /// A question answered by choosing an option, separate from allow/deny.
+    @ObservationIgnored var onAnswer: ((Int, String) -> Void)?
     /// Supplies the current pending approvals to push to the watch.
     @ObservationIgnored var pendingSnapshot: (() -> WatchPayload.Snapshot)?
     @ObservationIgnored var onNeedSnapshot: (() -> Void)?
@@ -70,7 +72,11 @@ extension WatchBridge: WCSessionDelegate {
               let decision = WatchPayload.decode(WatchPayload.Decision.self, from: data)
         else { return }
         DispatchQueue.main.async {
-            self.onDecision?(decision.id, decision.allow)
+            if let answer = decision.answer {
+                self.onAnswer?(decision.id, answer)
+            } else {
+                self.onDecision?(decision.id, decision.allow)
+            }
         }
     }
 }

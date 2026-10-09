@@ -52,6 +52,12 @@ final class AgentConnection {
             guard let self, let event = self.client?.events.first(where: { $0.id == id }) else { return }
             self.client?.resolve(event, allow: allow)
         }
+        // A question answered from the wrist goes through the same resolve the
+        // Inbox uses, so both surfaces record the same thing on the host.
+        watch.onAnswer = { [weak self] id, answer in
+            guard let self, let event = self.client?.events.first(where: { $0.id == id }) else { return }
+            self.client?.resolve(event, answer: answer)
+        }
         watch.onNeedSnapshot = { [weak self] in
             guard let self, let events = self.client?.events else { return }
             self.watch.publish(Self.snapshot(events))
@@ -87,7 +93,13 @@ final class AgentConnection {
     private static func snapshot(_ events: [AgentEvent]) -> WatchPayload.Snapshot {
         WatchPayload.Snapshot(
             items: events.filter(\.isPending).map {
-                .init(id: $0.id, source: $0.sourceLabel, title: $0.displayTitle, body: $0.displayBody)
+                .init(
+                    id: $0.id,
+                    source: $0.sourceLabel,
+                    title: $0.displayTitle,
+                    body: $0.displayBody,
+                    options: $0.options.map { .init(label: $0.label, value: $0.value) }
+                )
             }
         )
     }

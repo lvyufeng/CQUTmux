@@ -99,9 +99,11 @@ struct InboxView: View {
                     }
                 }
                 ForEach(client.events) { event in
-                    EventRow(event: event) { allow in
-                        client.resolve(event, allow: allow)
-                    }
+                    EventRow(
+                        event: event,
+                        resolve: { allow in client.resolve(event, allow: allow) },
+                        answer: { value in client.resolve(event, answer: value) }
+                    )
                 }
             }
             .listStyle(.insetGrouped)
@@ -125,6 +127,8 @@ struct InboxView: View {
 private struct EventRow: View {
     let event: AgentEvent
     let resolve: (Bool) -> Void
+    /// Answers a question by choosing an option.
+    var answer: (String) -> Void = { _ in }
     @Environment(ThemeStore.self) private var themes
 
     var body: some View {
@@ -147,14 +151,32 @@ private struct EventRow: View {
                     .lineLimit(4)
             }
             if event.isPending {
-                HStack(spacing: 10) {
-                    Button("Allow") { resolve(true) }
-                        .buttonStyle(.borderedProminent)
-                        .tint(themes.current.accentColor)
-                    Button("Deny", role: .destructive) { resolve(false) }
-                        .buttonStyle(.bordered)
+                // A question is answered by picking one of its options; asking
+                // it as Allow/Deny would throw away the choice it was asked to
+                // make. Stacked rather than in a row because option labels are
+                // sentences, and a row of sentences truncates into ambiguity.
+                if event.isQuestion {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(event.options) { option in
+                            Button(option.label) { answer(option.value) }
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                    .controlSize(.small)
+                } else {
+                    HStack(spacing: 10) {
+                        Button("Allow") { resolve(true) }
+                            .buttonStyle(.borderedProminent)
+                            .tint(themes.current.accentColor)
+                        Button("Deny", role: .destructive) { resolve(false) }
+                            .buttonStyle(.bordered)
+                    }
+                    .controlSize(.small)
                 }
-                .controlSize(.small)
+            } else if let chosen = event.chosenOption {
+                Label("Chose: \(chosen.label)", systemImage: "checkmark.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             } else if let decision = event.decision {
                 Label(decision == "allow" ? "Approved" : "Denied",
                       systemImage: decision == "allow" ? "checkmark.circle" : "xmark.circle")

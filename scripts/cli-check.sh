@@ -245,6 +245,35 @@ assert match[0].get('data', {}).get('teammate') == 'scout', \
 " || fail "an event's data does not survive POST -> GET"
 ok "an event's data survives POST -> GET"
 
+# A question with choices is answered by choosing one, and the choice has to
+# come back on the event — otherwise the app resolves it locally and the agent
+# never learns which option the user picked, which looks identical to a working
+# screen until the agent acts on the wrong thing.
+post '{"source":"claude-code","kind":"approval","title":"deploy where?","data":{"options":[{"label":"staging","value":"staging"},{"label":"production","value":"prod"}]}}' > "$OUT/q.json"
+QID="$(python3 -I -c "import json;print(json.load(open('$OUT/q.json'))['id'])")"
+curl -s -X POST -H 'content-type: application/json' -d '{"decision":"allow","answer":"prod"}' \
+  "http://127.0.0.1:$CFG_PORT/approve/$QID" > "$OUT/qres.json"
+python3 -I -c "
+import json
+e = json.load(open('$OUT/qres.json'))
+assert e['decision'] == 'allow', 'the decision was not recorded: ' + json.dumps(e)
+assert e.get('answer') == 'prod', 'the chosen option was dropped: ' + json.dumps(e)
+" || fail "answering a question did not record the choice"
+ok "a question records which option was chosen"
+
+# An option value is agent-supplied text. One containing a quote must survive
+# the round trip, which is what the app's encoded body is for.
+post '{"source":"x","kind":"approval","title":"quoted","data":{"options":[{"label":"a","value":"say \"hi\""}]}}' > "$OUT/q2.json"
+Q2ID="$(python3 -I -c "import json;print(json.load(open('$OUT/q2.json'))['id'])")"
+printf '%s' '{"decision":"allow","answer":"say \"hi\""}' > "$OUT/qbody.json"
+curl -s -X POST -H 'content-type: application/json' --data-binary @"$OUT/qbody.json" \
+  "http://127.0.0.1:$CFG_PORT/approve/$Q2ID" | python3 -I -c "
+import json,sys
+e = json.load(sys.stdin)
+assert e.get('answer') == 'say \"hi\"', 'a quoted option value did not survive: ' + json.dumps(e)
+" || fail "an option value containing a quote did not survive"
+ok "an option value containing a quote survives the round trip"
+
 # The suppression must be off by default, or every existing install changes
 # behaviour on upgrade.
 DEFAULT_PORT=$((PORT + 4))

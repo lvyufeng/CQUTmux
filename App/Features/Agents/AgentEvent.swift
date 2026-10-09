@@ -20,6 +20,8 @@ struct AgentEvent: Identifiable, Codable, Hashable {
     var title: String?
     var body: String?
     var decision: String?
+    /// Which option was chosen, for a question rather than an approval.
+    var answer: String?
     /// Whatever the agent attached. Free-form on the wire, so it is typed here
     /// as the few keys already in use rather than as a dictionary.
     var data: Payload?
@@ -31,6 +33,31 @@ struct AgentEvent: Identifiable, Codable, Hashable {
         /// Set by a teammate reporting its own message, rather than by the
         /// agent the user is watching. See `isTeammateMessage`.
         var teammate: String?
+        /// The choices an agent's question offers.
+        var options: [Option]?
+
+        /// One choice. `label` is what the button says; `value` is what goes
+        /// back to the agent, and the two differ often — a label is prose and
+        /// a value is a token.
+        struct Option: Codable, Hashable, Identifiable {
+            var id: String { value.isEmpty ? label : value }
+            var label: String
+            var value: String
+        }
+    }
+
+    /// An agent asking a question with choices, rather than requesting
+    /// permission. The distinction decides how it is answered: allow/deny would
+    /// throw away the choice the question was asked to make.
+    var isQuestion: Bool { !(data?.options ?? []).isEmpty }
+
+    var options: [Payload.Option] { data?.options ?? [] }
+
+    /// The option already chosen, if any, so a resolved question shows which
+    /// way it went instead of reverting to buttons.
+    var chosenOption: Payload.Option? {
+        guard let answer else { return nil }
+        return options.first { $0.value == answer || $0.label == answer }
     }
 
     /// A message from an agent-team teammate rather than from the agent the
@@ -45,7 +72,7 @@ struct AgentEvent: Identifiable, Codable, Hashable {
         return name
     }
 
-    var date: Date? { ISO8601DateFormatter().date(from: at) }
+    var date: Date? { ISODate.parse(at) }
 
     var isPending: Bool { kind == .approval && decision == nil }
 

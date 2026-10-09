@@ -46,6 +46,17 @@ struct ApprovalListView: View {
                                 )
                                 .font(.caption2)
                                 .foregroundStyle(allow ? .green : .orange)
+                            } else if item.isQuestion {
+                                // An agent waiting on a choice is waiting just
+                                // as much as one waiting on permission, and
+                                // this is the case where reaching for the phone
+                                // is most annoying.
+                                VStack(spacing: 4) {
+                                    ForEach(item.options) { option in
+                                        Button(option.label) { answer(item, option.value) }
+                                            .buttonStyle(.bordered)
+                                    }
+                                }
                             } else {
                                 HStack {
                                     Button(role: .destructive) { decide(item, allow: false) } label: {
@@ -96,6 +107,14 @@ struct ApprovalListView: View {
     private func decide(_ item: WatchPayload.Snapshot.Item, allow: Bool) {
         sent[item.id] = allow
         WatchLink.shared.send(.init(id: item.id, allow: allow))
+    }
+
+    /// A question is answered as "approved" plus the chosen value: the
+    /// allow/deny field stays meaningful for anything that reads a decision
+    /// without knowing about options.
+    private func answer(_ item: WatchPayload.Snapshot.Item, _ value: String) {
+        sent[item.id] = true
+        WatchLink.shared.send(.init(id: item.id, allow: true, answer: value))
     }
 }
 

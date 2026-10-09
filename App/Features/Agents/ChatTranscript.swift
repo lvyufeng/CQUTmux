@@ -47,7 +47,7 @@ struct AgentMessage: Codable, Identifiable, Hashable {
     var blocks: [AgentBlock]
     var model: String?
 
-    var date: Date? { at.flatMap { ISO8601DateFormatter().date(from: $0) } }
+    var date: Date? { at.flatMap(ISODate.parse) }
 
     /// A user message with nothing in it is a blank row; the gateway drops most
     /// of these, but one that survives should not render as an empty bubble.
