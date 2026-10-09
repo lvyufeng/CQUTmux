@@ -80,6 +80,11 @@ herdr 宿主侧对接 + **App 侧会话选择器**、APNs 两端代码、主机�
 `scripts/deeplink-test.sh` 端到端实测：宿主 shell 确实执行了 attach 命令；非法路由弹「无法打开链接」且不切页）。
 **顺带修掉另一个真实缺陷**：快捷键编辑器此前**只有调试环境变量能打开**，也就是用户在 App 里根本进不去；
 现在终端页右上角有了真正入口（Custom Keys / Gestures）。
+
+**再修掉一个隐私缺陷（听写）**：原实现写着"音频与转写不出设备"，但 `requiresOnDeviceRecognition` 只是**请求**——
+当该语言没有装离线模型时，识别器**不会报错**，而是静默回退到 Apple 服务器上传音频。
+即"告诉用户声音不出设备、实际传了出去"。现改为**先检查 `supportsOnDeviceRecognition`，不支持就直接拒绝启动**并提示去哪装模型
+（`Settings › General › Keyboard › Dictation`）：麦克风说"离线不可用"是小问题，说谎是大问题。
 **手势绑定的取舍**：单击**不开放绑定**——SwiftTerm 自己的单击处理驱动鼠标上报与长按选词，
 我们的识别器必须先失败才能让路，那样单击就不再是今天的单击。其余四个手势终端本就没用，全部开放。
 绑定失效（语法变更）时**回落到内置行为**而非什么都不做，因为那看起来就像 App 坏了。
@@ -87,7 +92,8 @@ herdr 宿主侧对接 + **App 侧会话选择器**、APNs 两端代码、主机�
 而该 task 与「从磁盘读 HostStore」存在竞态；竞态输了时，**先进 Terminal 页会让会话选择器与图片粘贴按钮整场缺失**
 （Inbox 页自己会连，所以只在 Terminal 页暴露）。改为由需要这条隧道的 Terminal 页自己保证。
 
-**仍未做**：端侧听写只接了 Apple Speech（无 whisper/parakeet 本地模型）；
+**仍未做**：端侧听写只有 Apple Speech（无 whisper/parakeet 本地模型；
+且已改为**离线模型不可用即拒绝启动**，见下）、
 无最近目录、无原生 Windows、无 macOS 菜单栏 / Moshi Desktop（属另一产品）；
 herdr 的 **Jump To 树**（按 tab 层级的树状视图）未接——会话选择器已接，
 但显示的是扁平的 session→tab 两级列表，不是 herdr 原生的 workspace→tab→pane 树；

@@ -3,9 +3,14 @@ import AVFoundation
 import Speech
 import Observation
 
-/// On-device speech to text for the terminal. Audio and transcripts never
-/// leave the device: `requiresOnDeviceRecognition` is set, and the recognizer
-/// is asked to run offline.
+/// On-device speech to text for the terminal.
+///
+/// Dictation refuses to run at all when the locale has no on-device model,
+/// rather than accepting `requiresOnDeviceRecognition` being ignored. Setting
+/// that flag on a locale without the model does not fail — it quietly falls
+/// back to Apple's servers, so the old code could upload audio from a device
+/// whose owner had been told their voice never left it. A microphone that says
+/// "not available offline" is a smaller problem than one that lies.
 @Observable
 final class VoiceDictation {
     enum State: Equatable {
@@ -83,11 +88,18 @@ final class VoiceDictation {
         try session.setCategory(.record, mode: .measurement, options: .duckOthers)
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 
+        // Refusing here rather than falling through matters: the flag is a
+        // *request*, and on a locale whose model is not installed the
+        // recognizer starts anyway and streams the audio to Apple. Setting it
+        // unverified would make the privacy claim in this file's header false
+        // without anything visibly going wrong.
+        guard recognizer.supportsOnDeviceRecognition else {
+            throw DictationError.offlineUnavailable
+        }
+
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-        }
+        request.requiresOnDeviceRecognition = true
         self.request = request
 
         let input = engine.inputNode
@@ -124,9 +136,16 @@ final class VoiceDictation {
 
     enum DictationError: Error, CustomStringConvertible {
         case recognizerUnavailable
+        case offlineUnavailable
 
         var description: String {
-            "speech recognizer is unavailable for this language"
+            switch self {
+            case .recognizerUnavailable:
+                "speech recognizer is unavailable for this language"
+            case .offlineUnavailable:
+                "dictation needs the offline speech model for this language. "
+                    + "Download it in Settings › General › Keyboard › Dictation."
+            }
         }
     }
 }
