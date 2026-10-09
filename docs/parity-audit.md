@@ -580,3 +580,44 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   face — was verified on the simulator: all four families resolve to their real
   faces rather than the system fallback, with ten TTFs at the bundle root and
   ten `UIAppFonts` entries.
+
+- **Live control of a simulator, not just watching one.** The docs say taps,
+  drags and multi-touch gestures pass from the phone to the Simulator. The
+  preview could only display frames and pause.
+
+  There is no supported way to inject a touch: `simctl` can screenshot and
+  record but not tap, and neither can anything public. The only route is
+  CoreSimulator's private `IndigoHID` API. It loads only into a process the
+  Objective-C runtime takes over, and `dlopen`ing SimulatorKit inside node
+  crashes at load — which is why this is a separate helper rather than part of
+  the gateway. `host/cqutmux-hook/simtouch/` holds its Swift source; the
+  gateway builds it on first use, keeps one child per simulator alive while a
+  preview is open, and stops it after five idle minutes. The call sequence was
+  written against `serve-sim`'s Apache-2.0 `HIDInjector` — the helper Moshi's
+  own docs name for simulator preview — and the same mechanism Meta's idb uses.
+
+  **The bug this feature invites, and which I shipped first.** The helper
+  printed `{"ok":true}` for every gesture and delivered none of them. The send
+  crosses XPC, and the process exited before the run loop turned. A plain sleep
+  is also required between a touch-down and its touch-up: a run-loop turn there
+  services the device connection mid-touch and drops it. Both failures are
+  invisible to anything that stops at the helper's reply, which is exactly what
+  a check written alongside the code would have done — so the check compares
+  two screenshots around a gesture and *only* that comparison is the assertion.
+  Finding it took driving the same gesture through `serve-sim`, which worked,
+  and bisecting the difference back to the run loop.
+
+  The app half is a `UIViewRepresentable` with tap/pan/pinch recognisers,
+  behind a Control toggle that is off by default — a preview someone opened to
+  watch should not turn a stray tap into input on a device they are not looking
+  at. Its coordinate mapping goes through the *fitted* frame rather than the
+  view's bounds: using the bounds letterboxes every point, so taps land in the
+  middle and miss at the edges, which reads as flakiness rather than
+  arithmetic.
+
+  `scripts/simulator-touch-check.sh` (15 checks) covers the host half and, on a
+  host with a booted simulator, the screenshot comparison.
+  `scripts/simulator-touch-app-check.sh` drives both halves through the app
+  against a real sshd: phase 1 sends a gesture via the view's own `send`, and
+  phase 2 puts a real touch on the phone's preview so the recognisers and the
+  mapping are exercised. Both pass.

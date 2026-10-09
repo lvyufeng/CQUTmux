@@ -31,3 +31,8 @@ build-watch/
 # KeyMaterial.swift against the transport package. The original is the source
 # of truth and the script overwrites this on every run.
 Packages/CQUTTransport/Tests/PassphraseChecks/KeyMaterial.swift
+
+# Built from simtouch/inject.swift on first use. The source is the shipped
+# artifact; this binary is a cache, and the gateway rebuilds it whenever the
+# source is newer.
+host/cqutmux-hook/simtouch/cqutmux-simtouch

@@ -12,6 +12,22 @@ final class HookClient {
         case failed(String)
     }
 
+    /// A request the gateway answered with something other than 200.
+    ///
+    /// Carries the status and the gateway's own message, because for the
+    /// endpoints that fail only on a host misconfiguration the message is the
+    /// instruction, and a bare `URLError` would show the user nothing useful.
+    enum Failure: Error, LocalizedError {
+        case server(status: Int, message: String?)
+
+        var errorDescription: String? {
+            switch self {
+            case .server(let status, let message):
+                message ?? "the host gateway returned \(status)"
+            }
+        }
+    }
+
     private(set) var state: State = .idle
     private(set) var events: [AgentEvent] = []
     private(set) var lastError: String?
@@ -396,6 +412,34 @@ final class HookClient {
         return payload.body
     }
 
+    /// Sends one touch gesture to a booted simulator.
+    ///
+    /// Coordinates are normalised 0..1 against the device screen, so the app
+    /// maps its own view geometry and never needs the device's pixel size. The
+    /// gateway clamps and validates every field, so a bad value here fails as
+    /// a 400 rather than reaching the simulator as an undefined point.
+    func simulatorTouch(udid: String, gesture: SimulatorGesture) async throws {
+        var body: [String: Any] = ["udid": udid, "type": gesture.type.rawValue]
+        body.merge(gesture.fields) { _, new in new }
+        let data = try JSONSerialization.data(withJSONObject: body)
+        let payload = try await request("POST", "/simulator/touch", body: data, timeout: 20)
+        guard payload.status == 200 else {
+            throw Failure.server(status: payload.status, message: Self.errorText(payload.body))
+        }
+    }
+
+    /// The gateway's reason for a failed request, when it sent one.
+    ///
+    /// Worth the decode: for the simulator endpoints every likely failure is a
+    /// host setup problem — no Xcode, no booted device, a helper that will not
+    /// build — and the gateway's message says which and what to do about it.
+    /// Flattening it to a status code would throw that away at exactly the
+    /// moment it is the only thing the user needs.
+    static func errorText(_ body: Data) -> String? {
+        struct Envelope: Decodable { var error: String? }
+        return (try? JSONDecoder().decode(Envelope.self, from: body))?.error
+    }
+
     // MARK: - Uploads
 
     /// Uploads a pasted image to the host and returns the path it was written
@@ -585,6 +629,59 @@ struct SimulatorBoard: Codable {
     var available: Bool
     var error: String?
     var simulators: [Simulator]
+}
+
+/// One touch gesture to hand to a booted simulator.
+///
+/// Normalised 0..1 coordinates throughout: the phone shows a scaled-down frame
+/// of a screen whose pixel size it never learns, so mapping its own geometry to
+/// the device's would mean carrying a resolution that is also different per
+/// device. The host clamps and validates, so a slightly out-of-range value from
+/// a drag that left the view is not an error.
+struct SimulatorGesture {
+    enum Kind: String {
+        case tap
+        /// A finger held down and moved: a scroll, a slider drag, a pane resize.
+        /// The wire name is the host's, which calls the whole gesture a swipe.
+        case drag = "swipe"
+        /// Two fingers spreading or closing, which the Simulator turns into a
+        /// pinch and the guest turns into a zoom.
+        case pinch
+    }
+
+    var type: Kind
+    /// Where the gesture starts, or the centre for a pinch.
+    var x: Double
+    var y: Double
+    /// Where it ends. Equal to the start for a tap.
+    var x2: Double
+    var y2: Double
+    /// How far apart the two fingers start, and how much that separation is
+    /// multiplied by, for a pinch.
+    var start: Double = 0.6
+    var scale: Double = 2
+    /// How long the gesture takes, so a drag scrolls at a speed a person would
+    /// recognise rather than teleporting.
+    var milliseconds: Double = 300
+
+    static func tap(x: Double, y: Double) -> SimulatorGesture {
+        SimulatorGesture(type: .tap, x: x, y: y, x2: x, y2: y, milliseconds: 80)
+    }
+
+    static func drag(from: CGPoint, to: CGPoint) -> SimulatorGesture {
+        SimulatorGesture(type: .drag, x: from.x, y: from.y, x2: to.x, y2: to.y)
+    }
+
+    static func pinch(centre: CGPoint, start: Double, scale: Double) -> SimulatorGesture {
+        SimulatorGesture(type: .pinch, x: centre.x, y: centre.y, x2: centre.x, y2: centre.y,
+                         start: start, scale: scale)
+    }
+
+    /// The wire fields. Kept beside the type so a renamed property cannot
+    /// silently stop being sent.
+    var fields: [String: Any] {
+        ["x": x, "y": y, "x2": x2, "y2": y2, "ms": milliseconds, "start": start, "scale": scale]
+    }
 }
 
 struct SessionBoard: Codable {

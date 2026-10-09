@@ -13,6 +13,9 @@
 //   POST /events              append an event        { source, kind, title, body, data }
 //   POST /approve/:id         resolve a pending approval { decision: "allow"|"deny" }
 //   POST /push/register       remember an APNs device token { token }
+//   GET  /simulators          booted iOS simulators on this host
+//   GET  /simulator/screenshot?udid=…   one PNG frame
+//   POST /simulator/touch     tap/drag/pinch a booted simulator { udid, type, x, y, … }
 //
 // Remote push is optional and off unless a signing key is configured. See
 // push.mjs for what that needs.
@@ -31,6 +34,7 @@ import { readTranscript } from './transcript.mjs'
 import { recentDirectories } from './recent.mjs'
 import { commandHistory } from './history.mjs'
 import { terminal as qrTerminal } from './qr.mjs'
+import { sendGesture, stopAllSessions, touchHelperAvailable } from './simtouch.mjs'
 
 const run = promisify(execFile)
 
@@ -698,6 +702,9 @@ const server = createServer(async (req, res) => {
       events: events.length,
       pendingApprovals,
       uptime: Math.round(process.uptime()),
+      // Whether the simulator touch helper can be built. The app uses this to
+      // say so before a gesture silently does nothing, rather than after.
+      simTouch: touchHelperAvailable(),
     })
   }
 
@@ -834,6 +841,57 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/simulators') {
     return json(res, 200, await bootedSimulators())
+  }
+
+  // A touch, drag or pinch sent to a booted simulator, so the app can drive one
+  // live rather than only watch it. Coordinates are normalised 0..1 so the
+  // phone does not have to know the device's pixel size.
+  //
+  // Named /simulator/touch rather than a sibling of /simulator/screenshot to
+  // match it: both act on one device, and the prefix keeps them together.
+  if (req.method === 'POST' && url.pathname === '/simulator/touch') {
+    let body
+    try {
+      body = JSON.parse(await readBody(req) || '{}')
+    } catch (error) {
+      return json(res, 400, { error: 'invalid JSON body' })
+    }
+    const udid = String(body.udid || '')
+    if (!/^[0-9A-Fa-f-]{20,40}$/.test(udid)) {
+      return json(res, 400, { error: 'invalid udid' })
+    }
+    // Only the gestures the app can send, and each field checked here rather
+    // than trusting the client: the helper parses numbers out of this and a
+    // NaN would be injected as a touch at an undefined point.
+    const point = value => {
+      const n = Number(value)
+      return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : null
+    }
+    const gesture = { type: String(body.type || '') }
+    const clamped = {
+      x: point(body.x ?? 0.5),
+      y: point(body.y ?? 0.5),
+      x2: point(body.x2 ?? 0.5),
+      y2: point(body.y2 ?? 0.5),
+      edge: Number.isFinite(Number(body.edge)) ? Number(body.edge) : 0,
+      ms: Number.isFinite(Number(body.ms)) ? Math.min(5000, Math.max(50, Number(body.ms))) : 300,
+      start: Number.isFinite(Number(body.start)) ? Number(body.start) : 0.6,
+      scale: Number.isFinite(Number(body.scale)) ? Number(body.scale) : 2,
+    }
+    if (clamped.x === null || clamped.y === null) {
+      return json(res, 400, { error: 'x and y must be numbers in 0..1' })
+    }
+    if (!['tap', 'down', 'move', 'up', 'swipe', 'pinch'].includes(gesture.type)) {
+      return json(res, 400, { error: 'unknown gesture type' })
+    }
+    try {
+      return json(res, 200, await sendGesture(udid, { ...gesture, ...clamped }))
+    } catch (error) {
+      // 502: the gateway is fine, the helper it drives is not. The message is
+      // the fix (build the helper, boot a simulator, install Xcode), so it is
+      // passed through rather than replaced with a generic failure.
+      return json(res, 502, { error: String(error.message || error).slice(0, 400) })
+    }
   }
 
   // A screenshot of a booted simulator, sent as raw PNG so the app can show it
@@ -2321,6 +2379,9 @@ server.listen(args.port, '127.0.0.1', () => {
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     retractToken()
+    // One helper process per simulator may be alive; stopping them here keeps a
+    // stopped gateway from leaving private frameworks resident behind it.
+    stopAllSessions()
     server.close(() => process.exit(0))
     // The listener above only fires if the server had not already closed; this
     // makes the exit happen either way rather than hanging a stopped daemon.

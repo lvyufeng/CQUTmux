@@ -155,10 +155,46 @@ require `Authorization: Bearer <secret>` on every request.
 | `GET` | `/ports` | listening TCP ports, dev-looking ones first |
 | `GET` | `/simulators` | booted iOS simulators on the host |
 | `GET` | `/simulator/screenshot?udid=<id>` | a PNG frame of one booted simulator |
+| `POST` | `/simulator/touch` | `{ udid, type, x, y, … }` — tap/drag/pinch a booted simulator |
 | `GET` | `/herdr` | herdr workspaces, tabs and panes (needs `--herdr <path>`) |
 | `GET` | `/uploads` | pasted files, newest first |
 | `GET` | `/upload?name=<n>` | one pasted file's bytes |
 | `DELETE` | `/upload?name=<n>` | remove a pasted file |
+
+## Driving a simulator's screen
+
+`POST /simulator/touch` injects a tap, drag or pinch into a booted simulator, so
+the app's preview can *drive* one rather than only watch it. Coordinates are
+normalised `0..1` against the device screen, so the caller never needs the
+device's pixel size. `type` is `tap`, `swipe` (a finger down and moved),
+`down`, `move`, `up` or `pinch`; a `pinch` carries `start` (the initial finger
+separation) and `scale` (what it is multiplied by).
+
+There is no supported way to do this. `simctl` can screenshot and record but
+not tap, so the only route is CoreSimulator's private `IndigoHID` API. That API
+loads only into a process the Objective-C runtime takes over, and `dlopen`ing
+SimulatorKit inside node crashes at load, so the injection lives in a separate
+helper — `simtouch/inject.swift`, built to `simtouch/cqutmux-simtouch`. The
+gateway builds it on first use with `xcrun swiftc`, keeps one child per
+simulator alive while a preview is open, speaks a JSON line protocol to it, and
+stops it after five idle minutes. The mechanism is the same one `serve-sim` —
+the helper Moshi's own docs name — and Meta's idb use; the call sequence was
+written against serve-sim's Apache-2.0 `HIDInjector`.
+
+Two things are easy to get wrong, and both were:
+
+- **The helper's `{"ok":true}` proves nothing.** The send crosses XPC; a
+  process that exits before the run loop turns delivers no touch while
+  reporting success. It also has to be a plain sleep, not a run-loop turn,
+  between a touch-down and its touch-up, or the device connection serviced
+  mid-touch drops it. `scripts/simulator-touch-check.sh` therefore compares two
+  screenshots around a gesture and only that comparison is the assertion.
+- **`Simulator.app` need not be running.** Injection reaches the guest with the
+  Simulator UI closed, which is what makes this usable from a headless host.
+
+Requires a host with Xcode command line tools. `/health` reports `simTouch`
+so the app can say the helper is unavailable before a gesture silently does
+nothing rather than after.
 
 ## Containers
 
