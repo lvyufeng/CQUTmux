@@ -73,16 +73,21 @@ Live Activity 与灵动岛（`ActivityManager` + `AgentActivityAttributes`）、
 主题与字体持久化、iPad 侧栏、CJK 输入。
 
 **本轮新增**：自定义快捷键（`ShortcutGrammar` + 编辑器 + 附件栏按键，26 项语法用例 + 端到端实测）、
+**手势绑定**（`GestureStore` + `GestureEditorView`：双击/三击/左滑/右滑可绑定，共 18 项用例 + 端到端实测）、
 herdr 宿主侧对接 + **App 侧会话选择器**、APNs 两端代码、主机探测不再 source rc、
 **deep link**（`cqutmux://tmux?session=…&window=…`、`cqutmux://zellij`、`cqutmux://herdr`、`cqutmux://host?host=…`，
 `DeepLink` 解析 + `CFBundleURLTypes` + `onOpenURL` → 切到终端页 → 解析主机 → 导航进会话 → 连上后自动 attach，
 `scripts/deeplink-test.sh` 端到端实测：宿主 shell 确实执行了 attach 命令；非法路由弹「无法打开链接」且不切页）。
+**顺带修掉另一个真实缺陷**：快捷键编辑器此前**只有调试环境变量能打开**，也就是用户在 App 里根本进不去；
+现在终端页右上角有了真正入口（Custom Keys / Gestures）。
+**手势绑定的取舍**：单击**不开放绑定**——SwiftTerm 自己的单击处理驱动鼠标上报与长按选词，
+我们的识别器必须先失败才能让路，那样单击就不再是今天的单击。其余四个手势终端本就没用，全部开放。
+绑定失效（语法变更）时**回落到内置行为**而非什么都不做，因为那看起来就像 App 坏了。
 **顺带修掉一个真实缺陷**：`AgentConnection` 只在 `RootView.task` 里连，
 而该 task 与「从磁盘读 HostStore」存在竞态；竞态输了时，**先进 Terminal 页会让会话选择器与图片粘贴按钮整场缺失**
 （Inbox 页自己会连，所以只在 Terminal 页暴露）。改为由需要这条隧道的 Terminal 页自己保证。
 
 **仍未做**：端侧听写只接了 Apple Speech（无 whisper/parakeet 本地模型）；
-无快捷指令绑定到手势/滑动（Moshi 的 tap/双击/三击/swipe 可绑定）；
 无最近目录、无原生 Windows、无 macOS 菜单栏 / Moshi Desktop（属另一产品）；
 herdr 的 **Jump To 树**（按 tab 层级的树状视图）未接——会话选择器已接，
 但显示的是扁平的 session→tab 两级列表，不是 herdr 原生的 workspace→tab→pane 树；

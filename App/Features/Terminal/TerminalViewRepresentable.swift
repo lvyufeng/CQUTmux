@@ -21,7 +21,9 @@ struct TerminalScreen: View {
     @State private var annotating: PendingImage?
     @State private var pastedNotice: String?
     @State private var shortcuts = ShortcutStore()
+    @State private var gestures = GestureStore()
     @State private var showShortcuts = false
+    @State private var showGestures = false
     /// Set once the link's attach command has been sent, so a reconnect — which
     /// also reaches `.connected` — does not attach a second time.
     @State private var didFollowLink = false
@@ -35,7 +37,8 @@ struct TerminalScreen: View {
                 credential: credential,
                 coordinator: coordinator,
                 theme: themes.current,
-                fonts: fonts
+                fonts: fonts,
+                gestures: gestures
             )
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationTitle(host.displayName)
@@ -43,16 +46,36 @@ struct TerminalScreen: View {
             .toolbar {
                 ToolbarItem(placement: .principal) { StatusBadge(status: coordinator.status) }
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        coordinator.terminal?.reconnect()
+                    Menu {
+                        Button {
+                            coordinator.terminal?.reconnect()
+                        } label: {
+                            Label("Reconnect", systemImage: "arrow.clockwise")
+                        }
+                        // Until this menu existed the shortcut editor was
+                        // reachable only from a debug environment variable,
+                        // which is to say not from the app.
+                        Button {
+                            showShortcuts = true
+                        } label: {
+                            Label("Custom Keys", systemImage: "keyboard")
+                        }
+                        Button {
+                            showGestures = true
+                        } label: {
+                            Label("Gestures", systemImage: "hand.tap")
+                        }
                     } label: {
-                        Label("Reconnect", systemImage: "arrow.clockwise")
+                        Label("More", systemImage: "ellipsis.circle")
                     }
                 }
             }
             .sheet(isPresented: $showSessions) { sessionPicker }
             .sheet(isPresented: $showShortcuts) {
                 NavigationStack { ShortcutEditorView(store: shortcuts) }
+            }
+            .sheet(isPresented: $showGestures) {
+                NavigationStack { GestureEditorView(store: gestures) }
             }
             .sheet(item: $annotating) { pending in annotator(pending.image) }
             .overlay(alignment: .top) { pasteNotice }
@@ -110,6 +133,28 @@ struct TerminalScreen: View {
                 }
                 if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "shortcuts" {
                     showShortcuts = true
+                }
+                if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "gestures" {
+                    showGestures = true
+                }
+                // A binding cannot be swiped from a script any more than a key
+                // can be tapped, so a run declares the gesture and the bytes
+                // travel the same `send(binding:)` path a real swipe does.
+                // `CQUT_DEV_GESTURE=swipeLeft=text:touch SWIPED` binds a gesture, and
+                // `CQUT_DEV_FIRE_GESTURE=swipeLeft` then fires it once the
+                // session is live. Firing goes through the view's own
+                // `send(binding:)`, which is the path a real recogniser takes,
+                // so a pass is evidence about the gesture and not about the
+                // test having called `write` itself.
+                if let raw = ProcessInfo.processInfo.environment["CQUT_DEV_GESTURE"] {
+                    let parts = raw.split(separator: "=", maxSplits: 1).map(String.init)
+                    if parts.count == 2, let gesture = TerminalGesture(rawValue: parts[0]) {
+                        gestures.set(parts[1], for: gesture)
+                    }
+                }
+                if let raw = ProcessInfo.processInfo.environment["CQUT_DEV_FIRE_GESTURE"],
+                   let gesture = TerminalGesture(rawValue: raw) {
+                    DebugSeed.fireGestureWhenConnected(view: coordinator.terminal, gesture: gesture)
                 }
                 if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "annotate" {
                     // Wait a beat so the gateway tunnel is up; otherwise the
@@ -352,6 +397,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
     let coordinator: TerminalCoordinator
     let theme: TerminalTheme
     let fonts: TerminalFontStore
+    let gestures: GestureStore
 
     func makeUIView(context: Context) -> CQUTTerminalView {
         let configuration = TransportConfiguration(
@@ -388,6 +434,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
             font: fonts.uiFont(),
             transport: transport
         )
+        view.gestures = gestures
         view.onStatus = { status in coordinator.status = status }
         // A pinch resizes the terminal and becomes the saved preference, so the
         // next session opens at the size the user settled on.

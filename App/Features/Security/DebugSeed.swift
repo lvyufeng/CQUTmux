@@ -74,6 +74,26 @@ enum DebugSeed {
         }
     }
 
+    /// Fires a gesture once the session is live. A recogniser cannot be
+    /// driven from a script, so the view's own handler is called — the same
+    /// `send(binding:)` a real swipe reaches, not a parallel path built to
+    /// pass.
+    static func fireGestureWhenConnected(
+        view: CQUTTerminalView?, gesture: TerminalGesture, attempt: Int = 0
+    ) {
+        guard let view else { return }
+        guard attempt < 60 else { return }
+        guard view.isLiveForTesting else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                fireGestureWhenConnected(view: view, gesture: gesture, attempt: attempt + 1)
+            }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            view.fireGestureForTesting(gesture)
+        }
+    }
+
     /// Presses a custom shortcut once the session is live, so its bytes go
     /// through `sendRaw` exactly as a tap on the accessory bar would.
     ///

@@ -29,6 +29,10 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
     private let startupCommand: String?
     private let theme: TerminalTheme
     private var didRunStartup = false
+    /// The user's gesture bindings, if any. nil keeps every gesture on its
+    /// built-in behaviour, which is what a view built outside the SwiftUI
+    /// screen (a preview, a test) gets.
+    var gestures: GestureStore?
     /// Font size that pinch zoom scales from, captured when a pinch begins.
     private var baseFontSize: CGFloat = 12
 
@@ -108,18 +112,31 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
     private func installGestures() {
         addGestureRecognizer(pinch)
 
-        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
+        // Each recogniser carries its gesture in `accessibilityValue`, so the
+        // handler can look up whatever the user bound it to. SwiftTerm draws
+        // the double tap itself (its `TerminalView` is where the recogniser
+        // would otherwise come from), which is why ours replaces it here.
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
+        doubleTap.accessibilityValue = TerminalGesture.doubleTap.rawValue
         addGestureRecognizer(doubleTap)
 
-        // A three-finger horizontal swipe switches tmux windows, matching
-        // Moshi's terminal gestures. The window index keys are Ctrl-b then
-        // 0-9; a swipe left/right walks them.
-        for (direction, delta) in [(UISwipeGestureRecognizer.Direction.left, 1), (.right, -1)] {
+        let tripleTap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        tripleTap.numberOfTapsRequired = 3
+        tripleTap.accessibilityValue = TerminalGesture.tripleTap.rawValue
+        addGestureRecognizer(tripleTap)
+        // The double tap has to wait: the first two taps of a triple tap are
+        // otherwise claimed by it, and the triple tap never fires.
+        doubleTap.require(toFail: tripleTap)
+
+        // Moshi's terminal gestures use a three-finger horizontal swipe to walk
+        // tmux windows; Ctrl-b n / Ctrl-b p by default, bindable like the rest.
+        for (direction, gesture) in [(UISwipeGestureRecognizer.Direction.left, TerminalGesture.swipeLeft),
+                                     (.right, .swipeRight)] {
             let swipe = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipe(_:)))
             swipe.direction = direction
             swipe.numberOfTouchesRequired = 3
-            swipe.accessibilityValue = String(delta)
+            swipe.accessibilityValue = gesture.rawValue
             addGestureRecognizer(swipe)
         }
     }
@@ -140,15 +157,24 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
         }
     }
 
-    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-        sendTab()
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        guard let raw = gesture.accessibilityValue,
+              let gestureKind = TerminalGesture(rawValue: raw) else { return }
+        send(binding: gestureKind)
     }
 
     @objc private func handleSwipe(_ gesture: UISwipeGestureRecognizer) {
-        guard let delta = Int(gesture.accessibilityValue ?? "0") else { return }
-        // Ctrl-b n / Ctrl-b p — next/previous tmux window.
-        write(Data([0x02]))
-        write(Data(delta > 0 ? [0x6E] : [0x70]))
+        guard let raw = gesture.accessibilityValue,
+              let gestureKind = TerminalGesture(rawValue: raw) else { return }
+        send(binding: gestureKind)
+    }
+
+    /// Sends whatever the gesture is bound to, falling back to its built-in
+    /// meaning. The bytes come from `GestureStore`, so a gesture and a key on
+    /// the accessory bar that share a binding also share an implementation.
+    private func send(binding gesture: TerminalGesture) {
+        guard let bytes = gestures?.bytes(for: gesture), !bytes.isEmpty else { return }
+        write(Data(bytes))
     }
 
     // MARK: - Session control
@@ -389,6 +415,13 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate {
     #if DEBUG
     /// Whether the session is up right now. Test-only.
     var isLiveForTesting: Bool { status.isLive }
+
+    /// Runs a gesture's binding exactly as the recogniser's handler does.
+    /// Test-only; see `DebugSeed.fireGestureWhenConnected`.
+    func fireGestureForTesting(_ gesture: TerminalGesture) {
+        guard status.isLive else { return }
+        send(binding: gesture)
+    }
 
     /// Types into the live session exactly as the keyboard does. Test-only;
     /// see `DebugSeed.typeWhenConnected`.
