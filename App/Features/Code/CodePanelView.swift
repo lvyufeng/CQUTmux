@@ -123,7 +123,9 @@ struct CodePanelView: View {
         }
         .sheet(isPresented: $showGoTo) {
             if let host = connection.host {
-                GoToDirectoryView(host: host, current: path, recents: recents) { next in
+                GoToDirectoryView(
+                    host: host, current: path, recents: recents, client: connection.client
+                ) { next in
                     path = next
                     recents.record(next, for: host)
                     Task { if let client = connection.client { await loadFiles(client) } }

@@ -28,6 +28,7 @@ import { homedir, hostname, networkInterfaces, tmpdir, userInfo } from 'node:os'
 import { createPushService } from './push.mjs'
 import { herdrStatus, herdrSnapshot, herdrApprove, herdrRead, herdrFocusPane } from './herdr.mjs'
 import { readTranscript } from './transcript.mjs'
+import { recentDirectories } from './recent.mjs'
 import { terminal as qrTerminal } from './qr.mjs'
 
 const run = promisify(execFile)
@@ -738,6 +739,25 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { enabled: false, available: true, ports: [] })
     }
     return json(res, 200, { enabled: true, ...(await listeningPorts()) })
+  }
+
+  if (req.method === 'GET' && url.pathname === '/recent-directories') {
+    // Gated on the same flag as the port scan: both are "look at the host
+    // unasked", and a user who turned that off meant it for the whole class of
+    // probes rather than for the one screen they happened to be looking at.
+    if (args.alwaysOnDiscovery === false) {
+      return json(res, 200, { enabled: false, available: true, directories: [] })
+    }
+    // Best-effort and silent, like the port probe: a host with no agents
+    // installed produces an empty list, not an error the app has to explain.
+    try {
+      return json(res, 200, { enabled: true, available: true, ...(await recentDirectories()) })
+    } catch (error) {
+      return json(res, 200, {
+        enabled: true, available: true, directories: [],
+        error: String(error?.message || error),
+      })
+    }
   }
 
   if (req.method === 'GET' && url.pathname === '/simulators') {

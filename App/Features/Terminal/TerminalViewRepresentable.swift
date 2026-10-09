@@ -41,9 +41,11 @@ struct TerminalScreen: View {
     @State private var showGestures = false
     @State private var showJumpTo = false
     @State private var showHistory = false
+    @State private var showSpeech = false
     /// Set once the link's attach command has been sent, so a reconnect — which
     /// also reaches `.connected` — does not attach a second time.
     @State private var didFollowLink = false
+    @Environment(\.dismiss) private var dismiss
     @Environment(ThemeStore.self) private var themes
     @Environment(ToolbarSettings.self) private var toolbar
     @Environment(TerminalFontStore.self) private var fonts
@@ -67,7 +69,17 @@ struct TerminalScreen: View {
             .navigationTitle(host.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { StatusBadge(status: coordinator.status) }
+                ToolbarItem(placement: .principal) {
+                    StatusBadge(
+                        status: coordinator.status,
+                        // A short drag down opens the session switcher, which is
+                        // a gesture on the header rather than another bar button
+                        // because the header is the part of the screen a thumb
+                        // reaches without looking.
+                        onSoftDrag: { if connection.client != nil { showSessions = true } },
+                        onHardDrag: { minimize() }
+                    )
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button {
@@ -114,6 +126,9 @@ struct TerminalScreen: View {
             }
             .sheet(isPresented: $showGestures) {
                 NavigationStack { GestureEditorView(store: gestures) }
+            }
+            .sheet(isPresented: $showSpeech) {
+                NavigationStack { SpeechSettingsView() }
             }
             .sheet(isPresented: $showHistory) {
                 NavigationStack {
@@ -373,6 +388,21 @@ struct TerminalScreen: View {
             .tint(shortcut.problem == nil ? nil : .orange)
             .accessibilityHint(shortcut.problem ?? shortcut.text)
         }
+    }
+
+    /// Puts the session away and goes back to the host list.
+    ///
+    /// Two things have to be true for this to be the right gesture and not a
+    /// data-losing one. The transport is disconnected, so the session is not
+    /// left running in the background competing for the one connection the
+    /// gateway allows. And it is *not* a sign-out: the tmux/zellij/herdr
+    /// session on the host is untouched — this is the "minimize" Moshi
+    /// documents, and a persistent mux session is exactly what makes it
+    /// non-destructive. `userInitiated` is set first so the disconnect is not
+    /// treated as a dropped connection and retried by the backoff.
+    private func minimize() {
+        coordinator.terminal?.minimize()
+        dismiss()
     }
 
     /// Image paste needs the gateway to carry the bytes to the host, so the
@@ -839,12 +869,45 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
 
 private struct StatusBadge: View {
     let status: CQUTTerminalView.Status
+    /// A short downward drag: open the session switcher.
+    var onSoftDrag: () -> Void = {}
+    /// A long one, or a flick: put the session away and go back to the hosts.
+    var onHardDrag: () -> Void = {}
+
+    /// How far the badge must be dragged before it counts. The soft threshold
+    /// is about a thumb's travel on a small target; the hard one is far enough
+    /// that it cannot be reached by accident while aiming for the soft one.
+    private static let softDrag: CGFloat = 24
+    private static let hardDrag: CGFloat = 90
 
     var body: some View {
         HStack(spacing: 6) {
             Circle().fill(color).frame(width: 7, height: 7)
             Text(text).font(.caption).foregroundStyle(.secondary)
         }
+        // The badge is a small target, so the whole row has to be draggable
+        // rather than just the dot and the word.
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: Self.softDrag)
+                .onEnded { value in
+                    let dy = value.translation.height
+                    // Downward only, and not a diagonal: an upward drag or a
+                    // sideways one is someone aiming at something else and
+                    // catching the title on the way past.
+                    guard dy > 0, abs(value.translation.width) < abs(dy) else { return }
+                    // `predictedEndTranslation` is where the finger was heading,
+                    // which is what separates a flick from a slow drag to the
+                    // same place — a flick down should put the session away even
+                    // though it travelled less than the hard threshold.
+                    let projected = value.predictedEndTranslation.height
+                    if dy >= Self.hardDrag || projected >= Self.hardDrag * 1.6 {
+                        onHardDrag()
+                    } else if dy >= Self.softDrag {
+                        onSoftDrag()
+                    }
+                }
+        )
     }
 
     private var color: SwiftUI.Color {

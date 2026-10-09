@@ -140,3 +140,18 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   resize text without leaving a session, so the font is still the default and
   the pane zoom is a choice. On a host with no multiplexer a pinch still resizes
   the text, so the gesture is never dead.
+
+- **Recent directories discovered from the agents' own history** — a new
+  `GET /recent-directories` on the gateway reads Claude Code's
+  `~/.claude/projects/*/**.jsonl`, Codex's and OpenCode's session trees, and
+  Cursor's, pulling a `cwd` out of the head of each transcript. The Claude Code
+  *slug* is lossy (`/srv/a-b` and `/srv/a/b` both become `-srv-a-b`), so a path
+  recovered from a directory name is marked `inferred` and shown with a
+  question mark rather than presented as a fact. Settings → Code → Go to now
+  lists them under "Agent history", separately from the app's own visits —
+  those are two different claims and merging them would make a directory the
+  user never opened look like one they had.
+- **Header drags** — a short drag down on the status badge opens the session
+  switcher; a long one, or a fast flick, minimizes: disconnect and pop back to
+  the host list. The host's tmux/zellij/herdr session is untouched, which is
+  what makes minimizing safe to offer as a gesture.

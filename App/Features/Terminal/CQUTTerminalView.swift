@@ -454,6 +454,14 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         transport.disconnect()
     }
 
+    /// Ends this client without disturbing the session on the host.
+    ///
+    /// The same teardown as `disconnect` — the difference is what the caller
+    /// does next, which is pop back to the host list. The host's tmux/zellij/
+    /// herdr session keeps running, which is the whole reason minimizing is
+    /// safe to offer as a gesture rather than a menu item with a warning.
+    func minimize() { disconnect() }
+
     private func handle(_ event: TransportEvent) {
         switch event {
         case .connected:
