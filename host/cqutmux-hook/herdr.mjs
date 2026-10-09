@@ -23,7 +23,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { connect } from 'node:net'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { resolveCommand, socketPath as platformSocketPath } from './platform.mjs'
 
 const run = promisify(execFile)
 
@@ -41,6 +41,32 @@ function binary(args) {
 }
 
 /**
+ * Whether herdr is installed, per platform.
+ *
+ * On POSIX the bare name is enough for `execFile` to find via PATH. On Windows
+ * it is not: the installed program is `herdr.exe` and `execFile('herdr', …)`
+ * fails with ENOENT even though the program is right there. So the probe is a
+ * `Get-Command` through PowerShell, which resolves the real path (and a
+ * package-manager `.cmd` shim) — the same shape as `command -v`. The decision
+ * lives in `platform.mjs`, which is pure so it can be checked without a Windows
+ * machine.
+ */
+export async function herdrResolved(args) {
+  if (args.herdrPath) return { ok: true, path: args.herdrPath }
+  const probe = resolveCommand(DEFAULT_BIN)
+  try {
+    const { stdout } = await run(probe.shell, probe.argv, {
+      timeout: 5000,
+      env: process.env,
+    })
+    const path = stdout.trim().split('\n')[0].trim()
+    return path ? { ok: true, path } : { ok: false, reason: 'not-installed' }
+  } catch (error) {
+    return { ok: false, reason: 'not-installed', message: String(error.message || error) }
+  }
+}
+
+/**
  * A raw request over herdr's Unix socket.
  *
  * The CLI is enough for most of what the app needs, but it has a real gap:
@@ -53,7 +79,7 @@ function binary(args) {
  * envelope (`{id, method, params}`).
  */
 export function callHerdrSocket(args, method, params, timeoutMs = 5000) {
-  const socketPath = args.herdrSocket || join(homedir(), '.config', 'herdr', 'herdr.sock')
+  const socketPath = args.herdrSocket || platformSocketPath(homedir(), process.platform)
   return new Promise(resolve => {
     const id = `cqutmux:${method}`
     let buffer = ''

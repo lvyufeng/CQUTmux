@@ -456,3 +456,26 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   200k tokens. `scripts/context-window-check.sh` pins the arithmetic, and
   `scripts/transcript-check.sh` gained the cases that ensure the gateway passes
   numeric usage through and drops a count that arrives as a string.
+
+- **Native Windows hosts — the resolution decisions.** A gateway on Windows
+  needs two things done differently, and both fail only on the platform nobody
+  is looking at. `execFile('herdr', …)` never finds the installed `herdr.exe`
+  (nor a package-manager `.cmd` shim), so on win32 the probe goes through
+  PowerShell's `Get-Command` — the equivalent of `command -v` — instead of the
+  bare name. And herdr's API socket is a Unix domain socket on macOS and Linux
+  but a *named pipe* on Windows, so the path is derived per platform
+  (`\\.\pipe\herdr-<account>`, sanitised so a name with a separator cannot
+  escape the pipe namespace, and carrying the account so two users on one
+  machine do not collide).
+
+  The decisions live in a new pure `host/cqutmux-hook/platform.mjs` that takes a
+  platform string and returns a description without spawning anything — because
+  the decisions are the part that breaks, and a checked decision is worth more
+  than untestable code. `scripts/windows-host-check.sh` (18 checks) pins the
+  program, arguments, presence signal and socket path for each platform.
+
+  **Honest limit:** this repo's gateway has only ever run on Linux and macOS.
+  The Windows branch is asserted through the pure functions, *not* end to end —
+  no part of this has run on a Windows host. The POSIX path is unchanged, and
+  `scripts/herdr-test.sh` still passes against a real herdr server, which is
+  what proves the refactor did not break the platform we can run.
