@@ -22,7 +22,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { execFile, spawn } from 'node:child_process'
 import { readdir, readFile, stat, mkdir, writeFile, appendFile, rm, chmod } from 'node:fs/promises'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { resolve, relative, isAbsolute, join, dirname } from 'node:path'
 import { homedir, hostname, networkInterfaces, tmpdir, userInfo } from 'node:os'
 import { createPushService } from './push.mjs'
@@ -1067,7 +1067,7 @@ const SETTABLE = [
 
 const COMMANDS = new Set([
   'pair', 'install', 'uninstall', 'serve', 'status', 'doctor', 'logs', 'diff',
-  'set', 'usage', 'version', 'help',
+  'set', 'usage', 'version', 'update', 'help',
 ])
 
 function usage() {
@@ -1082,6 +1082,8 @@ function usage() {
   cqutmux install        print how to keep the gateway running
   cqutmux uninstall      remove the hooks this tool installed
   cqutmux set            show the config settings, or change one
+  cqutmux set --first-run  reopen the first-run prompt on the next install
+  cqutmux update         re-wire the hooks and report the version
   cqutmux usage          agent rate-limit windows, as the app shows them
   cqutmux pair           set up a phone: print a link and its QR code
   cqutmux version        print the version
@@ -1159,9 +1161,9 @@ async function runCommand(name, argv) {
     case 'pair':
       return pair()
     case 'status':
-      return status()
+      return status(argv.includes('--json'))
     case 'doctor':
-      return doctor()
+      return doctor(argv.includes('--yes') || argv.includes('-y'))
     case 'logs':
       return logs(argv.includes('-f') || argv.includes('--follow'))
     case 'install':
@@ -1173,9 +1175,11 @@ async function runCommand(name, argv) {
     case 'set':
       return setCommand(positionals.slice(1))
     case 'usage':
-      return usageCommand()
+      return usageCommand(argv.includes('--sync'))
     case 'version':
       return versionCommand()
+    case 'update':
+      return update(argv)
   }
 }
 
@@ -1196,6 +1200,24 @@ function setCommand(rest) {
     return
   }
   const [key, raw] = rest
+
+  // `set --first-run` clears the marker that says the first-run prompt has been
+  // seen, so the next launch shows it again. It is a *reset*, not a setting,
+  // which is why it is handled before the key lookup — otherwise it would be
+  // reported as an unknown setting, which is what it looks like from the
+  // outside and is not a helpful answer.
+  if (key === '--first-run' || key === 'first-run') {
+    const marker = join(homedir(), '.cqutmux', 'installed')
+    try {
+      if (existsSync(marker)) rmSync(marker, { force: true })
+      process.stdout.write('first-run prompt will be shown again on the next install\n')
+    } catch (error) {
+      process.stderr.write(`cqutmux: could not clear ${marker}: ${error.message}\n`)
+      process.exitCode = 1
+    }
+    return
+  }
+
   const name = key.replace(/-/g, '_')
   if (!SETTABLE.includes(name)) {
     process.stderr.write(`cqutmux: unknown setting "${key}". Known: ${SETTABLE.join(', ')}\n`)
@@ -1303,7 +1325,7 @@ function writeConfigValue(config, key, value) {
 /// standalone computation would print an empty board and look like a broken
 /// feature. This reaches the gateway over the same loopback endpoint the app
 /// does, which also means it sees exactly what the app sees.
-async function usageCommand() {
+async function usageCommand(sync = false) {
   const url = `http://127.0.0.1:${args.port}/usage`
   let body
   try {
@@ -1319,6 +1341,19 @@ async function usageCommand() {
       `Usage is counted from events the gateway has seen, so it needs one running.\n`
     )
     process.exit(1)
+  }
+  // `--sync` asks the gateway to refresh from the providers first. The counters
+  // otherwise come from what the hooks reported, which is only as fresh as the
+  // last agent event — so a script that wants the current numbers has to say so
+  // rather than being handed whatever the daemon happens to hold.
+  if (sync && body.enabled !== false) {
+    try {
+      const refreshed = await fetch(`${url}?sync=1`, { headers: authHeaders() })
+      if (refreshed.ok) body = await refreshed.json()
+    } catch {
+      // Falls through to what was already fetched: a failed refresh is not
+      // worth failing the command over when a readable board is in hand.
+    }
   }
   if (body.enabled === false) {
     process.stdout.write('usage collection is off (cqutmux set usage-collection on)\n')
@@ -1346,29 +1381,80 @@ async function usageCommand() {
 /// hook the user added after installing, which is a bigger surprise than
 /// leaving a `.cqutmux-backup` file behind for them to inspect.
 async function uninstall() {
-  const target = join(homedir(), '.claude', 'settings.json')
+  let total = 0
+  for (const agent of agentHooks()) {
+    try {
+      total += await uninstallAgent(agent)
+    } catch (error) {
+      process.stderr.write(`cqutmux: could not clean ${agent.label}: ${error.message}\n`)
+    }
+  }
+  if (!total) {
+    process.stdout.write('nothing to uninstall: no cqutmux hooks found\n')
+    return
+  }
+  process.stdout.write(`removed ${total} hook entr${total === 1 ? 'y' : 'ies'}\n`)
+}
+
+/// Removes our hooks from one agent, leaving everything else as it was.
+///
+/// Matched on the bridge path rather than on an index or a count, which is what
+/// lets a user's own hooks in the same file survive — the promise `install`
+/// makes and the only one that makes it safe to run.
+async function uninstallAgent(agent) {
+  if (agent.format === 'kimi-toml') {
+    let text
+    try {
+      text = await readFile(agent.path, 'utf8')
+    } catch {
+      return 0
+    }
+    if (!text.includes(agent.bridge)) return 0
+    const blocks = text.split(/(?=^\[\[hooks\]\])/m)
+    const kept = blocks.filter(block => !block.includes(agent.bridge))
+    const removed = blocks.length - kept.length
+    await writeFile(agent.path, kept.join('').trimEnd() + '\n')
+    process.stdout.write(`removed ${removed} hook(s) from ${agent.path}\n`)
+    return removed
+  }
+
   let settings
   try {
-    settings = JSON.parse(readFileSync(target, 'utf8'))
+    settings = JSON.parse(await readFile(agent.path, 'utf8'))
   } catch {
-    process.stdout.write(`nothing to uninstall: no readable ${target}\n`)
-    return
+    return 0
   }
-  const hooks = settings.hooks || {}
+
   let removed = 0
-  for (const [event, entries] of Object.entries(hooks)) {
-    if (!Array.isArray(entries)) continue
-    const kept = entries.filter(entry => !JSON.stringify(entry).includes('claude-code-hook'))
-    removed += entries.length - kept.length
-    if (kept.length) hooks[event] = kept
-    else delete hooks[event]
+  if (agent.format === 'cursor') {
+    const hooks = settings.hooks ?? {}
+    for (const [event, entries] of Object.entries(hooks)) {
+      if (!Array.isArray(entries)) continue
+      const kept = entries.filter(entry => !agent.ours(entry))
+      removed += entries.length - kept.length
+      if (kept.length) hooks[event] = kept
+      else delete hooks[event]
+    }
+  } else if (agent.format === 'antigravity') {
+    if (settings.cqutmux) {
+      removed = 1
+      delete settings.cqutmux
+    }
+  } else {
+    const hooks = settings.hooks ?? {}
+    for (const [event, entries] of Object.entries(hooks)) {
+      if (!Array.isArray(entries)) continue
+      const kept = entries.filter(entry => !agent.ours(entry))
+      removed += entries.length - kept.length
+      if (kept.length) hooks[event] = kept
+      else delete hooks[event]
+    }
   }
-  if (!removed) {
-    process.stdout.write(`nothing to uninstall: no cqutmux hooks in ${target}\n`)
-    return
-  }
-  writeFileSync(target, JSON.stringify(settings, null, 2))
-  process.stdout.write(`removed ${removed} hook entr${removed === 1 ? 'y' : 'ies'} from ${target}\n`)
+
+  if (!removed) return 0
+  await writeFile(agent.path, JSON.stringify(settings, null, 2) + '\n')
+  process.stdout.write(`removed ${removed} hook(s) from ${agent.path}\n`)
+  return removed
 }
 
 /// The address the phone should dial: the first non-loopback IPv4, or whatever
@@ -1531,15 +1617,27 @@ if (existsSync(keyPath)) {
 /// Reports whether a gateway is answering here, and what it says. Reads the
 /// health endpoint rather than trusting a pid file, because a stale pid file is
 /// exactly the thing this command exists to catch.
-async function status() {
+async function status(asJson) {
   const url = `http://127.0.0.1:${args.port}/health`
   try {
     const response = await fetch(url, { headers: authHeaders() })
     if (!response.ok) {
+      if (asJson) return emitStatusJson({ running: false, port: args.port, error: `HTTP ${response.status}` })
       process.stderr.write(`cqutmux: gateway answered ${response.status} on port ${args.port}\n`)
       process.exit(1)
     }
     const body = await response.json()
+    if (asJson) {
+      return emitStatusJson({
+        running: true,
+        port: args.port,
+        events: body.events,
+        pendingApprovals: body.pendingApprovals,
+        uptime: body.uptime,
+        version: VERSION,
+        configPath: Object.keys(config.values).some(k => k.startsWith('gateway.')) ? config.path : null,
+      })
+    }
     process.stdout.write(`running on 127.0.0.1:${args.port}\n`)
     process.stdout.write(`events   ${body.events}\n`)
     process.stdout.write(`pending  ${body.pendingApprovals}\n`)
@@ -1547,9 +1645,23 @@ async function status() {
     process.stdout.write(`config   ${Object.keys(config.values).some(k => k.startsWith('gateway.'))
       ? config.path : 'defaults'}\n`)
   } catch (error) {
+    if (asJson) return emitStatusJson({ running: false, port: args.port, error: error.message })
     process.stderr.write(`cqutmux: no gateway on 127.0.0.1:${args.port} (${error.message})\n`)
     process.exit(1)
   }
+}
+
+/// One object, one line of stdout, and a non-zero exit when nothing is running
+/// — the shape a script wants. The human-readable `status` and this share the
+/// same probe so the two cannot disagree about whether a gateway is up; only
+/// the rendering differs.
+///
+/// A missing gateway is reported *in* the JSON as well as by the exit code: a
+/// script that captures stdout and ignores the status would otherwise parse an
+/// empty string and have to guess why.
+function emitStatusJson(payload) {
+  process.stdout.write(JSON.stringify(payload) + '\n')
+  if (!payload.running) process.exit(1)
 }
 
 function authHeaders() {
@@ -1559,7 +1671,7 @@ function authHeaders() {
 /// Checks the things that actually stop the app from working, in the order they
 /// would bite. Each one prints what it found and why it matters, because a bare
 /// "ERROR" leaves the user to guess which of these the app will trip over.
-async function doctor() {
+async function doctor(repair = false) {
   let failures = 0
   const check = (ok, label, detail) => {
     process.stdout.write(`${ok ? 'ok  ' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}\n`)
@@ -1608,8 +1720,50 @@ async function doctor() {
     check(true, 'config', 'defaults (no config file)')
   }
 
+  // `--yes` repairs what a repair can honestly fix. It is deliberately narrow:
+// a missing tmux or a gateway that is not running is not something this
+// command can conjure, and a `doctor --yes` that "fixed" either by pretending
+// would be worse than one that says so. What it does repair is the hook
+// wiring, which `install` already knows how to write and which is the failure
+// a user most often cannot diagnose by hand.
+  if (repair) {
+    const bridge = join(import.meta.dirname, 'claude-code-hook.sh')
+    const target = join(homedir(), '.claude', 'settings.json')
+    let needed = true
+    try {
+      const parsed = JSON.parse(await readFile(target, 'utf8'))
+      needed = !Object.values(parsed.hooks ?? {}).some(groups =>
+        (Array.isArray(groups) ? groups : []).some(group => isOurs(group, bridge)))
+    } catch {
+      // Missing or unparseable: `install` reports the unparseable case itself
+      // rather than overwriting the user's file, so hand it the decision.
+      needed = true
+    }
+    if (needed) {
+      process.stdout.write('\n--yes: installing the agent hooks\n')
+      await install([])
+      failures = 0
+    } else {
+      process.stdout.write('\nhooks already wired\n')
+    }
+  }
+
   process.stdout.write(failures === 0 ? '\nready\n' : `\n${failures} thing(s) to fix\n`)
   if (failures > 0) process.exit(1)
+}
+
+/// `cqutmux update` — re-run the installer and say what version it landed.
+///
+/// There is no downloader here on purpose: the gateway is a plain Node script
+/// that ships with the app's repository, and a `cqutmux update` that fetched
+/// and ran code from the network would be a much larger thing to trust than the
+/// problem it solves. What this does is what a user actually needs after
+/// pulling a new checkout — re-wire the hooks so a changed bridge path or a
+/// new event is picked up — plus a version report so the other end can be told
+/// apart from an old install.
+async function update(argv) {
+  process.stdout.write(`cqutmux ${VERSION} at ${import.meta.dirname}\n`)
+  await install(argv)
 }
 
 async function logs(follow) {
@@ -1624,65 +1778,283 @@ async function logs(follow) {
   child.on('exit', code => process.exit(code ?? 0))
 }
 
-async function install(argv) {
-  const dryRun = argv.includes('--dry-run') || argv.includes('--print')
+/// The agents this installer knows how to wire.
+///
+/// Each entry carries its own format, because one generic writer would be wrong
+/// for at least three of these: Claude Code, Cursor and Antigravity all nest
+/// `{type, command}` under an event, but Antigravity keys its events under a
+/// *named* hook object, Kimi uses TOML, and Codex needs a feature flag before
+/// its hooks are even read at all. The schemas are the agents' own documented
+/// ones, with the source beside each.
+///
+/// `events` maps the agent's own event name to the kind the gateway records.
+/// Only events the agent documents appear, so nothing here invents a name and
+/// hopes.
+///
+/// OpenCode is deliberately absent: it documents no declarative command hook,
+/// only a JavaScript plugin API. A config entry it would ignore is worse than
+/// no entry, because it looks wired up.
+function agentHooks() {
+  const claudeBridge = join(import.meta.dirname, 'claude-code-hook.sh')
+  const nodeBridge = join(import.meta.dirname, 'agent-hook.mjs')
+  return [
+    {
+      id: 'claude-code',
+      label: 'Claude Code',
+      // https://docs.claude.com/en/docs/claude-code/hooks
+      path: join(homedir(), '.claude', 'settings.json'),
+      format: 'claude',
+      bridge: claudeBridge,
+      // The shell bridge predates the shared one and carries the Claude Code
+      // payload field names directly; changing it would rewrite every existing
+      // install's hook command for no gain.
+      command: kind => `"${claudeBridge}" ${kind}`,
+      ours: group => isOurs(group, claudeBridge),
+    },
+    {
+      id: 'codex',
+      label: 'Codex CLI',
+      // https://developers.openai.com/codex/hooks
+      path: join(homedir(), '.codex', 'hooks.json'),
+      format: 'claude', // same nested {type, command} shape
+      bridge: nodeBridge,
+      command: kind => `"${nodeBridge}" codex ${kind}`,
+      ours: group => isOurs(group, nodeBridge),
+      // Codex ignores hooks entirely unless this is set, so installing them
+      // without it would write a file that does nothing — the exact failure
+      // that is impossible to debug from the app's side.
+      tomlFeature: join(homedir(), '.codex', 'config.toml'),
+      events: { PreToolUse: 'approval', Stop: 'notice' },
+    },
+    {
+      id: 'cursor',
+      label: 'Cursor',
+      // https://cursor.com/docs/hooks
+      path: join(homedir(), '.cursor', 'hooks.json'),
+      format: 'cursor', // {version, hooks: {camelCaseEvent: [...]}}
+      bridge: nodeBridge,
+      command: kind => `"${nodeBridge}" cursor ${kind}`,
+      // Cursor's entries put `command` directly on the entry, unlike the
+      // nested `{hooks: [{command}]}` the others use — so this cannot share
+      // `isOurs`, which looks inside a `hooks` array.
+      ours: hook => typeof hook?.command === 'string' && hook.command.includes(nodeBridge),
+      versionKey: true,
+      events: { preToolUse: 'approval', stop: 'notice' },
+    },
+    {
+      id: 'kimi-code',
+      label: 'Kimi Code CLI',
+      // https://moonshotai.github.io/kimi-code/en/customization/hooks
+      path: join(homedir(), '.kimi-code', 'config.toml'),
+      format: 'kimi-toml',
+      bridge: nodeBridge,
+      command: kind => `"${nodeBridge}" kimi ${kind}`,
+      events: { PreToolUse: 'approval', Stop: 'notice' },
+    },
+    {
+      id: 'antigravity',
+      label: 'Antigravity',
+      // https://antigravity.google/docs/hooks
+      path: join(homedir(), '.gemini', 'config', 'hooks.json'),
+      format: 'antigravity', // {name: {Event: [{matcher, hooks: [...]}]}}
+      bridge: nodeBridge,
+      command: kind => `"${nodeBridge}" antigravity ${kind}`,
+      events: { PreToolUse: 'approval', PostInvocation: 'notice' },
+    },
+  ]
+}
 
-  // 1. Agent hook config.
-  const bridge = join(import.meta.dirname, 'claude-code-hook.sh')
-  const target = join(homedir(), '.claude', 'settings.json')
+/// Writes one agent's hooks, in that agent's own format.
+///
+/// Every writer follows the same three rules, which are what make a re-run and
+/// an uninstall safe:
+///
+///   1. Read and parse the existing file first; if it does not parse, stop and
+///      say so rather than overwriting it. The file may hold the user's own
+///      hooks, and guessing at a broken one risks their work.
+///   2. Keep everything that is not ours, matched by the bridge path in the
+///      command. An installer that drops someone's hooks is worse than none.
+///   3. Back up the original the first time, so a mistaken install is
+///      reversible by hand.
+async function installAgentHooks(agent, dryRun) {
+  const events = agent.events ?? { PreToolUse: 'approval', Stop: 'notice' }
+  const additions = Object.entries(events).map(([event, kind]) => [event, agent.command(kind)])
 
-  const wanted = {
-    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `"${bridge}" approval` }] }],
-    Stop: [{ hooks: [{ type: 'command', command: `"${bridge}" notice` }] }],
+  // TOML files (Kimi, and Codex's feature flag) are edited as text: a TOML
+  // round-trip through a parser would reformat the user's whole config, and the
+  // file is the user's.
+  if (agent.format === 'kimi-toml') {
+    return installKimi(agent, additions, dryRun)
   }
 
-  let existing = {}
-  let raw = null
-  try {
-    raw = await readFile(target, 'utf8')
-    existing = JSON.parse(raw)
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      // A settings file that does not parse is the user's, and guessing at it
-      // risks throwing away their work. Report and stop rather than rewrite.
-      process.stderr.write(`cqutmux: ${target} is not valid JSON (${error.message})\n`)
-      process.stderr.write(`cqutmux: leaving it alone; nothing was written\n`)
-      process.exit(1)
+  const existing = await readJson(agent.path)
+  const merged = structuredClone(existing ?? {})
+
+  if (agent.format === 'cursor') {
+    merged.version ??= 1
+    merged.hooks ??= {}
+    for (const [event, command] of additions) {
+      const current = Array.isArray(merged.hooks[event]) ? merged.hooks[event] : []
+      const theirs = current.filter(hook => !agent.ours(hook))
+      merged.hooks[event] = [...theirs, { type: 'command', command, timeout: 5 }]
     }
-  }
-
-  // Merge without disturbing anything already there: Moshi's promise, and the
-  // right one — a hook installer that drops someone's existing hooks is worse
-  // than no installer. Our entries are recognised by the command string, so
-  // re-running updates them in place instead of stacking duplicates.
-  const merged = structuredClone(existing)
-  merged.hooks ??= {}
-  let changed = 0
-  for (const [event, additions] of Object.entries(wanted)) {
-    const current = Array.isArray(merged.hooks[event]) ? merged.hooks[event] : []
-    const mine = current.filter(group => isOurs(group, bridge))
-    const theirs = current.filter(group => !isOurs(group, bridge))
-    if (JSON.stringify(mine) !== JSON.stringify(additions)) changed++
-    merged.hooks[event] = [...theirs, ...additions]
+  } else if (agent.format === 'antigravity') {
+    // Antigravity keys its events under a *named* hook object, so ours gets a
+    // name — which also makes it removable without touching anything else.
+    merged.cqutmux ??= {}
+    for (const [event, command] of additions) {
+      const groups = [{
+        matcher: '*',
+        hooks: [{ type: 'command', command, timeout: 5 }],
+      }]
+      if (event === 'PostInvocation') groups[0] = { hooks: [{ type: 'command', command, timeout: 5 }] }
+      merged.cqutmux[event] = groups
+    }
+  } else {
+    // Claude Code, and Codex's hooks.json, share the nested shape.
+    merged.hooks ??= {}
+    for (const [event, command] of additions) {
+      const current = Array.isArray(merged.hooks[event]) ? merged.hooks[event] : []
+      const theirs = current.filter(group => !agent.ours(group))
+      merged.hooks[event] = [...theirs, { matcher: '*', hooks: [{ type: 'command', command }] }]
+    }
   }
 
   if (dryRun) {
-    process.stdout.write(`would write ${target}:\n`)
-    process.stdout.write(JSON.stringify({ hooks: merged.hooks }, null, 2) + '\n')
-  } else {
-    await mkdir(dirname(target), { recursive: true })
-    if (raw !== null) {
-      // Keep a copy the first time, so a mistaken install is reversible.
-      const backup = `${target}.cqutmux-backup`
-      if (!existsSync(backup)) await writeFile(backup, raw)
+    process.stdout.write(`would write ${agent.path} (${agent.label}):\n`)
+    process.stdout.write(JSON.stringify(merged, null, 2) + '\n')
+    return
+  }
+
+  await writeJson(agent.path, merged, existing !== null)
+  await chmod(agent.bridge, 0o755).catch(() => {})
+  process.stdout.write(`installed hooks for ${agent.label} in ${agent.path}\n`)
+
+  // Codex reads no hooks at all until the feature flag is on. Writing a file it
+  // ignores is the failure that cannot be diagnosed from the phone, so the flag
+  // is set here and the reason printed.
+  if (agent.tomlFeature) {
+    const changed = await ensureTomlFeature(agent.tomlFeature, 'features.hooks', true, dryRun)
+    if (changed) {
+      process.stdout.write(`  enabled features.hooks in ${agent.tomlFeature} (Codex ignores hooks without it)\n`)
     }
-    await writeFile(target, JSON.stringify(merged, null, 2) + '\n')
-    await chmod(bridge, 0o755).catch(() => {})
-    process.stdout.write(
-      changed === 0
-        ? `hooks already installed in ${target}\n`
-        : `installed hooks in ${target}${raw !== null ? ` (backup: ${target}.cqutmux-backup)` : ''}\n`
-    )
+  }
+}
+
+/// Kimi Code CLI's hooks are a TOML array of tables, and the docs are explicit
+/// that an unknown field makes the whole config fail to load — so the four
+/// documented fields are the only ones written.
+async function installKimi(agent, additions, dryRun) {
+  let text = ''
+  try {
+    text = await readFile(agent.path, 'utf8')
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+
+  // Our blocks are recognised by the bridge path inside them, and an existing
+  // block runs from its `[[hooks]]` header to the next one.
+  const blocks = text.split(/(?=^\[\[hooks\]\])/m)
+  const kept = blocks.filter(block => !block.includes(agent.bridge))
+  const ours = additions.map(([, command]) => `[[hooks]]
+event = "${additions.find(([, c]) => c === command)[0]}"
+command = "${command}"
+`)
+
+  const header = kept.join('').trimEnd()
+  const next = [header, ...ours].filter(Boolean).join('\n\n') + '\n'
+
+  if (dryRun) {
+    process.stdout.write(`would write ${agent.path} (${agent.label}):\n${next}`)
+    return
+  }
+  await writeFileWithBackup(agent.path, next, text || null)
+  process.stdout.write(`installed hooks for ${agent.label} in ${agent.path}\n`)
+}
+
+/// Flips a `key = value` in the `[section]` of a TOML file, adding the section
+/// if it is missing. Returns whether anything changed.
+///
+/// Text-level on purpose: the file is the user's, and a full TOML parse and
+/// re-emit would rewrite every comment and every key order in it.
+async function ensureTomlFeature(path, key, value, dryRun) {
+  const [section, name] = key.split('.')
+  let text = ''
+  try {
+    text = await readFile(path, 'utf8')
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+
+  const sectionPattern = new RegExp(`^\\[${section}\\]$`, 'm')
+  const keyPattern = new RegExp(`^\\s*${name}\\s*=\\s*(true|false)\\s*$`, 'm')
+  if (keyPattern.test(text)) {
+    const next = text.replace(keyPattern, `${name} = ${value}`)
+    if (next === text) return false
+    if (!dryRun) await writeFileWithBackup(path, next, text)
+    return true
+  }
+
+  const block = `[${section}]\n${name} = ${value}\n`
+  const next = sectionPattern.test(text)
+    ? text.replace(sectionPattern, block.trimEnd())
+    : `${text.trimEnd()}${text.trim() ? '\n\n' : ''}${block}`
+  if (!dryRun) await writeFileWithBackup(path, next, text || null)
+  return true
+}
+
+/// Reads a JSON config, distinguishing "missing" (which becomes an empty
+/// object) from "present but broken" (which stops the install).
+async function readJson(path) {
+  let raw
+  try {
+    raw = await readFile(path, 'utf8')
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+  if (!raw.trim()) return null
+  try {
+    return JSON.parse(raw)
+  } catch (error) {
+    throw new Error(`${path} is not valid JSON (${error.message}); leaving it alone`)
+  }
+}
+
+async function writeJson(path, value, backUp) {
+  const text = JSON.stringify(value, null, 2) + '\n'
+  await writeFileWithBackup(path, text, backUp ? await readFile(path, 'utf8').catch(() => null) : null)
+}
+
+/// Writes a file, keeping a one-time `.cqutmux-backup` of what was there.
+async function writeFileWithBackup(path, text, existing) {
+  await mkdir(dirname(path), { recursive: true })
+  if (existing !== null && existing !== undefined) {
+    const backup = `${path}.cqutmux-backup`
+    if (!existsSync(backup)) await writeFile(backup, existing)
+  }
+  await writeFile(path, text)
+}
+
+async function install(argv) {
+  const dryRun = argv.includes('--dry-run') || argv.includes('--print')
+
+  // 1. Agent hook config. Claude Code first, because it is the one this tool
+  // grew up with and the one a failure here matters most for.
+  const claude = agentHooks().find(a => a.id === 'claude-code')
+  await installClaude(claude, dryRun)
+
+  // 1b. The rest, each in its own documented format. A failure on one does not
+  // stop the others: a machine often has three of these installed and one
+  // misconfigured, and refusing to wire the rest over it would be the wrong
+  // trade.
+  for (const agent of agentHooks()) {
+    if (agent.id === 'claude-code') continue
+    try {
+      await installAgentHooks(agent, dryRun)
+    } catch (error) {
+      process.stderr.write(`cqutmux: could not wire ${agent.label}: ${error.message}\n`)
+    }
   }
 
   // 2. Supervision.
@@ -1698,6 +2070,44 @@ Keep the gateway running at login.
 The app reaches this port over the SSH session it already has, so there is no
 need to open a firewall port or expose it to the network. Bind stays loopback.
 `)
+}
+
+/// Claude Code's own writer, kept separate only because its hook command is the
+/// shell bridge rather than the shared Node one — the file format is identical
+/// to Codex's.
+async function installClaude(agent, dryRun) {
+  const bridge = agent.bridge
+  const target = agent.path
+
+  const wanted = {
+    PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `"${bridge}" approval` }] }],
+    Stop: [{ hooks: [{ type: 'command', command: `"${bridge}" notice` }] }],
+  }
+
+  const existing = await readJson(target)
+  const merged = structuredClone(existing ?? {})
+  merged.hooks ??= {}
+  let changed = 0
+  for (const [event, additions] of Object.entries(wanted)) {
+    const current = Array.isArray(merged.hooks[event]) ? merged.hooks[event] : []
+    const mine = current.filter(group => isOurs(group, bridge))
+    const theirs = current.filter(group => !isOurs(group, bridge))
+    if (JSON.stringify(mine) !== JSON.stringify(additions)) changed++
+    merged.hooks[event] = [...theirs, ...additions]
+  }
+
+  if (dryRun) {
+    process.stdout.write(`would write ${target}:\n`)
+    process.stdout.write(JSON.stringify({ hooks: merged.hooks }, null, 2) + '\n')
+    return
+  }
+  await writeJson(target, merged, existing !== null)
+  await chmod(bridge, 0o755).catch(() => {})
+  process.stdout.write(
+    changed === 0
+      ? `hooks already installed in ${target}\n`
+      : `installed hooks in ${target}${existing !== null ? ` (backup: ${target}.cqutmux-backup)` : ''}\n`
+  )
 }
 
 /// Whether a hook group belongs to us. Matched on the bridge script's path
@@ -1727,10 +2137,53 @@ async function diff(argv) {
     + `or run \`cqutmux serve\` and GET /diff?root=${encodeURIComponent(cwd)}.\n`)
 }
 
+/// Publishes the token the hooks need, so they do not have to be configured
+/// with it separately.
+///
+/// This closes a real hole: `install` tells the user to run the gateway with
+/// `--token`, and the bridges are spawned by the agent with no environment of
+/// ours at all — so they posted without an Authorization header and got a 401
+/// that nothing surfaced. The hooks looked installed and no event ever reached
+/// the inbox.
+///
+/// Written 0600 in the user's own directory, and only when a token is actually
+/// set: a world-readable token file would be worse than the problem, and with
+/// no token there is nothing to publish.
+const tokenPath = join(homedir(), '.cqutmux', 'token')
+
+function publishToken() {
+  if (!args.token) return
+  try {
+    mkdirSync(dirname(tokenPath), { recursive: true })
+    writeFileSync(tokenPath, args.token, { mode: 0o600 })
+  } catch {
+    // A read-only home is not a reason to refuse to start the gateway.
+  }
+}
+
+/// Removes the published token on the way out, so a stopped gateway does not
+/// leave a live secret lying around for the next program that reads it.
+function retractToken() {
+  try {
+    if (existsSync(tokenPath)) rmSync(tokenPath, { force: true })
+  } catch {
+    // Best effort, as above.
+  }
+}
+
 server.listen(args.port, '127.0.0.1', () => {
+  publishToken()
   process.stderr.write(`[hook] listening on 127.0.0.1:${args.port} (token: ${args.token ? 'set' : 'none'})\n`)
+  if (args.token) process.stderr.write(`[hook] token published to ${tokenPath} for the hooks\n`)
 })
 
-process.on('SIGINT', () => {
-  server.close(() => process.exit(0))
-})
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    retractToken()
+    server.close(() => process.exit(0))
+    // The listener above only fires if the server had not already closed; this
+    // makes the exit happen either way rather than hanging a stopped daemon.
+    setTimeout(() => process.exit(0), 200).unref()
+  })
+}
+

@@ -27,6 +27,15 @@ KIND="${1:-notice}"
 PORT="${CQUTMUX_PORT:-24543}"
 URL="http://127.0.0.1:${PORT}/events"
 
+# The gateway's token, which it publishes while it runs. Claude Code spawns this
+# hook with none of our environment, so without this a gateway started with
+# `--token` refuses every event with a 401 that nothing reports — the hooks look
+# installed and the inbox stays empty.
+TOKEN="${CQUTMUX_TOKEN:-}"
+if [ -z "$TOKEN" ] && [ -r "$HOME/.cqutmux/token" ]; then
+  TOKEN="$(cat "$HOME/.cqutmux/token")"
+fi
+
 payload="$(cat)"
 
 # Pull nested fields without requiring jq: json_string tool_input file_path
@@ -65,6 +74,7 @@ fi
 # Best-effort: never block the agent if the hook daemon isn't running.
 curl -s -m 2 -X POST "$URL" \
   -H 'content-type: application/json' \
+  ${TOKEN:+-H "authorization: Bearer $TOKEN"} \
   -d "$(python3 -c '
 import json, sys
 print(json.dumps({

@@ -198,3 +198,27 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   raw bytes that go inside the private half, and writing the raw ones there
   yields a file ssh-keygen rejects as "invalid format" while this app's own
   reader reads it back perfectly happily.
+
+- **Multi-agent install.** `cqutmux install` wired Claude Code alone. It now
+  wires five, each in that agent's own documented format — and the formats
+  really are different, which is why this is a table rather than one writer:
+  Claude Code and Codex share the nested `PreToolUse`/`Stop` shape, Cursor uses
+  camelCase events under `{version, hooks}`, Kimi Code CLI is a TOML `[[hooks]]`
+  array with exactly four legal fields, and Antigravity keys its events under a
+  *named* hook object. Codex additionally needs `features.hooks` set or it
+  reads none of this, so the installer flips that flag and says why — a hooks
+  file an agent silently ignores is the failure you cannot diagnose from the
+  phone. OpenCode is deliberately left out: it documents no declarative command
+  hook, only a JavaScript plugin API, and a config entry it would ignore is
+  worse than no entry because it looks wired up.
+- **Every agent's payload reaches one bridge.** The five agents hand a hook the
+  same *kind* of JSON with differently-named fields (`tool_name` vs `toolName`,
+  `session_id` vs `conversation_id`), so `agent-hook.mjs` reads whichever it was
+  given and posts one event. Five per-agent bridge scripts would be five copies
+  of the same curl and five chances to drift.
+- **The hook token hole.** A gateway started with `--token` — which `install`
+  tells you to do — refused every hook with a 401, and nothing surfaced it: the
+  hooks looked installed and the inbox stayed empty, because the agent spawns
+  the bridge with none of the gateway's environment. The gateway now publishes
+  its token to `~/.cqutmux/token` (0600) while it runs and removes it on exit,
+  and both bridges send it.
