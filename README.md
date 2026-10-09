@@ -15,15 +15,16 @@ See plan: [PLAN.md](PLAN.md).
 |---|---|---|
 | 0 | Project skeleton, SwiftUI shell, host CRUD | ✅ |
 | 1 | SSH terminal MVP (swift-nio-ssh + SwiftTerm + tmux) | ✅ |
-| 2 | Mosh / ET transports | 🟡 Mosh's client libraries cross-compile for iOS and complete a real handshake against `mosh-server` (verified end to end in the simulator). Not yet behind `TerminalTransport`/the UI. ET not attempted. |
+| 2 | Mosh / ET transports | ✅ both behind `TerminalTransport`, selected per host; mosh verified end to end against a real `mosh-server`, ET against a real `etserver`/`etterminal` |
 | 3 | Host gateway + agent Inbox / Diff / Files / History | ✅ |
 | 4 | Notifications, Live Activity, voice, image paste, tmux picker | ✅ |
-| 5 | zellij, iPad sidebar, browser + simulator preview, gateway token | ✅ |
-| 6 | Apple Watch approvals | 🟡 builds and embeds; not run — no watch simulator runtime is installed |
+| 5 | zellij + herdr, iPad sidebar, browser + simulator preview, gateway token | ✅ |
+| 6 | Apple Watch approvals | ✅ full round trip driven in the watchOS simulator (phone → wrist → approval → `POST /approve/<id>`) |
 
 Each phase was exercised in the simulator against a real sshd on a loopback
-port, with the host gateway live. See [PLAN.md](PLAN.md) for what is verified
-and what is not.
+port, with the host gateway live. `scripts/` holds a check script per area;
+each one ends in a `<AREA>_PASS` line. See [PLAN.md](PLAN.md) for what is
+verified and — recorded just as carefully — what is not.
 
 ## Architecture
 
@@ -56,17 +57,21 @@ and simulator previews.
 
 ```
 App/                    SwiftUI app (features grouped by domain)
-  Features/Terminal/    the terminal, accessory bar, session picker
+  Features/Terminal/    the terminal, accessory bar, session picker, Jump To
   Features/Agents/      inbox, gateway client, notifications, Live Activity
-  Features/Code/        files, diffs, git history
+  Features/Code/        files, diffs, git history, pasted files
   Features/Preview/     browser bridge and simulator preview
   Features/Security/    Keychain, key management
-Packages/CQUTTransport/ local SwiftPM package: the SSH transport
+  Features/Settings/    theme, font, cursor, speech, iCloud sync, integrations
+  Features/Voice/       dictation engines (Apple / Whisper / Parakeet / cloud)
+Packages/CQUTTransport/ local SwiftPM package: the SSH transport, agent forwarding
 Packages/CQUTMosh/      the mosh↔Swift driver (C); see scripts/mosh-ios/
-host/cqutmux-hook/      host-side gateway daemon (Node.js)
+Packages/CQUTET/        Eternal Terminal; see scripts/et-ios/
+Packages/CQUTWhisper/   whisper.cpp + Parakeet, via a C seam
+host/cqutmux-hook/      host-side gateway daemon and CLI (Node.js, no deps)
 Widgets/                Live Activity / Dynamic Island extension
 Watch/                  watchOS app: approve agent requests from the wrist
-scripts/                bootstrap / build / run
+scripts/                bootstrap / build / run, plus one check script per area
 ```
 
 ## License
