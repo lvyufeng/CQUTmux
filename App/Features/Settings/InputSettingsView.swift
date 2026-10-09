@@ -115,6 +115,7 @@ struct InputSettingsView: View {
         case .enter: "return"
         case .backspace: "delete.left"
         case .keyboard: "keyboard.chevron.compact.down"
+        case .showKeyboard: "keyboard"
         case .arrows: "arrow.up.and.down.and.arrow.left.and.right"
         case .dpad: "square.grid.3x3"
         case .clipboard: "doc.on.doc"

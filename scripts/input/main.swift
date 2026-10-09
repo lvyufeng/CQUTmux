@@ -309,6 +309,16 @@ writer.setCornerShortcut(nil, for: .bottomLeading)
 check(InputSettings.allItems.contains(.enter), "Enter can be added to the bar")
 check(InputSettings.allItems.contains(.backspace), "Backspace can be added to the bar")
 check(InputSettings.allItems.contains(.keyboard), "the keyboard toggle can be added")
+check(InputSettings.allItems.contains(.showKeyboard), "the show-keyboard key can be added")
+check(!InputSettings.defaultItems.contains(.showKeyboard),
+      "show-keyboard is off by default, as Moshi ships it")
+// The bar sits above the keyboard, so hiding the keyboard hides the bar. The
+// hide key without the show key is the trap this pair exists to close: once
+// the keyboard is away there is nothing left on screen to ask for it back, and
+// the only way out is to leave the session. So they ship together, both off by
+// default, and adding one offers the other on the same screen.
+check(!InputSettings.defaultItems.contains(.keyboard),
+      "the hide key is off by default too, so the two move together")
 check(!InputSettings.defaultItems.contains(.enter),
       "Enter is off by default, as Moshi ships it")
 

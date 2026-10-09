@@ -345,6 +345,14 @@ struct TerminalScreen: View {
                    let gesture = TerminalGesture(rawValue: raw) {
                     DebugSeed.fireGestureWhenConnected(view: coordinator.terminal, gesture: gesture)
                 }
+                // The show-keyboard key answers a state a script cannot reach:
+                // `dismissKeyboard` resigns the responder, and no environment
+                // variable can put the keyboard away. So a run says which items
+                // the bar should hold and the bar builds them exactly as the
+                // settings screen would; pressing one is still a real tap.
+                if let spec = ProcessInfo.processInfo.environment["CQUT_DEV_BAR_ITEMS"], !spec.isEmpty {
+                    input.items = spec.split(separator: ",").compactMap { InputSettings.Item(rawValue: String($0)) }
+                }
                 if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "annotate" {
                     // Wait a beat so the gateway tunnel is up; otherwise the
                     // sheet renders its connecting placeholder.
@@ -670,6 +678,24 @@ struct TerminalScreen: View {
         .accessibilityHint("Long press for dictation settings")
     }
 
+    /// Brings the software keyboard back after it has been hidden.
+    ///
+    /// `keyboardButton` can only put the keyboard away: nothing else in the
+    /// terminal summons it, since a tap on the pane goes to a gesture recogniser
+    /// before the responder ever sees it. So the hide key was one-way for the
+    /// rest of the session, which is why this is a key of its own rather than
+    /// another state of the one above it.
+    private var showKeyboardButton: some View {
+        Button {
+            coordinator.terminal?.showKeyboard()
+        } label: {
+            Image(systemName: "keyboard").frame(width: 40, height: 32)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 6))
+        .accessibilityLabel("Show keyboard")
+    }
+
     /// Not named `resignFirstResponder`: that collides with `UIResponder`'s own
     /// instance method and the compiler resolves the call inside a `Button`
     /// action to the view's inherited one rather than to this.
@@ -722,6 +748,7 @@ struct TerminalScreen: View {
         case .enter: key("Return", CtrlKey.enter)
         case .backspace: key("⌫", CtrlKey.backspace)
         case .keyboard: keyboardButton
+        case .showKeyboard: showKeyboardButton
         case .arrows:
             icon("arrow.up", CtrlKey.upArrow)
             icon("arrow.down", CtrlKey.downArrow)

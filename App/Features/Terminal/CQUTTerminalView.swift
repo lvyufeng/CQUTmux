@@ -470,6 +470,22 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         _ = becomeFirstResponder()
     }
 
+    /// Puts the software keyboard back after the bar's hide button took it away.
+    ///
+    /// Separate from `connect()`'s `becomeFirstResponder` because this one has to
+    /// work on a view that is already live: calling `becomeFirstResponder` alone
+    /// would be a no-op there, since this view is *already* the first responder —
+    /// the keyboard is hidden because the user resigned it system-wide, not
+    /// because focus moved. `reloadInputViews` is what makes the system re-show
+    /// the keyboard for a responder that is still focused.
+    func showKeyboard() {
+        if isFirstResponder {
+            reloadInputViews()
+        } else {
+            _ = becomeFirstResponder()
+        }
+    }
+
     /// Manual retry from the toolbar: clears any pending backoff and starts
     /// immediately.
     func reconnect() {

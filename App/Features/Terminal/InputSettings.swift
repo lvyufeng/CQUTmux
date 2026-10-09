@@ -37,7 +37,7 @@ final class InputSettings {
     /// What the accessory bar can show, in the user's order.
     enum Item: String, CaseIterable, Codable, Identifiable {
         case control, escape, tab
-        case enter, backspace, keyboard
+        case enter, backspace, keyboard, showKeyboard
         case arrows
         case dpad
         case clipboard, pasteImage
@@ -56,6 +56,7 @@ final class InputSettings {
             case .enter: "Enter"
             case .backspace: "Backspace"
             case .keyboard: "Keyboard"
+            case .showKeyboard: "Show keyboard"
             case .arrows: "Arrows"
             case .dpad: "D-pad"
             case .clipboard: "Paste"
@@ -79,8 +80,13 @@ final class InputSettings {
     /// Moshi's: the toolbar has one documented default, and adding a key to it
     /// on a guess would make "Moshi's order" a claim this list no longer
     /// supports. History is reachable from the bar's own settings and the
-    /// More menu, which is enough for a key not everyone needs.
-    static let optInItems: [Item] = [.history]
+    /// More menu, which is enough for a key not everyone needs. Show keyboard is
+    /// the way back from the Keyboard key beside it: that key only ever
+    /// *dismisses*, and nothing else in the terminal can summon the keyboard —
+    /// a tap on the pane is bound to a gesture, and the recognisers take the
+    /// touch before the responder could. So without this key, hiding the
+    /// keyboard is one-way for the rest of the session.
+    static let optInItems: [Item] = [.history, .showKeyboard]
 
     /// Every item the bar can show, whether or not it is on by default.
     ///

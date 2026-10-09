@@ -86,7 +86,18 @@ has since been closed, with the check that pins it.
 - **Enter / Backspace / keyboard-show-hide bar keys** — added to
   `InputSettings.Item`; `sendEnter` (CR) and `sendBackspace` (BS) are distinct
   from the existing `sendDelete` (DEL), which is the forward delete a terminal
-  means by "Delete".
+  means by "Delete". The keyboard half needed two keys rather than one: the
+  first release only had the dismiss button, and nothing else in the terminal
+  can raise the keyboard — a tap on the pane goes to a gesture recogniser before
+  the responder ever sees it — so pressing it was one-way for the rest of the
+  session. A separate `Show keyboard` key calls `showKeyboard()`, which is
+  `reloadInputViews()` on the view that is *already* first responder (calling
+  `becomeFirstResponder` alone would be a no-op there). Both are off by default
+  and listed in `optInItems`, since Moshi's default bar has one documented
+  shape. `scripts/input-check.sh` (93 checks) pins the item, its label and the
+  reachability invariant; the button's own behaviour is not asserted on screen —
+  the bar's position moves with the keyboard's frame, so a coordinate tap aimed
+  at it misses, and the check says so rather than guessing a pixel.
 - **Custom-shortcut D-pad corners** — a fifth `CornerAction.custom` plus a
   stored shortcut string and a text field in Settings.
 - **Gesture "Reset all"** — `GestureStore.resetAll`.
