@@ -15,6 +15,7 @@ struct CQUTmuxApp: App {
     @State private var sessionLayout = SessionLayout()
     @State private var security = SecuritySettings()
     @State private var gate = SecuritySettings.Gate()
+    @State private var sync = SettingsSync()
 
     /// Whether the app was away long enough that coming back should re-prompt.
     /// A glance at another app is not a handoff, and prompting for it would
@@ -34,10 +35,14 @@ struct CQUTmuxApp: App {
                 .environment(sessionLayout)
                 .environment(security)
                 .environment(gate)
+                .environment(sync)
                 .overlay {
                     if gate.isLocked { LockedView(gate: gate) }
                 }
                 .task {
+                    // Runs before the debug seeds so a synced host list is
+                    // what the seeds have to override, not the other way round.
+                    await syncStore()
                     #if DEBUG
                     DebugSeed.apply(to: hostStore)
                     // Runs off to the side: it loads a model and transcribes,
@@ -68,6 +73,7 @@ struct CQUTmuxApp: App {
                 }
         }
         .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await syncStore() } }
             switch phase {
             case .background:
                 leftAt = Date()
@@ -84,6 +90,25 @@ struct CQUTmuxApp: App {
                 break
             }
         }
+    }
+
+    /// One sync exchange with every live store attached.
+    ///
+    /// On return to the foreground as well as at launch, because the interesting
+    /// moment for a pull is picking the device up after editing on another one —
+    /// and a pull that only happens at launch is a pull the user never sees.
+    private func syncStore() async {
+        guard sync.isEnabled else { return }
+        let coordinator = SettingsSyncCoordinator(sync: sync)
+        let stores = SyncStores(
+            hosts: hostStore,
+            themes: themes,
+            fonts: fonts,
+            cursor: cursor,
+            layout: sessionLayout,
+            speech: SpeechSettings()
+        )
+        await coordinator.run(stores: stores)
     }
 }
 

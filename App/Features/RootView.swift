@@ -158,7 +158,7 @@ struct RootView: View {
         case "code": return .code
         case "usages": return .usages
         case "theme", "font", "speech", "settings", "cursor", "icon", "sessions",
-             "security", "notifications":
+             "security", "notifications", "sync":
             return .settings
         default: break
         }

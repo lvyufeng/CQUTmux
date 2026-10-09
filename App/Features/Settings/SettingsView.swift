@@ -5,7 +5,8 @@ struct SettingsView: View {
     /// cannot drift. A `cqutmux://theme` link sets `pendingRoute` on the store
     /// and the push below happens here, once, in the same place the tap does.
     enum Route: Hashable {
-        case theme, font, cursor, icon, speech, sessions, security, notifications, standIn(String)
+        case theme, font, cursor, icon, speech, sessions, security, notifications, sync
+        case standIn(String)
     }
 
     @Environment(ThemeStore.self) private var themes
@@ -31,6 +32,11 @@ struct SettingsView: View {
                 Section("Notifications") {
                     NavigationLink(value: Route.notifications) {
                         Label("Notifications", systemImage: "bell.badge")
+                    }
+                }
+                Section("Data") {
+                    NavigationLink(value: Route.sync) {
+                        Label("iCloud sync", systemImage: "icloud")
                     }
                 }
                 Section("Dictation") {
@@ -72,6 +78,7 @@ struct SettingsView: View {
                 case .sessions: SessionLayoutView()
                 case .security: SecuritySettingsView()
                 case .notifications: NotificationSettingsView()
+                case .sync: SyncSettingsView()
                 case .speech: SpeechSettingsView()
                 case .standIn(let title): PlaceholderView(
                     title: title,
@@ -99,7 +106,7 @@ struct SettingsView: View {
         guard let tab = ProcessInfo.processInfo.environment["CQUT_DEV_TAB"] else { return nil }
         switch tab {
         case "theme", "font", "speech", "cursor", "icon", "sessions", "security",
-             "notifications":
+             "notifications", "sync":
             return tab
         default:
             return nil
@@ -116,6 +123,7 @@ struct SettingsView: View {
         case "sessions": SessionLayoutView()
         case "security": SecuritySettingsView()
         case "notifications": NotificationSettingsView()
+        case "sync": SyncSettingsView()
         default: SpeechSettingsView()
         }
     }

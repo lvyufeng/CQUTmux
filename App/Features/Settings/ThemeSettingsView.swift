@@ -69,6 +69,20 @@ final class ThemeStore {
         return isNew
     }
 
+    /// Adds a theme without selecting it or reordering the user's list.
+    ///
+    /// Separate from `importTheme` because sync applies a whole payload: calling
+    /// `importTheme` per theme would select each one in turn, leaving whichever
+    /// happened to be last as the active theme rather than the one the payload
+    /// names.
+    func adopt(_ theme: TerminalTheme) {
+        var updated = imported
+        updated.removeAll { $0.id == theme.id }
+        updated.append(theme)
+        imported = updated
+        writeImported()
+    }
+
     func delete(_ theme: TerminalTheme) {
         imported.removeAll { $0.id == theme.id }
         writeImported()

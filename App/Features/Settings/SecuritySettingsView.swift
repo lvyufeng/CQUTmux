@@ -69,6 +69,74 @@ struct ExportKeysView: View {
     }
 }
 
+/// iCloud settings sync.
+///
+/// Two switches, matching Moshi's shape: settings sync, and credential sync
+/// nested beneath it. The nesting is not decoration — turning credential sync
+/// on requires settings sync first, so a user cannot opt into moving secrets
+/// without having opted into moving anything at all.
+///
+/// Moshi syncs credentials behind that second toggle. This app does not: there
+/// is nowhere in the payload for them. The row is shown disabled with the
+/// reason rather than hidden, because a settings screen that quietly omits a
+/// feature the user expects is how they conclude the app is broken.
+struct SyncSettingsView: View {
+    @State private var coordinator: SettingsSyncCoordinator?
+    @State private var account = true
+    @State private var testing = false
+
+    var body: some View {
+        List {
+            if let coordinator {
+                Section {
+                    @Bindable var sync = coordinator.sync
+                    Toggle("Sync settings through iCloud", isOn: $sync.isEnabled)
+                        .disabled(!account)
+                        .onChange(of: sync.isEnabled) { _, enabled in
+                            Task { await coordinator.setEnabled(enabled) }
+                        }
+                    LabeledContent("Status", value: coordinator.status.label)
+                } footer: {
+                    Text(account
+                         ? "Hosts, theme, font, cursor, session layout and speech engine, kept "
+                           + "in step across your devices. Nothing here is a secret: the "
+                           + "payload is built field by field and has no room for one."
+                         : "Sign in to iCloud in Settings to sync. Without an account the "
+                           + "switch cannot do anything, so it is off for now.")
+                }
+
+                Section {
+                    Toggle("Sync credentials", isOn: .constant(false))
+                        .disabled(true)
+                    Button("Sync now") { Task { await run(coordinator) } }
+                        .disabled(!coordinator.sync.isEnabled || testing)
+                } footer: {
+                    Text("Not offered. Credential sync would move SSH key material and gateway "
+                         + "tokens between devices, and this app keeps those in the Keychain on "
+                         + "the device that created them — the host list records that a key is "
+                         + "used, never the key. A switch here would move nothing.")
+                }
+            } else {
+                ProgressView()
+            }
+        }
+        .navigationTitle("iCloud sync")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            guard coordinator == nil else { return }
+            let made = SettingsSyncCoordinator(sync: SettingsSync())
+            coordinator = made
+            account = await made.accountAvailable()
+        }
+    }
+
+    private func run(_ coordinator: SettingsSyncCoordinator) async {
+        testing = true
+        defer { testing = false }
+        await coordinator.run(stores: nil)
+    }
+}
+
 /// The notification controls Moshi documents: an on/off, a temporary pause that
 /// keeps the device registered, and a way to test that delivery works.
 struct NotificationSettingsView: View {
