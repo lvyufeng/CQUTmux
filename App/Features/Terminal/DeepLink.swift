@@ -11,6 +11,7 @@ import Foundation
 ///   cqutmux://herdr?workspace=<id>[&session=<name>]
 ///   cqutmux://host?host=<name-or-hostname>
 ///   cqutmux://theme
+///   cqutmux://inbox
 ///
 /// A host is optional and, when absent, resolves to the only saved host — a
 /// link from a notification usually does not need to name the machine, and the
@@ -26,6 +27,11 @@ struct DeepLink: Equatable {
         /// gallery page can hand a theme straight to the app rather than
         /// making the user copy and paste it.
         case theme
+        /// Open the Inbox. What a Live Activity's tap target uses: a
+        /// notification is about a pending approval, and the answer to it is on
+        /// the Inbox, so a tap that opened the app on whatever tab was last
+        /// used would be a tap that made the user navigate.
+        case inbox
     }
 
     var target: Target
@@ -90,6 +96,9 @@ struct DeepLink: Equatable {
 
         case "theme":
             return .success(DeepLink(target: .theme))
+
+        case "inbox":
+            return .success(DeepLink(target: .inbox))
 
         default:
             return .failure(.unknownRoute(route))

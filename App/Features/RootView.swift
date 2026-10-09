@@ -86,6 +86,22 @@ struct RootView: View {
                let target = store.hosts.first(where: { $0.hostname == ProcessInfo.processInfo.environment["CQUT_DEV_HOST"] }) {
                 connection.connect(to: target)
             }
+            // The Settings test button starts an activity the same way, but a
+            // tap is the one thing `simctl` cannot do — so the button's own
+            // code path is reachable from launch instead. What this proves is
+            // the part the check script cannot: that `Activity.request`
+            // actually succeeds and the widget renders it, which is the half
+            // that lives in ActivityKit and the widget extension.
+            if ProcessInfo.processInfo.environment["CQUT_DEV_TEST_ACTIVITY"] == "1" {
+                let outcome = ActivityManager().update(
+                    hostName: "Test host", events: AgentActivityPreview.sampleEvents()
+                )
+                // Printed, not just acted on: `Activity.request` failing is
+                // invisible from here — no exception reaches the UI, and the
+                // activity simply is not there — so a run that cannot tap the
+                // button needs the outcome in the log to tell the two apart.
+                print("CQUT_TEST_ACTIVITY: \(outcome)")
+            }
             #endif
         }
     }
@@ -95,7 +111,11 @@ struct RootView: View {
     private func handle(_ url: URL) {
         switch DeepLink.parse(url) {
         case .success(let link):
+            // Screens a link opens rather than a session it attaches to. Both
+            // are handled here, before `pendingLink`, because neither has
+            // anything for the terminal to do.
             if handleTheme(link) { return }
+            if handleInbox(link) { return }
             selection = .terminal
             pendingLink = link
         case .failure(let error):
@@ -110,6 +130,23 @@ struct RootView: View {
         guard case .theme = link.target else { return false }
         selection = .settings
         themes.pendingRoute = .theme
+        return true
+    }
+
+    /// `cqutmux://inbox`, which is where a Live Activity's tap lands.
+    ///
+    /// Routed like the theme link rather than through `pendingLink`: the Inbox
+    /// is a tab, not a session, so there is nothing for the terminal to attach
+    /// to and nothing to keep pending.
+    private func handleInbox(_ link: DeepLink) -> Bool {
+        guard case .inbox = link.target else { return false }
+        // The switch is read here rather than in the widget because the widget
+        // extension has its own `UserDefaults` container and no app group to
+        // share one through — read there it would always answer with the
+        // default and the toggle would change nothing. A tap with it off still
+        // opens the app; it just leaves the tab where it was.
+        guard AgentActivitySettings.opensInboxOnTap() else { return true }
+        selection = .inbox
         return true
     }
 
@@ -179,7 +216,7 @@ struct RootView: View {
         case "usages": return .usages
         case "theme", "font", "speech", "settings", "cursor", "icon", "sessions",
              "security", "notifications", "sync", "integrations", "input", "mux",
-             "toolbar", "support", "agents":
+             "toolbar", "support", "agents", "hooks":
             return .settings
         default: break
         }

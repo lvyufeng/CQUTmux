@@ -31,4 +31,15 @@ enum ISODate {
     static func parse(_ text: String) -> Date? {
         withFractionalSeconds.date(from: text) ?? plain.date(from: text)
     }
+
+    /// Writes the same shape the gateway writes, milliseconds included.
+    ///
+    /// Here rather than at each call site so that a timestamp this app
+    /// fabricates — a sample event for the Live Activity test — is one the
+    /// parser above provably reads back. A locally built event with a `Date`
+    /// description would parse to nil and show a blank time, which is the exact
+    /// failure `parse` exists to have fixed.
+    static func string(from date: Date) -> String {
+        withFractionalSeconds.string(from: date)
+    }
 }

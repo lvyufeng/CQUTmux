@@ -144,6 +144,14 @@ targets:
         # session, so allowing local networking here exposes nothing.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # The key that lets this app start an activity at all. Without it
+        # `Activity.request` throws "Target does not include
+        # NSSupportsLiveActivities plist key" — and because the old code
+        # swallowed that error with `try?`, the Live Activity looked implemented
+        # while never once appearing. `NSSupportsLiveActivitiesFrequentUpdates`
+        # is not set: the activity is updated from the poll, not pushed, so it
+        # needs neither the budget nor the battery that flag asks for.
+        NSSupportsLiveActivities: true
         # Scanning a QR code: importing a theme, or pairing a host. Both are
         # behind the Scan tab of their own screen, so the camera is only ever
         # opened on a deliberate action and closed when that screen goes away.

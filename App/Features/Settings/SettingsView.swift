@@ -12,6 +12,7 @@ struct SettingsView: View {
         case toolbar
         case support
         case agents
+        case hooks
     }
 
     @Environment(ThemeStore.self) private var themes
@@ -88,6 +89,9 @@ struct SettingsView: View {
                     NavigationLink(value: Route.agents) {
                         Label("Agents", systemImage: "person.2.badge.gearshape")
                     }
+                    NavigationLink(value: Route.hooks) {
+                        Label("Hooks", systemImage: "bolt.badge.clock")
+                    }
                 }
                 Section("Help") {
                     NavigationLink(value: Route.support) {
@@ -117,6 +121,7 @@ struct SettingsView: View {
                 case .toolbar: ToolbarSettingsView()
                 case .support: SupportView()
                 case .agents: AgentsSettingsView()
+                case .hooks: HooksSettingsView()
                 }
             }
         }
@@ -139,7 +144,7 @@ struct SettingsView: View {
         switch tab {
         case "theme", "font", "speech", "cursor", "icon", "sessions", "security",
              "notifications", "sync", "integrations", "input", "mux", "toolbar",
-             "support", "agents":
+             "support", "agents", "hooks":
             return tab
         default:
             return nil
@@ -163,6 +168,7 @@ struct SettingsView: View {
         case "toolbar": ToolbarSettingsView()
         case "support": SupportView()
         case "agents": AgentsSettingsView()
+        case "hooks": HooksSettingsView()
         default: SpeechSettingsView()
         }
     }

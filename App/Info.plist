@@ -71,6 +71,8 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan a QR code to import a theme or pair a host. The camera is used only while that screen is open, and nothing is recorded.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

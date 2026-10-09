@@ -15,6 +15,11 @@ struct AgentApprovalWidget: Widget {
             lockScreen(context)
                 .activityBackgroundTint(Color.black.opacity(0.75))
                 .activitySystemActionForegroundColor(.green)
+                // A tap lands on the Inbox, whichever tab was last open. The
+                // notification is about a pending approval and the answer is on
+                // the Inbox, so landing anywhere else makes the user navigate
+                // to the thing they were just told about.
+                .widgetURL(URL(string: "cqutmux://inbox"))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {

@@ -349,3 +349,42 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   simulator. The fixes it offers were also checked against what this repo can
   actually be installed from — there is no npm package, so "npm i -g" would have
   been a command that is followed and then believed when it does nothing.
+
+- **Settings → Hooks: the Live Activity preference, the tap destination, and a
+  test.** The Live Activity was unconditional: it appeared whenever the poll saw
+  a pending approval and vanished when it did not, with no way to say no and no
+  way to tell whether it worked without waiting for a real approval. There is now
+  a Hooks screen with two switches and a test button. Both default to *on*, and
+  that is the part worth stating: the defaults are read through
+  `object(forKey:)` rather than `bool(forKey:)`, because the latter cannot tell
+  "never set" from "set to false" — with it, a device that had never opened this
+  screen would show the feature already off.
+
+  What the activity *shows* was also moved out of `ActivityManager` into
+  `AgentActivityPreview`, a Foundation-only file, so the test button drives the
+  same decision the Inbox does. A test that built its own state would render
+  something the real path never produces and prove nothing. The decision covers
+  three cases the old code got wrong or did not have: a pending approval counts
+  (with the plural derived, not hardcoded), a resolved approval lingers at zero
+  rather than blinking out mid-answer, and a bare notice produces *no* activity
+  at all — badging the Lock Screen for agent chatter claims the user is needed
+  when nothing is waiting.
+
+  "Open Inbox on tap" is enforced in the app rather than in the widget: the
+  widget extension has its own `UserDefaults` container and no app group, so
+  reading the setting there would always answer with the default and the toggle
+  would change nothing. The widget still carries the `cqutmux://inbox` URL, and
+  `RootView.handleInbox` decides whether to act on it.
+
+  Checking this on a simulator found a real bug that the old code had hidden.
+  `Activity.request` throws "Target does not include NSSupportsLiveActivities
+  plist key" when the app's Info.plist lacks that key, and the app had no such
+  key. The request was wrapped in `try?`, so the failure produced no activity, no
+  error and no log — the Live Activity had never once run, while the code, the
+  widget and the docs all read as if it had. Fixed by adding
+  `NSSupportsLiveActivities` to `project.yml` (XcodeGen writes App/Info.plist
+  from it, so a hand edit to the plist would be reverted), and by returning an
+  `ActivityManager.Outcome` instead of swallowing the throw, so the test button
+  can say *why* nothing appeared. `scripts/hooks-activity-check.sh` pins the
+  defaults, the decision, the sample timestamps, the plist key, and the absence
+  of the `try?`.

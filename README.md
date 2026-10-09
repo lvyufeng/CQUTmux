@@ -17,7 +17,7 @@ See plan: [PLAN.md](PLAN.md).
 | 1 | SSH terminal MVP (swift-nio-ssh + SwiftTerm + tmux) | ✅ |
 | 2 | Mosh / ET transports | ✅ both behind `TerminalTransport`, selected per host; mosh verified end to end against a real `mosh-server`, ET against a real `etserver`/`etterminal` |
 | 3 | Host gateway + agent Inbox / Diff / Files / History | ✅ |
-| 4 | Notifications, Live Activity, voice, image paste, tmux picker | ✅ |
+| 4 | Notifications, Live Activity, voice, image paste, tmux picker | ✅ Live Activity needed `NSSupportsLiveActivities` in `project.yml` and never actually ran until 2026-10-09 — see PLAN.md 4b |
 | 5 | zellij + herdr, iPad sidebar, browser + simulator preview, gateway token | ✅ |
 | 5 | Easy Pair: `cqutmux pair` makes a key and prints a `cqutmux://pair` QR; the app scans it into a saved host | ✅ |
 | 6 | Apple Watch approvals | ✅ full round trip driven in the watchOS simulator (phone → wrist → approval → `POST /approve/<id>`) |
