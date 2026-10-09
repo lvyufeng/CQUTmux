@@ -15,8 +15,13 @@ final class AgentConnection {
     /// already are — the watch is a second view of the same connection.
     let watch = WatchBridge()
 
+    /// The slow usage poll. Held so reconnecting to another host replaces it
+    /// rather than leaving two timers pushing different hosts' numbers.
+    private var usageTask: Task<Void, Never>?
+
     func connect(to host: Host) {
         client?.stop()
+        usageTask?.cancel()
         self.host = host
         lastError = nil
         watch.activate()
@@ -62,6 +67,19 @@ final class AgentConnection {
             guard let self, let events = self.client?.events else { return }
             self.watch.publish(Self.snapshot(events))
         }
+        // Usage is polled rather than evented: the host's rate-limit counters
+        // move over minutes, and the watch re-reads the last value from its
+        // application context when it wakes, so a slow cadence is enough.
+        watch.onNeedUsage = { [weak self] in
+            guard let self else { return }
+            Task { await self.publishUsage() }
+        }
+        usageTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.publishUsage()
+                try? await Task.sleep(for: .seconds(180))
+            }
+        }
 
         // A push token belongs to the *host's* gateway, not to this app, so it
         // is re-registered on every connect: host A's gateway must not keep
@@ -88,8 +106,39 @@ final class AgentConnection {
         client.start()
     }
 
+    /// Fetches the usage board and flattens it onto the watch's model.
+    ///
+    /// Failure is silent on purpose: a watch showing the last good reading
+    /// beats one showing an error the wearer cannot act on, and the phone's own
+    /// Usages tab is where a broken endpoint is worth reporting.
+    @MainActor
+    private func publishUsage() async {
+        guard let client, client.state == .connected else { return }
+        guard let board = try? await client.usage() else { return }
+        watch.publishUsage(Self.usage(board))
+    }
+
     /// Only approvals that still need a decision are worth a watch buzz — a
     /// notice has nothing to act on from the wrist.
+    /// Built by field rather than encoded from `UsageBoard`, because the two
+    /// types live in different targets on purpose: the watch links no
+    /// transport, so it cannot see `HookClient`'s model at all.
+    private static func usage(_ board: UsageBoard) -> WatchPayload.Usage {
+        WatchPayload.Usage(
+            entries: board.entries.map { entry in
+                .init(
+                    source: entry.source,
+                    label: entry.label,
+                    pace: entry.pace,
+                    windows: entry.windows.map {
+                        .init(label: $0.label, percent: $0.percent, resetIn: $0.resetIn)
+                    }
+                )
+            },
+            generatedAt: ISODate.parse(board.generatedAt ?? "")
+        )
+    }
+
     private static func snapshot(_ events: [AgentEvent]) -> WatchPayload.Snapshot {
         WatchPayload.Snapshot(
             items: events.filter(\.isPending).map {

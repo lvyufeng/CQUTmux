@@ -8,6 +8,11 @@ import WatchConnectivity
 /// session, so if the list is empty that may mean either "nothing pending" or
 /// "the phone hasn't pushed yet" — the empty state says both, rather than
 /// implying an all-clear it can't actually vouch for.
+///
+/// NOT wrapped in its own `NavigationStack`: `WatchRootView` owns the one
+/// stack and switches between this and the usage screen inside it. A second
+/// stack here would nest, and the inner title would win — which is exactly
+/// what a first attempt at this did.
 struct ApprovalListView: View {
     @State private var link = WatchLink.shared
     @State private var sent: [Int: Bool] = [:]
@@ -15,72 +20,70 @@ struct ApprovalListView: View {
     private var items: [WatchPayload.Snapshot.Item] { link.items }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if items.isEmpty {
-                    ContentUnavailableView(
-                        "Nothing pending",
-                        systemImage: "checkmark.circle",
-                        description: Text("Open CQUTmux on your iPhone and connect to a host.")
-                    )
-                } else {
-                    List(items) { item in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(item.source)
-                                .font(.caption2)
+        Group {
+            if items.isEmpty {
+                ContentUnavailableView(
+                    "Nothing pending",
+                    systemImage: "checkmark.circle",
+                    description: Text("Open CQUTmux on your iPhone and connect to a host.")
+                )
+            } else {
+                List(items) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(item.source)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(item.title)
+                            .font(.headline)
+                            .lineLimit(3)
+                        if !item.body.isEmpty {
+                            Text(item.body)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Text(item.title)
-                                .font(.headline)
-                                .lineLimit(3)
-                            if !item.body.isEmpty {
-                                Text(item.body)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(4)
+                                .lineLimit(4)
+                        }
+
+                        if let allow = sent[item.id] {
+                            Label(
+                                allow ? "Approved" : "Denied",
+                                systemImage: allow ? "checkmark.circle.fill" : "xmark.circle.fill"
+                            )
+                            .font(.caption2)
+                            .foregroundStyle(allow ? .green : .orange)
+                        } else if item.isQuestion {
+                            // An agent waiting on a choice is waiting just
+                            // as much as one waiting on permission, and
+                            // this is the case where reaching for the phone
+                            // is most annoying.
+                            VStack(spacing: 4) {
+                                ForEach(item.options) { option in
+                                    Button(option.label) { answer(item, option.value) }
+                                        .buttonStyle(.bordered)
+                                }
                             }
-
-                            if let allow = sent[item.id] {
-                                Label(
-                                    allow ? "Approved" : "Denied",
-                                    systemImage: allow ? "checkmark.circle.fill" : "xmark.circle.fill"
-                                )
-                                .font(.caption2)
-                                .foregroundStyle(allow ? .green : .orange)
-                            } else if item.isQuestion {
-                                // An agent waiting on a choice is waiting just
-                                // as much as one waiting on permission, and
-                                // this is the case where reaching for the phone
-                                // is most annoying.
-                                VStack(spacing: 4) {
-                                    ForEach(item.options) { option in
-                                        Button(option.label) { answer(item, option.value) }
-                                            .buttonStyle(.bordered)
-                                    }
+                        } else {
+                            HStack {
+                                Button(role: .destructive) { decide(item, allow: false) } label: {
+                                    Image(systemName: "xmark")
                                 }
-                            } else {
-                                HStack {
-                                    Button(role: .destructive) { decide(item, allow: false) } label: {
-                                        Image(systemName: "xmark")
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(.red)
+                                .buttonStyle(.borderedProminent)
+                                .tint(.red)
 
-                                    Spacer()
+                                Spacer()
 
-                                    Button { decide(item, allow: true) } label: {
-                                        Image(systemName: "checkmark")
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(.green)
+                                Button { decide(item, allow: true) } label: {
+                                    Image(systemName: "checkmark")
                                 }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.green)
                             }
                         }
-                        .padding(.vertical, 2)
                     }
+                    .padding(.vertical, 2)
                 }
             }
-            .navigationTitle("Approvals")
         }
+        .navigationTitle("Approvals")
         .onAppear { WatchLink.shared.start() }
         #if DEBUG
         // The watch simulator renders but cannot be tapped from the command
@@ -125,6 +128,10 @@ final class WatchLink: NSObject {
     static let shared = WatchLink()
 
     private(set) var items: [WatchPayload.Snapshot.Item] = []
+    /// The latest usage rings, or nil if the phone has not pushed any yet.
+    /// Kept as an optional rather than an empty array so "no data" and "zero
+    /// percent" stay distinguishable — an empty ring reads as a measured 0%.
+    private(set) var usage: WatchPayload.Usage?
     @ObservationIgnored var onChange: (([WatchPayload.Snapshot.Item]) -> Void)?
 
     private var session: WCSession? { WCSession.isSupported() ? WCSession.default : nil }
@@ -133,6 +140,16 @@ final class WatchLink: NSObject {
         guard let session else { return }
         session.delegate = self
         session.activate()
+    }
+
+    /// Re-reads both contexts from the session. Called once at activation, so
+    /// a watch that was asleep through a push still shows the last value the
+    /// phone sent rather than an empty screen.
+    private func reload() {
+        guard let session else { return }
+        let context = session.receivedApplicationContext
+        apply(context[WatchPayload.pendingKey])
+        applyUsage(context[WatchPayload.usageKey])
     }
 
     func send(_ decision: WatchPayload.Decision) {
@@ -154,14 +171,14 @@ extension WatchLink: WCSessionDelegate {
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
     ) {
-        DispatchQueue.main.async {
-            let payload = session.receivedApplicationContext[WatchPayload.pendingKey]
-            self.apply(payload)
-        }
+        DispatchQueue.main.async { self.reload() }
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
-        DispatchQueue.main.async { self.apply(applicationContext[WatchPayload.pendingKey]) }
+        DispatchQueue.main.async {
+            self.apply(applicationContext[WatchPayload.pendingKey])
+            self.applyUsage(applicationContext[WatchPayload.usageKey])
+        }
     }
 
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
@@ -176,5 +193,12 @@ extension WatchLink: WCSessionDelegate {
         else { return }
         items = snapshot.items
         onChange?(snapshot.items)
+    }
+
+    private func applyUsage(_ payload: Any?) {
+        guard let data = payload as? Data,
+              let decoded = WatchPayload.decode(WatchPayload.Usage.self, from: data)
+        else { return }
+        usage = decoded
     }
 }

@@ -4,7 +4,7 @@ import SwiftUI
 struct CQUTmuxWatchApp: App {
     var body: some Scene {
         WindowGroup {
-            ApprovalListView()
+            WatchRootView()
         }
     }
 }

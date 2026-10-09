@@ -21,6 +21,10 @@ final class WatchBridge: NSObject {
     /// Supplies the current pending approvals to push to the watch.
     @ObservationIgnored var pendingSnapshot: (() -> WatchPayload.Snapshot)?
     @ObservationIgnored var onNeedSnapshot: (() -> Void)?
+    /// Asks the app to re-send the usage rings. Separate from the snapshot
+    /// callback because the two are fetched from different endpoints on
+    /// different clocks.
+    @ObservationIgnored var onNeedUsage: (() -> Void)?
 
     private var session: WCSession? {
         WCSession.isSupported() ? WCSession.default : nil
@@ -31,6 +35,21 @@ final class WatchBridge: NSObject {
         session.delegate = self
         session.activate()
     }
+
+    /// Pushes per-account usage. Called on a slow timer, not on every change:
+    /// rate limits move over minutes, and a context update wakes the watch.
+    func publishUsage(_ usage: WatchPayload.Usage) {
+        guard let session, session.activationState == .activated else { return }
+        guard let data = WatchPayload.encode(usage) else { return }
+        do {
+            try session.updateApplicationContext([WatchPayload.usageKey: data])
+            lastUsageTransfer = "sent \(usage.entries.count)"
+        } catch {
+            lastUsageTransfer = "usage push failed: \(error.localizedDescription)"
+        }
+    }
+
+    private(set) var lastUsageTransfer: String?
 
     /// Pushes the current pending set. Called whenever the Inbox changes.
     func publish(_ snapshot: WatchPayload.Snapshot) {
@@ -56,7 +75,10 @@ extension WatchBridge: WCSessionDelegate {
     ) {
         DispatchQueue.main.async {
             self.activated = activationState == .activated
-            if self.activated { self.onNeedSnapshot?() }
+            if self.activated {
+                self.onNeedSnapshot?()
+                self.onNeedUsage?()
+            }
         }
     }
 
