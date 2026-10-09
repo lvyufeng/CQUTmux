@@ -18,6 +18,7 @@ struct CodePanelView: View {
     @State private var showPreview = false
     @State private var showSimulator = false
     @State private var showGoTo = false
+    @State private var showUploads = false
     @State private var recents = RecentDirectoryStore()
 
     private enum Mode: String, CaseIterable { case files = "Files", changes = "Changes", history = "History" }
@@ -72,6 +73,11 @@ struct CodePanelView: View {
                             showGoTo = true
                         } label: {
                             Label("Go to directory", systemImage: "arrow.right.to.line")
+                        }
+                        Button {
+                            showUploads = true
+                        } label: {
+                            Label("Pasted files", systemImage: "photo.on.rectangle.angled")
                         }
                         Button {
                             showPreview = true
@@ -133,6 +139,9 @@ struct CodePanelView: View {
                 SimulatorPreviewView(client: client)
             }
         }
+        .sheet(isPresented: $showUploads) {
+            NavigationStack { UploadsView() }
+        }
     }
 
     @ViewBuilder
@@ -163,6 +172,7 @@ struct CodePanelView: View {
             #if DEBUG
             if Self.previewInitiallyOpen { showPreview = true }
             if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "simulator" { showSimulator = true }
+            if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "uploads" { showUploads = true }
             #endif
         }
         .sheet(item: $openFile) { (file: FileContents) in

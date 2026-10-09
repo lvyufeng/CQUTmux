@@ -80,6 +80,9 @@ require `Authorization: Bearer <secret>` on every request.
 | `GET` | `/simulators` | booted iOS simulators on the host |
 | `GET` | `/simulator/screenshot?udid=<id>` | a PNG frame of one booted simulator |
 | `GET` | `/herdr` | herdr workspaces, tabs and panes (needs `--herdr <path>`) |
+| `GET` | `/uploads` | pasted files, newest first |
+| `GET` | `/upload?name=<n>` | one pasted file's bytes |
+| `DELETE` | `/upload?name=<n>` | remove a pasted file |
 
 ## Containers
 

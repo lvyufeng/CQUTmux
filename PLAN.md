@@ -65,6 +65,7 @@
 | 安全 | 重开需生物识别（后台 >30s）、key 导出页（显式空缺） | P4 ✅ 实测 |
 | 同步 | iCloud 设置同步（hosts/主题/字体/光标/布局/引擎；冲突合并；**载荷无密钥**）；凭据同步显示但禁用并说明 | P4 ✅ 实测 |
 | 宿主 | `cqutmux` CLI（`<dir>` 起 tmux / `diff` / `status` / `doctor` / `logs` / `serve` / `install` / `pair`），裸调用仍是网关 | P5 ✅ 实测 |
+| 输入 | 粘贴文件历史与复取（宿主 `/uploads`、`/upload`、`DELETE`；App 侧 Pasted files 页）。**不做**：对外可分享的 HTTPS 短链（那是托管服务） | P4 ✅ 宿主实测 / App 侧未在线实测 |
 | 通知 | 通知设置页：权限状态、暂停（客户端强制）、测试通知、远程推送状态 | P4 ✅ 实测 |
 | 其他 | 远程剪贴板 OSC 52、Tailscale、iPad 分栏 | P5 |
 
@@ -230,6 +231,21 @@ into supported agent config files"，且**不动用户自己的 hook**）。我�
    让 `status` 检查在上一轮残留的服务上"通过"——现按 pid 杀并让这个检查自带端口占用检测。
 **另实测**：把 `claude-code-hook.sh` 接在真实网关前，喂一份 Claude Code 的 PreToolUse 载荷，
 `GET /events` 确实拿到 `title: Write` / `kind: approval` / `data.session`（不是"脚本退出 0"就算数）。
+
+**本轮新增：粘贴文件列表（`GET /uploads` + App 侧 Pasted files 页）。**
+对照 `docs/files` 又核出一处缺口：Moshi 的 Files 是"粘贴盘"——上传后给一个**短期有效的 HTTPS 短链**，
+并能从**最近上传历史**里重新取用。我们此前 `POST /upload` 只把文件写进宿主 `~/.cqutmux/paste/`，
+**目录是只写的，没有任何读回路径**——同一张截图要用第二次就得重传，这正是历史列表存在的意义。
+现补上能诚实补的那一半：宿主 `GET /uploads`（按时间倒序）、`GET /upload?name=`（取字节）、
+`DELETE /upload?name=`；App 侧 `UploadsView` 列出缩略图/大小/相对时间，点按复制宿主路径、可滑动删除。
+**没补的那一半说清楚**：本 App **不提供**把文件对外用 HTTPS URL 供出去的服务，
+所以设置页脚注直说这些是**宿主路径**，只有跑在同一台机器上的 agent 能直接读——
+把宿主路径包装得像一个可分享的 URL，比没有这个功能更糟。
+`/upload` 的 name 参数来自客户端，故凡含 `/`、`\` 或以 `.` 开头一律拒绝（实测 `../../etc/passwd` 与 `.hidden` 均被拒），
+不做路径归一化。
+**实测**：宿主三个端点用 curl 跑通（上传→列表→取回→删除→列表计数正确）；
+**未实测**：App 侧该页面的**在线渲染**——网关是经 SSH 通道（`direct-ssh`）到达的，
+要截图需在模拟器里搭一套真 sshd + 网关 + 传输，代价高于这一步的价值，故如实记为未验证。
 
 ## 2. 技术选型
 

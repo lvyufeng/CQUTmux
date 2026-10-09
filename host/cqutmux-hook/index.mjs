@@ -738,6 +738,64 @@ const server = createServer(async (req, res) => {
     return json(res, 201, { path, bytes: body.length })
   }
 
+  // What has been pasted, newest first. The paste directory is otherwise
+  // write-only, which means a re-usable screenshot has to be uploaded again to
+  // be used again — the thing this endpoint exists to stop.
+  if (req.method === 'GET' && url.pathname === '/uploads') {
+    const dir = join(args.root, '.cqutmux', 'paste')
+    let names = []
+    try {
+      names = await readdir(dir)
+    } catch {
+      // Nothing uploaded yet is an empty list, not a failure.
+      return json(res, 200, { root: args.root, uploads: [] })
+    }
+    const uploads = []
+    for (const name of names) {
+      try {
+        const info = await stat(join(dir, name))
+        if (!info.isFile()) continue
+        uploads.push({ name, path: join(dir, name), bytes: info.size, at: info.mtime.toISOString() })
+      } catch {
+        // A file that vanished between listing and stat is not worth failing
+        // the whole request over.
+      }
+    }
+    uploads.sort((a, b) => (a.at < b.at ? 1 : -1))
+    return json(res, 200, { root: args.root, uploads })
+  }
+
+  // A pasted file, by name. Constrained to the paste directory: the name comes
+  // from the client, so anything that could climb out of it is refused rather
+  // than resolved.
+  if (req.method === 'GET' && url.pathname === '/upload') {
+    const name = String(url.searchParams.get('name') || '')
+    if (!name || name.includes('/') || name.includes('\\') || name.startsWith('.')) {
+      return json(res, 400, { error: 'bad name' })
+    }
+    const file = join(args.root, '.cqutmux', 'paste', name)
+    try {
+      const body = await readFile(file)
+      res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': body.length })
+      return res.end(body)
+    } catch {
+      return json(res, 404, { error: 'not found' })
+    }
+  }
+
+  if (req.method === 'DELETE' && url.pathname === '/upload') {
+    const name = String(url.searchParams.get('name') || '')
+    if (!name || name.includes('/') || name.includes('\\') || name.startsWith('.')) {
+      return json(res, 400, { error: 'bad name' })
+    }
+    try {
+      await rm(join(args.root, '.cqutmux', 'paste', name))
+      return json(res, 200, { deleted: name })
+    } catch {
+      return json(res, 404, { error: 'not found' })
+    }
+  }
+
   json(res, 404, { error: 'not found' })
 })
 

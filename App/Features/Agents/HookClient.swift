@@ -305,11 +305,59 @@ final class HookClient {
         )
         return try JSONDecoder().decode(UploadResult.self, from: payload.body)
     }
+
+    /// What has already been pasted, newest first.
+    ///
+    /// The paste directory is write-only without this: a screenshot the user
+    /// needs again has to be uploaded again, which is what the list exists to
+    /// avoid.
+    func uploads() async throws -> [UploadBoard.Upload] {
+        let payload = try await request("GET", "/uploads")
+        return try JSONDecoder().decode(UploadBoard.self, from: payload.body).uploads
+    }
+
+    func uploadData(name: String) async throws -> Data {
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        let payload = try await request("GET", "/upload?name=\(encoded)", timeout: 60)
+        return payload.body
+    }
+
+    func deleteUpload(name: String) async throws {
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        _ = try await request("DELETE", "/upload?name=\(encoded)")
+    }
 }
 
 struct UploadResult: Codable {
     var path: String
     var bytes: Int
+}
+
+struct UploadBoard: Codable {
+    struct Upload: Codable, Identifiable, Hashable {
+        var name: String
+        var path: String
+        var bytes: Int
+        /// ISO-8601, matching how `LogResult.Commit` carries its date.
+        var at: String
+
+        var id: String { name }
+        var date: Date? { ISO8601DateFormatter().date(from: at) }
+
+        /// Whether a thumbnail is worth asking the host for.
+        var isImage: Bool {
+            let lowered = name.lowercased()
+            return [".png", ".jpg", ".jpeg", ".heic", ".gif", ".webp"]
+                .contains { lowered.hasSuffix($0) }
+        }
+
+        var sizeLabel: String {
+            ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        }
+    }
+
+    var root: String
+    var uploads: [Upload]
 }
 
 struct PortBoard: Codable {
