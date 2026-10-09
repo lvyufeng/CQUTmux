@@ -7,7 +7,10 @@ struct HostsView: View {
     var pendingLink: DeepLink?
 
     @Environment(HostStore.self) private var store
+    @Environment(GatewayProbe.self) private var probe
     @State private var editing: Host?
+    /// The host whose status sheet is open, if any.
+    @State private var statusHost: Host?
     @State private var path: [Host] = []
     @State private var pairing = false
 
@@ -43,7 +46,7 @@ struct HostsView: View {
             } else {
                 ForEach(store.hosts) { host in
                     NavigationLink(value: host) {
-                        HostRow(host: host)
+                        HostRow(host: host) { statusHost = host }
                     }
                 }
                 .onDelete { indexSet in
@@ -120,10 +123,22 @@ struct HostsView: View {
                 HostEditView(host: host) { store.upsert($0) }
             }
         }
+        .sheet(item: $statusHost) { host in
+            HostStatusSheet(host: host)
+        }
+        // Probed when the list appears rather than on a timer: the dot answers
+        // "is this host usable right now", and a stale answer to that is worse
+        // than none — it would send someone to fix a gateway that came back up
+        // ten minutes ago.
+        .task { await probe.probeAll(store.hosts) }
         .task {
             #if DEBUG
             if !pairingLink.isEmpty { pairing = true }
-            if path.isEmpty,
+            // Seeding a host and opening a session to it are separate things.
+            // A run that wants to look at the list itself — the gateway status
+            // dot, which is only visible when nothing is connected — says so.
+            if ProcessInfo.processInfo.environment["CQUT_DEV_NO_CONNECT"] != "1",
+               path.isEmpty,
                let target = store.hosts.first(where: { $0.hostname == ProcessInfo.processInfo.environment["CQUT_DEV_HOST"] }) {
                 path = [target]
             }
@@ -134,7 +149,11 @@ struct HostsView: View {
 
 private struct HostRow: View {
     @Environment(ThemeStore.self) private var themes
+    @Environment(GatewayProbe.self) private var probe
     let host: Host
+    /// Opens the fix sheet. Passed in rather than a sheet on this row, so the
+    /// list presents one sheet rather than one per row.
+    var onShowStatus: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 12) {
@@ -146,6 +165,103 @@ private struct HostRow: View {
                 Text(verbatim: "\(host.target):\(String(host.port)) · \(host.transport.label)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            Spacer()
+            HostStatusDot(host: host, onTap: onShowStatus)
+        }
+    }
+}
+
+/// The gateway's state as a dot, tappable for the fix.
+///
+/// Here rather than in Settings → Support because this list is where you are
+/// when a host stops working: the Support screen asks about one host you have
+/// already connected to, and the case this exists for is the one that is *not*
+/// connected. A dot alone would say "something is wrong" and leave the user to
+/// guess which of five things; the tap names it and gives the command.
+private struct HostStatusDot: View {
+    @Environment(GatewayProbe.self) private var probe
+    let host: Host
+    var onTap: () -> Void = {}
+
+    var body: some View {
+        let state = probe.state(for: host)
+        Button(action: onTap) {
+            if probe.isProbing(host) {
+                ProgressView().controlSize(.mini)
+            } else {
+                Circle()
+                    .fill(state.isUp ? Self.color(for: state) : .clear)
+                    .frame(width: 10, height: 10)
+                    // Filled once the gateway has answered, hollow while the
+                    // probe is still out: a dot that looks the same whether or
+                    // not it has been checked is a dot that lies for the first
+                    // few seconds of every visit to this screen.
+                    .overlay {
+                        Circle().strokeBorder(Self.color(for: state), lineWidth: 2)
+                    }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Gateway: \(state.label)")
+        .accessibilityHint(state.fix.map { "Double tap for the fix: \($0)" } ?? state.detail)
+    }
+
+    static func color(for state: GatewayState) -> Color {
+        switch state {
+        case .running: .green
+        case .unknown: .secondary
+        case .update: .yellow
+        case .wrongPort: .orange
+        case .notRunning, .notInstalled: .red
+        }
+    }
+}
+
+/// What the dot meant, and the one command that fixes it.
+private struct HostStatusSheet: View {
+    let host: Host
+    @Environment(GatewayProbe.self) private var probe
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                let state = probe.state(for: host)
+                Section {
+                    LabeledContent("State", value: state.label)
+                    Text(state.detail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text(host.displayName)
+                }
+                if let fix = state.fix {
+                    Section {
+                        // Selectable so it can be copied onto the host without
+                        // retyping, which is the whole point of showing it.
+                        Text(fix)
+                            .font(.system(.callout, design: .monospaced))
+                            .textSelection(.enabled)
+                    } header: {
+                        Text("Fix")
+                    } footer: {
+                        Text("Run this on \(host.target).")
+                    }
+                }
+                Section {
+                    Button("Check again") {
+                        Task { await probe.probe(host) }
+                    }
+                    LabeledContent("Port", value: String(host.gatewayPort))
+                }
+            }
+            .navigationTitle("Gateway")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
             }
         }
     }

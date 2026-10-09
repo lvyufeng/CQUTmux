@@ -57,7 +57,11 @@ struct InboxView: View {
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .task {
             #if DEBUG
-            if connection.client == nil,
+            // Same escape hatch as the shell's: seeding a host and connecting
+            // to it are separate things, and a run that wants to look at the
+            // host list itself must not be dragged into a session.
+            if ProcessInfo.processInfo.environment["CQUT_DEV_NO_CONNECT"] != "1",
+               connection.client == nil,
                let target = store.hosts.first(where: { $0.hostname == ProcessInfo.processInfo.environment["CQUT_DEV_HOST"] }) {
                 connection.connect(to: target)
             }

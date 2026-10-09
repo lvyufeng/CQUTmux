@@ -323,3 +323,29 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   `--base-url`, a one-shot override of the loopback address for a gateway
   reached through an SSH port-forward, where the port is right and the host is
   not.
+
+- **A gateway status dot per host, with five states.** The host list showed
+  each saved host's name and target and nothing about whether it worked; health
+  was only on the Support screen, which asks about the one host you have already
+  connected to. The dot sits in the row and answers the case that screen cannot
+  — the host that is *not* connected — by opening its own short-lived SSH
+  connection and asking once. Five states rather than up/down because the three
+  failures need different things done about them: running, an out-of-date
+  gateway (something answers its port but not with a route this app knows),
+  the wrong port (nothing where the host is set, a gateway on the default),
+  installed-but-not-running, and not installed. Tapping the dot names the state
+  and gives the one command that resolves it, selectable so it can be pasted
+  onto the host.
+
+  Checking this against a real host found two bugs worth naming. The probe
+  script's `|| echo 000` appended to curl's own `000` for a refused connection,
+  producing `000000` — which is not `"000"`, so every dead port read as
+  *answering* and every host showed a green dot: the one thing the screen exists
+  to catch was the one thing it hid. And the interpreter now accepts only a
+  three-digit 100–599 status, so no garbled value can read as a live gateway.
+  The screen's own claim is that a wrong fix is worse than no answer, so the
+  interpreter was moved into a file that imports only Foundation and is run
+  directly by `scripts/gateway-status-check.sh`, rather than only through a
+  simulator. The fixes it offers were also checked against what this repo can
+  actually be installed from — there is no npm package, so "npm i -g" would have
+  been a command that is followed and then believed when it does nothing.

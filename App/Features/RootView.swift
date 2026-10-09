@@ -77,7 +77,12 @@ struct RootView: View {
                let url = URL(string: raw) {
                 handle(url)
             }
-            if connection.client == nil,
+            // Seeding a host and connecting to it are separate things: the host
+            // list is where a saved host's own state shows (its gateway status
+            // dot), and an auto-connect makes the app unreachable at the moment
+            // it launches.
+            if ProcessInfo.processInfo.environment["CQUT_DEV_NO_CONNECT"] != "1",
+               connection.client == nil,
                let target = store.hosts.first(where: { $0.hostname == ProcessInfo.processInfo.environment["CQUT_DEV_HOST"] }) {
                 connection.connect(to: target)
             }

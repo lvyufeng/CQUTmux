@@ -8,6 +8,8 @@ struct CQUTmuxApp: App {
 
     @State private var hostStore = HostStore()
     @State private var connection = AgentConnection()
+    /// What each saved host's gateway is doing, for the dot in the host list.
+    @State private var probe = GatewayProbe()
     @State private var themes = ThemeStore()
     @State private var fonts = TerminalFontStore()
     @State private var customFonts = CustomFontStore()
@@ -31,6 +33,7 @@ struct CQUTmuxApp: App {
             RootView()
                 .environment(hostStore)
                 .environment(connection)
+                .environment(probe)
                 .environment(themes)
                 .environment(fonts)
                 .environment(customFonts)
