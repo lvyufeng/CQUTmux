@@ -153,6 +153,19 @@ private final class ShellChannelHandler: ChannelInboundHandler {
             )
         }
 
+        // The agent request goes before the shell, which is where OpenSSH's
+        // own client puts it and appears to be the only ordering sshd prepares
+        // the agent socket for. Sent after the shell request it is still
+        // acknowledged — `server_input_channel_req … reply 0` — but sshd never
+        // creates the socket, so SSH_AUTH_SOCK arrives unset and the failure
+        // looks like a server that does not support forwarding at all.
+        if configuration.forwardAgent {
+            context.triggerUserOutboundEvent(
+                SSHChannelRequestEvent.AgentForwardingRequest(wantReply: false),
+                promise: nil
+            )
+        }
+
         context.triggerUserOutboundEvent(SSHChannelRequestEvent.ShellRequest(wantReply: false), promise: nil)
         emit(.connected)
     }
@@ -431,11 +444,43 @@ public final class SSHTransport: TerminalTransport {
         let sshHandler = NIOSSHHandler(
             role: .client(.init(userAuthDelegate: delegate, serverAuthDelegate: AcceptAllHostKeysDelegate())),
             allocator: channel.allocator,
-            inboundChildChannelInitializer: nil
+            // Only channels the server opens to us are expected here, and the
+            // only one we invite is the agent. The initializer is what makes
+            // forwarding work at all: the request alone gets the server to
+            // agree, but nothing happens until it can open a channel and find
+            // an agent listening.
+            inboundChildChannelInitializer: agentInitializer(configuration.agentSigner, configuration.credential)
         )
         let sync = channel.pipeline.syncOperations
         try sync.addHandler(sshHandler)
         try sync.addHandler(ErrorHandler { [weak self] error in self?.emit(.failed("\(error)")) })
+    }
+
+    /// Builds the handler for a channel the server opens back to us.
+    ///
+    /// Only the agent channel is ever invited, so an initializer that refuses
+    /// anything else is the correct amount of code. Returning a failed future
+    /// rather than nil means the server gets a proper channel-open failure
+    /// instead of a hang.
+    private func agentInitializer(
+        _ signer: SSHAgent.Signer?,
+        _ credential: SSHCredential
+    ) -> @Sendable (Channel, SSHChannelType) -> EventLoopFuture<Void> {
+        { child, channelType in
+            guard case .authAgent = channelType else {
+                return child.eventLoop.makeFailedFuture(SSHTransportError.unexpectedChannelType)
+            }
+            guard let signer, let identity = credential.agentIdentity else {
+                // Asked for forwarding but there is no key to serve. Failing
+                // the open is what makes `git` on the host say "permission
+                // denied" rather than hanging on a channel nobody answers.
+                return child.eventLoop.makeFailedFuture(SSHAgent.AgentError.noIdentity)
+            }
+            let handler = SSHAgentChannelHandler(agent: SSHAgent(identity: identity, sign: signer))
+            return child.eventLoop.makeCompletedFuture {
+                try child.pipeline.syncOperations.addHandler(handler)
+            }
+        }
     }
 
     /// Records the channel whose death ends the session and starts `opening`

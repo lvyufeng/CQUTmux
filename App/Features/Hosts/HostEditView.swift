@@ -136,13 +136,15 @@ struct HostEditView: View {
                 if host.transport == .ssh && host.authMethod == .key {
                     Toggle("Forward SSH Agent", isOn: $host.forwardAgent)
 
-                    // swift-nio-ssh has no channel for agent forwarding yet, and
-                    // we have no ssh-agent socket to forward to on iOS anyway.
+                    // Explains what is actually forwarded, because the name
+                    // invites the wrong assumption: this is not a bridge to an
+                    // agent on the phone, it is this key, offered to the host.
                     if host.forwardAgent {
-                        Label("Not available yet — the app keeps the key to itself.",
-                              systemImage: "exclamationmark.triangle")
+                        Text("The host can use this connection's key for git and SSH signing. "
+                             + "The key itself never leaves the device, and it is not shared with "
+                             + "any other connection.")
                             .font(.caption)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }

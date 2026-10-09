@@ -444,7 +444,11 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
                 host.jumpHost,
                 fallbackUser: host.username,
                 credential: credential
-            )
+            ),
+            // Only for key auth over plain SSH: mosh and ET are not SSH once
+            // they are up, so there is no channel to carry the request.
+            forwardAgent: host.forwardAgent && host.transport == .ssh && credential.isKey,
+            agentSigner: SSHCredential.agentSigner(for: credential)
         )
         // The transport is chosen here rather than defaulted in the view, so a
         // host that asks for something unavailable says why instead of quietly

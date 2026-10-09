@@ -71,6 +71,17 @@ public struct TransportConfiguration: Sendable {
     /// on this host rather than opening a socket of its own.
     public var jumpHost: JumpHost?
 
+    /// Offer this connection's key to the host as an SSH agent, so programs
+    /// running *there* can authenticate as this user without a copy of the key.
+    /// Only meaningful for key authentication over SSH — mosh and ET are not
+    /// SSH once they are up, and the request is an SSH channel request.
+    public var forwardAgent: Bool
+
+    /// Signs with the connection's private key. Supplied by the caller because
+    /// the key lives in the Keychain behind Face ID, which this package has no
+    /// business reaching into — it only needs the bytes.
+    public var agentSigner: SSHAgent.Signer?
+
     public init(
         host: String,
         port: Int = 22,
@@ -78,7 +89,9 @@ public struct TransportConfiguration: Sendable {
         credential: SSHCredential,
         terminalType: String = "xterm-256color",
         environment: [String: String] = ["LANG": "en_US.UTF-8"],
-        jumpHost: JumpHost? = nil
+        jumpHost: JumpHost? = nil,
+        forwardAgent: Bool = false,
+        agentSigner: SSHAgent.Signer? = nil
     ) {
         self.host = host
         self.port = port
@@ -87,6 +100,8 @@ public struct TransportConfiguration: Sendable {
         self.terminalType = terminalType
         self.environment = environment
         self.jumpHost = jumpHost
+        self.forwardAgent = forwardAgent
+        self.agentSigner = agentSigner
     }
 }
 

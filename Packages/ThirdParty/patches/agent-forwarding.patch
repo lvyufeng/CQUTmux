@@ -1,0 +1,187 @@
+--- a/Sources/NIOSSH/Child Channels/ChildChannelUserEvents.swift
++++ b/Sources/NIOSSH/Child Channels/ChildChannelUserEvents.swift
+@@ -118,6 +118,21 @@
+ 
+     /// A request for this session to invoke a shell.
+     public struct ShellRequest: Hashable, Sendable {
++        /// Whether this request should be replied to.
++        public var wantReply: Bool
++
++        public init(wantReply: Bool) {
++            self.wantReply = wantReply
++        }
++    }
++
++    /// A request that the peer forward its authentication agent back over this
++/// session (`auth-agent-req@openssh.com`).
++    ///
++    /// Added in this vendored copy: upstream swift-nio-ssh does not model the
++    /// request, and the child-channel request mechanism is internal, so there
++    /// is no way to send it from outside without this.
++    public struct AgentForwardingRequest: Hashable, Sendable {
+         /// Whether this request should be replied to.
+         public var wantReply: Bool
+ 
+@@ -350,6 +365,8 @@
+             return LocalFlowControlRequest(clientCanDo: clientCanDo)
+         case .signal(let signalName):
+             return SignalRequest(signal: signalName)
++        case .authAgent:
++            return AgentForwardingRequest(wantReply: message.wantReply)
+         case .unknown:
+             return nil
+         }
+@@ -391,6 +408,15 @@
+                     terminalModes: event.terminalModes
+                 )
+             ),
++            wantReply: event.wantReply
++        )
++        self = .channelRequest(message)
++    }
++
++    init(_ event: SSHChannelRequestEvent.AgentForwardingRequest, recipientChannel: UInt32) {
++        let message = SSHMessage.ChannelRequestMessage(
++            recipientChannel: recipientChannel,
++            type: .authAgent,
+             wantReply: event.wantReply
+         )
+         self = .channelRequest(message)
+--- a/Sources/NIOSSH/Child Channels/SSHChannelType.swift
++++ b/Sources/NIOSSH/Child Channels/SSHChannelType.swift
+@@ -35,6 +35,11 @@
+ 
+     /// "Forwarded TCP/IP" is a connection that was accepted from a listening socket and is being forwarded to the client.
+     case forwardedTCPIP(ForwardedTCPIP)
++
++    /// `auth-agent@openssh.com` — the peer opening a channel to our
++    /// authentication agent. Only ever seen inbound, and only after we asked
++    /// for it with `auth-agent-req@openssh.com`.
++    case authAgent
+ }
+ 
+ extension SSHChannelType {
+@@ -129,6 +134,8 @@
+                     originatorAddress: message.originatorAddress
+                 )
+             )
++        case .authAgent:
++            self = .authAgent
+         }
+     }
+ }
+@@ -154,6 +161,8 @@
+                     originatorAddress: data.originatorAddress
+                 )
+             )
++        case .authAgent:
++            self = .authAgent
+         }
+     }
+ }
+--- a/Sources/NIOSSH/Child Channels/SSHChildChannel.swift
++++ b/Sources/NIOSSH/Child Channels/SSHChildChannel.swift
+@@ -418,6 +418,8 @@
+         case let event as SSHChannelRequestEvent.LocalFlowControlRequest:
+             message = SSHMessage(event, recipientChannel: self.state.remoteChannelIdentifier!)
+         case let event as SSHChannelRequestEvent.SignalRequest:
++            message = SSHMessage(event, recipientChannel: self.state.remoteChannelIdentifier!)
++        case let event as SSHChannelRequestEvent.AgentForwardingRequest:
+             message = SSHMessage(event, recipientChannel: self.state.remoteChannelIdentifier!)
+         case is ChannelSuccessEvent:
+             message = .channelSuccess(.init(recipientChannel: self.state.remoteChannelIdentifier!))
+--- a/Sources/NIOSSH/SSHMessages.swift
++++ b/Sources/NIOSSH/SSHMessages.swift
+@@ -221,6 +221,12 @@
+             case session
+             case forwardedTCPIP(ForwardedTCPIP)
+             case directTCPIP(DirectTCPIP)
++
++            /// `auth-agent@openssh.com` — the peer asking to speak to our
++            /// authentication agent. This is how a server that accepted
++            /// `auth-agent-req@openssh.com` comes back to use the forwarded
++            /// identity; without it the request is a no-op.
++            case authAgent
+         }
+ 
+         struct ForwardedTCPIP: Equatable {
+@@ -319,6 +325,15 @@
+             case windowChange(WindowChange)
+             case xonXoff(Bool)
+             case signal(String)
++            /// `auth-agent-req@openssh.com` — asks the peer to forward its
++            /// authentication agent back over this session.
++            ///
++            /// Not part of RFC 4254, but it is the request OpenSSH invented and
++            /// every server understands, and it is the standard spelling that
++            /// has to appear on the wire. Added to this vendored copy of
++            /// swift-nio-ssh (see Packages/ThirdParty/) because upstream does
++            /// not model it and the child-channel request path is internal.
++            case authAgent
+             case unknown
+         }
+ 
+@@ -902,6 +917,12 @@
+                     )
+                 )
+ 
++            case "auth-agent@openssh.com":
++                // No extra fields: the channel type string is the whole
++                // request, and everything after it is the normal channel
++                // framing that has already been read.
++                type = .authAgent
++
+             default:
+                 throw NIOSSHError.unknownPacketType(diagnostic: "Channel request with \(typeRawValue)")
+             }
+@@ -1122,6 +1143,9 @@
+                 }
+                 type = .xonXoff(clientCanDo)
+ 
++            case "auth-agent-req@openssh.com":
++                type = .authAgent
++
+             case "signal":
+                 guard let signalName = self.readSSHStringAsString() else {
+                     return nil
+@@ -1454,6 +1478,9 @@
+ 
+         case .directTCPIP:
+             writtenBytes += self.writeSSHString("direct-tcpip".utf8)
++
++        case .authAgent:
++            writtenBytes += self.writeSSHString("auth-agent@openssh.com".utf8)
+         }
+ 
+         writtenBytes += self.writeInteger(message.senderChannel)
+@@ -1462,6 +1489,10 @@
+ 
+         switch message.type {
+         case .session:
++            break
++
++        case .authAgent:
++            // Nothing beyond the type string, which was already written.
+             break
+ 
+         case .forwardedTCPIP(let data):
+@@ -1571,6 +1602,8 @@
+             writtenBytes += self.writeSSHString("xon-xoff".utf8)
+         case .signal:
+             writtenBytes += self.writeSSHString("signal".utf8)
++        case .authAgent:
++            writtenBytes += self.writeSSHString("auth-agent-req@openssh.com".utf8)
+         case .unknown:
+             preconditionFailure()
+         }
+@@ -1610,6 +1643,10 @@
+             writtenBytes += self.writeSSHBoolean(clientCanDo)
+         case .signal(let name):
+             writtenBytes += self.writeSSHString(name.utf8)
++        case .authAgent:
++            // The request name is the entire message, and it was already
++            // written above.
++            break
+         case .unknown:
+             preconditionFailure()
+         }
