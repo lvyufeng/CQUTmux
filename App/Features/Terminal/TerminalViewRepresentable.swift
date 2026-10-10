@@ -472,8 +472,8 @@ struct TerminalScreen: View {
         Group {
             ForEach(shortcuts.shortcuts) { shortcut in
                 Button {
-                    guard let bytes = shortcut.bytes else { return }
-                    coordinator.terminal?.sendRaw(Data(bytes))
+                    guard let parsed = shortcut.parsed else { return }
+                    coordinator.terminal?.send(parsed)
                 } label: {
                     Text(shortcut.label)
                         .font(.caption)
@@ -815,8 +815,8 @@ struct TerminalScreen: View {
             case .interrupt: coordinator.terminal?.sendInterrupt()
             case .escape: coordinator.terminal?.sendEscape()
             case .custom:
-                if let bytes = input.cornerBytes(slot) {
-                    coordinator.terminal?.sendRaw(Data(bytes))
+                if let parsed = input.cornerParsed(slot) {
+                    coordinator.terminal?.send(parsed)
                 }
             }
         } label: {

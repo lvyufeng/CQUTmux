@@ -828,6 +828,34 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         write(data)
     }
 
+    /// Sends a parsed shortcut, pacing its steps apart.
+    ///
+    /// A multi-step shortcut is several keystrokes — `C-b, T` is the tmux
+    /// prefix and then a letter — and the remote only acts on the second once
+    /// it has processed the first. Written as one blob both bytes land in the
+    /// same read and the chord works only by luck. A single step is still one
+    /// write, so nothing about an ordinary key changes.
+    ///
+    /// Pacing runs on the main actor as one task, so a second shortcut or a
+    /// keystroke cannot wedge its bytes between the steps of the first: the
+    /// interleaved order is the failure that no byte-level check would catch.
+    func send(_ parsed: ShortcutGrammar.Parsed) {
+        guard parsed.needsPacing else {
+            sendRaw(Data(parsed.bytes))
+            return
+        }
+        let schedule = parsed.schedule
+        Task { @MainActor [weak self] in
+            for (index, chunk) in schedule.enumerated() {
+                if index > 0, chunk.after > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(chunk.after * 1_000_000_000))
+                }
+                guard let self else { return }
+                self.sendRaw(Data(chunk.bytes))
+            }
+        }
+    }
+
     private func write(_ data: Data) {
         transport.send(data)
         rearmControlLockIfNeeded()

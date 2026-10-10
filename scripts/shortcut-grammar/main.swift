@@ -63,6 +63,50 @@ do {
     print("\(parsed.bytes == want ? "PASS" : "FAIL")  text:a,b c      -> \(parsed.bytes) (commas kept)")
 } catch { print("FAIL text:a,b c threw \(error)") }
 
+print("\n— multi-step pacing —")
+
+// A multi-step shortcut is several keystrokes, and the remote only consumes the
+// next once it has processed the last: a tmux chord sent as one write arrives in
+// a single read and lands only by luck. The delay is the fix, and every rule
+// about it is invisible on a screen — the bytes are all correct either way, it
+// is their timing that decides whether the chord works.
+func checkSchedule(_ input: String, _ expected: [(TimeInterval, [UInt8])], _ note: String) {
+    do {
+        let parsed = try ShortcutGrammar.parse(input)
+        let got = parsed.schedule.map { ($0.after, $0.bytes) }
+        let pass = got.count == expected.count
+            && zip(got, expected).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
+        print("\(pass ? "PASS" : "FAIL")  \(input.padding(toLength: 16, withPad: " ", startingAt: 0)) -> \(got.map { "\($0.0):\($0.1)" })  \(note)")
+        if !pass { print("        expected \(expected.map { "\($0.0):\($0.1)" })") }
+    } catch {
+        print("FAIL  \(input.padding(toLength: 16, withPad: " ", startingAt: 0)) -> threw \(error)")
+    }
+}
+
+// The delay goes *between* steps, never in front of the first one. A pause
+// before the first byte would make every shortcut key on the bar feel broken,
+// and that is the difference a schedule has to be able to express.
+checkSchedule("C-b, T", [(0, [0x02]), (ShortcutGrammar.Parsed.interStepDelay, [0x54])],
+              "tmux chord: prefix now, letter after the gap")
+checkSchedule("C-c", [(0, [0x03])], "one step is one immediate chunk, no delay at all")
+checkSchedule("text:/clear",
+              [(0, Array("/clear".utf8)), (ShortcutGrammar.Parsed.interStepDelay, [0x0D])],
+              "the auto-Enter is paced like any other step, not glued on")
+checkSchedule("F1, F2, F3",
+              [(0, [0x1B, 0x4F, 0x50]),
+               (ShortcutGrammar.Parsed.interStepDelay, [0x1B, 0x4F, 0x51]),
+               (ShortcutGrammar.Parsed.interStepDelay, [0x1B, 0x4F, 0x52])],
+              "three steps: a gap before the second and the third")
+
+// And the predicate the send path branches on, so a single step keeps taking
+// the same one-write route it always did.
+do {
+    let one = try ShortcutGrammar.parse("C-c")
+    let two = try ShortcutGrammar.parse("C-b, T")
+    print("\(one.needsPacing == false ? "PASS" : "FAIL")  C-c is not paced (old path)")
+    print("\(two.needsPacing == true ? "PASS" : "FAIL")  C-b, T is paced (new path)")
+} catch { print("FAIL pacing predicate threw \(error)") }
+
 print("\n— rejections —")
 rejects("Contrl-b", "misspelled modifier")
 rejects("F13", "out of range")

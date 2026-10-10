@@ -30,8 +30,8 @@ with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 52 |
-| partial | 21 |
+| closed | 53 |
+| partial | 20 |
 | deliberate-divergence | 2 |
 | missing | 1 |
 
@@ -133,6 +133,15 @@ has since been closed, with the check that pins it.
   the hook puts on the wire. The two sibling surfaces that announce a pending
   approval — the Live Activity and the push notification text — still show the
   title alone and are tracked separately.
+
+- **Multi-step shortcut timing** — `ShortcutGrammar.Parsed.schedule` gives each step the delay before
+  it (the first at zero), `interStepDelay` is the gap, and `CQUTTerminalView.send(_:)` writes them as
+  one main-actor task. A single keystroke keeps the old immediate path (`needsPacing`), so nothing about
+  an ordinary key got slower. The failure this fixes is invisible to a byte check: a tmux chord sent as
+  one write arrives in a single read and lands only by luck, and a delay placed *before* the first byte
+  would make every key feel late — which is why the schedule distinguishes the two, and why the check
+  (`scripts/shortcut-grammar`, a new "multi-step pacing" block) asserts the shape of the timing rather
+  than just the bytes.
 
 - **Enter / Backspace / keyboard-show-hide bar keys** — added to
   `InputSettings.Item`; `sendEnter` (CR) and `sendBackspace` (BS) are distinct
@@ -767,7 +776,7 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   sync carries both, and every chord and the tab row resolve through
   `prefix(for:)`.
 
-### The 21 that are still open, grouped by what is actually missing
+### The 20 that are still open, grouped by what is actually missing
 
 A second independent pass on 2026-10-10 rewrote each of these with file:line
 evidence. What is missing, in one line each:
@@ -779,7 +788,6 @@ evidence. What is missing, in one line each:
   last host/session at cold launch.
 - Chat mode's composer takes typed text only — the mic and image buttons are in
   the bar it replaces.
-- Multi-step shortcuts parse and send, but with no delay between steps.
 - `LANG` is set for the host; `LC_ALL` is set nowhere and no rc file is written.
 - The diff viewer does take the custom font (that half is done); `.ttc`/`.otc`
   handling and the fallback are not.

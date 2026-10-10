@@ -205,6 +205,15 @@ final class InputSettings {
         return (try? ShortcutGrammar.parse(text))?.bytes
     }
 
+    /// The parsed shortcut for a custom corner, so the send can pace a
+    /// multi-step one. Nil for a blank slot or a text that no longer parses —
+    /// the same two cases `cornerBytes` returns nil for, which is what the
+    /// corner's enabled state is drawn from.
+    func cornerParsed(_ slot: Corner) -> ShortcutGrammar.Parsed? {
+        guard let text = cornerShortcuts[slot.rawValue] else { return nil }
+        return try? ShortcutGrammar.parse(text)
+    }
+
     /// Esc top-left and Delete top-right: the two a TUI needs most often, in
     /// the two slots a thumb reaches first.
     static func defaultCorner(_ slot: Corner) -> CornerAction {

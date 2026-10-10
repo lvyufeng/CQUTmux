@@ -45,6 +45,37 @@ enum ShortcutGrammar {
 
         /// What the panel shows, e.g. `Ctrl+b, Shift+t`.
         var label: String { steps.map(\.label).joined(separator: ", ") }
+
+        /// How long to wait between steps of a multi-step shortcut.
+        ///
+        /// A tmux chord like `C-b, T` is really two separate keystrokes, and
+        /// tmux only consumes the second once it has registered the prefix.
+        /// Sent as one write the two bytes arrive in the same read and the
+        /// chord is a coin flip; the gap is what makes it land. Gone entirely
+        /// for a single step, because there is no second step to separate and
+        /// a lone keystroke must never be made to feel late.
+        static let interStepDelay: TimeInterval = 0.15
+
+        /// Each step with how long after the previous one it goes out.
+        ///
+        /// The FIRST step is at zero, and that is the part worth pinning: a
+        /// delay in front of the first byte would make every shortcut key on
+        /// the bar feel broken, and only a schedule that separates "before the
+        /// first" from "between the rest" can express that. `autoEnter` is its
+        /// own final chunk so a `text:…` shortcut's Return is subject to the
+        /// same pacing as any other step.
+        var schedule: [(after: TimeInterval, bytes: [UInt8])] {
+            var out: [(after: TimeInterval, bytes: [UInt8])] = []
+            for (index, step) in steps.enumerated() {
+                out.append((after: index == 0 ? 0 : Self.interStepDelay, bytes: step.bytes))
+            }
+            if autoEnter { out.append((after: Self.interStepDelay, bytes: [0x0D])) }
+            return out
+        }
+
+        /// Whether this shortcut needs the paced path at all. A single step is
+        /// one write, exactly as before the schedule existed.
+        var needsPacing: Bool { schedule.count > 1 }
     }
 
     enum ParseError: Error, Equatable, LocalizedError {
