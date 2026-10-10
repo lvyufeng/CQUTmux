@@ -666,3 +666,52 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   read returns nil instead of trapping and the complication draws `—` rather
   than a false zero. `scripts/watch-usage-check.sh` (27 checks) covers the
   shared-container round trip that the simulator cannot.
+
+- **The tab quick-access row, on every multiplexer.** The row was tmux-only and
+  nine buttons wide. The page lists twenty for each of the three multiplexers,
+  and the reason each button is not simply the same keystroke is that the three
+  programs read a tab number three different ways: tmux reads its prefix plus the
+  bare digit (and its command prompt past nine), herdr reads its own prefix, and
+  zellij — which has no prefix at all — reads `Ctrl-T` plus the number, `Ctrl-T`
+  being its tab-mode key rather than one of its `zellij action` line commands.
+  That last one is the trap: reaching for `zellij action go-to-tab` would be the
+  natural move, since it is what every other zellij command here uses, but that
+  line needs a shell to run it and the shell is not what has focus while a TUI is
+  on screen. The mapping lives in one function so the row cannot drift from it,
+  and the row is drawn wherever that function returns bytes rather than behind a
+  `host.mux == "tmux"` test.
+
+  **Two checks, because they fail differently.** The mapping is pure and runs
+  through the interpreter (19 checks). The delivery is read off a live host with
+  `cat -v`, which renders a prefix as `^B` — a digit that arrived *without* its
+  prefix is the bug this row can have, and it is invisible to anything that only
+  checks the row exists.
+
+  **The instrument lied first, though.** The zellij probe showed a bare `5`
+  where it should have shown `^T5`, which looks exactly like a dropped control
+  byte. It was not: under a shell with line editing the tty is in canonical mode,
+  and a control byte readline has no binding for is discarded before any program
+  sees it — the digit survives because it is text. `stty raw -echo` put the pty in
+  raw mode and `^T` appeared. Same class of mistake as the simulator-touch
+  helper's `{"ok":true}`: a negative result from an instrument that cannot show
+  the positive one.
+
+- **Two-finger swipes drive the multiplexer.** Recorded here as absent twice, and
+  wrong both times: the notes enumerated UIKit's stock recognisers and missed
+  `UISweepGesture`, a custom two-touch directional recogniser that exists because
+  `UISwipeGestureRecognizer` cannot require exactly two touches while also
+  reporting which way the drag went and refusing a diagonal. A horizontal sweep
+  moves the pane on tmux and herdr and does nothing on zellij — whose pane moves
+  live inside a mode whose entry key cannot be sent as one chord — and a vertical
+  sweep moves the tab on tmux and zellij and opens herdr's workspace navigator,
+  which has no next-workspace key of its own. The gate is consulted before the
+  touch begins, so on a plain shell the sweep fails immediately and the
+  two-finger drag still scrolls; the mouse-wheel pan is made to wait on both.
+
+- **Herdr's prefix is its own setting.** Also recorded as absent and also
+  already implemented — the audit text had gone stale against commit `edf2834`.
+  tmux and herdr are separate programs configured by separate files, and a host
+  commonly runs both, so sharing one stored prefix would make changing the tmux
+  one silently rebind every herdr chord. `Settings → Multiplexer` carries both,
+  sync carries both, and every chord and the tab row resolve through
+  `prefix(for:)`.

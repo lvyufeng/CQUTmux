@@ -785,6 +785,21 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// rather than from a parameter: a caller that could pass a prefix could
     /// pass the wrong one, and this is exactly the code path where that failure
     /// is silent. Reading it here means `MuxSettings` has one consumer.
+    /// Jumps to tab or window `number` — what the quick-access row sends.
+    ///
+    /// Deliberately not routed through `selectWindow`: that method predates the
+    /// row offering more than nine and takes a *selector string*, which is the
+    /// shape the session picker needs. The row knows a number, and the mapping
+    /// from a number to bytes is per multiplexer, so it lives in
+    /// `MuxCommand.selectTab` where it can be checked against the published
+    /// behaviour without a simulator.
+    func selectTab(_ number: Int, mux: String?) {
+        guard let bytes = MuxSettings.MuxCommand.selectTab(number, mux: mux, prefix: muxPrefix) else {
+            return
+        }
+        write(Data(bytes))
+    }
+
     func selectWindow(mux: String, session: String, selector: String) {
         switch mux {
         case "zellij":
@@ -886,6 +901,13 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     func selectWindowForTesting(mux: String, session: String, selector: String) {
         guard status.isLive else { return }
         selectWindow(mux: mux, session: session, selector: selector)
+    }
+
+    /// Presses a tab-row button with the view's own configured prefix.
+    /// Test-only; see `DebugSeed.selectTabWhenConnected`.
+    func selectTabForTesting(_ number: Int, mux: String) {
+        guard status.isLive else { return }
+        selectTab(number, mux: mux)
     }
     #endif
 

@@ -196,6 +196,57 @@ final class MuxSettings {
             }
         }
 
+        /// The highest tab number the quick-access row offers.
+        ///
+        /// The page lists "Tab 1–20" for tmux, herdr and zellij alike, so the row
+        /// is the same twenty buttons everywhere and only what each button *sends*
+        /// differs. That is the point of putting the number here rather than in
+        /// the view: the row cannot drift into offering a number one multiplexer
+        /// cannot reach.
+        static let selectableTabs = 1...20
+
+        /// What tapping tab `number` sends, or nil when this multiplexer has no
+        /// way to jump to a number.
+        ///
+        /// These are three genuinely different mechanisms, and the page
+        /// distinguishes them:
+        ///
+        /// * tmux reads `prefix` + the digit itself, so bare digits work and the
+        ///   row can reach all twenty without a prompt.
+        /// * zellij has no prefix at all. `Ctrl-T` is its *tab mode* key, and the
+        ///   number is read from inside that mode — which is why this is the one
+        ///   row entry that sends a control byte rather than a `zellij action`
+        ///   line. Typing the line command (`go-to-tab N`) would need the shell,
+        ///   and the shell is not what has focus while a TUI is on screen.
+        /// * herdr has tabs of its own — see `gotoPrompt`, which is how a tab past
+        ///   the ninth is reached.
+        static func selectTab(_ number: Int, mux: String?, prefix: Prefix) -> [UInt8]? {
+            guard selectableTabs.contains(number) else { return nil }
+            switch mux {
+            case "tmux":
+                if number <= 9 { return prefix.bytes + Array(String(number).utf8) }
+                // tmux binds the bare digits to its first nine windows. A tenth
+                // has no bare binding, so it goes through the command prompt —
+                // which is what the row did before it offered more than nine.
+                return prefix.bytes + Array(":select-window -t \(number)\n".utf8)
+            case "zellij":
+                // Ctrl-T is 0x14, zellij's tab-mode key; the number is read from
+                // inside that mode. This is the one row entry that sends a control
+                // byte rather than a `zellij action` line: the line form needs the
+                // shell to run it, and the shell is not what has focus while a TUI
+                // is on screen.
+                return [0x14] + Array(String(number).utf8)
+            case "herdr":
+                if number <= 9 { return prefix.bytes + Array(String(number).utf8) }
+                // Herdr reads 1–9 off its prefix directly; past that its own tab
+                // command is the honest route rather than a chord the page warns
+                // "may need a custom binding".
+                return Array("herdr tab focus \(number)\n".utf8)
+            default:
+                return nil
+            }
+        }
+
         /// Which command a two-finger swipe means, or nil to leave the swipe to the
         /// terminal.
         ///

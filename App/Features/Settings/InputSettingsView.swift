@@ -12,7 +12,7 @@ struct InputSettingsView: View {
                 Toggle("Hide the key bar with a hardware keyboard",
                        isOn: $input.hideBarWithHardwareKeyboard)
                     .disabled(input.chatMode)
-                Toggle("Hide the window row", isOn: $input.hidesWindowRow)
+                Toggle("Hide the tab row", isOn: $input.hidesWindowRow)
                     .disabled(input.chatMode)
             } header: {
                 Label("Keyboard", systemImage: "keyboard")

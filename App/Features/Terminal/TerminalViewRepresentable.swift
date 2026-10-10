@@ -220,7 +220,7 @@ struct TerminalScreen: View {
                     hardwareKeyboard: hardwareKeyboard
                 ) {
                     VStack(spacing: 0) {
-                        if host.mux == "tmux", !input.hidesWindowRow { windowRow }
+                        if tabRowApplies, !input.hidesWindowRow { tabRow }
                         accessoryBar
                     }
                 }
@@ -365,29 +365,37 @@ struct TerminalScreen: View {
             }
     }
 
-    /// One tap per tmux window, 1–9, above the key bar.
+    /// Whether the host has a tab row at all.
+    ///
+    /// The row is offered on every multiplexer the app detects, and that is the
+    /// whole reason the view consults `host.mux`: what each button *sends* differs
+    /// per multiplexer (see `MuxCommand.selectTab`), and a host with no
+    /// multiplexer has nothing for the row to address — showing it there would be
+    /// a row of numbers that type digits into whatever program is running.
+    private var tabRowApplies: Bool {
+        MuxSettings.MuxCommand.selectTab(
+            1, mux: host.mux, prefix: mux.prefix(for: host.mux)
+        ) != nil
+    }
+
+    /// One tap per tab or window, 1–20, above the key bar.
     ///
     /// Above rather than below on purpose: this is the row a thumb reaches
     /// past to get to the keys, and the keys are the ones pressed constantly.
     /// A row that pushed them up the screen would cost more than it saved.
     ///
-    /// Only 1–9 because tmux binds those to bare digits — window 10 needs the
-    /// command prompt, which is what Jump To is for. Showing 1–20 as glass
-    /// buttons would make two thirds of them do something different from the
-    /// rest.
-    ///
-    /// Only shown for tmux, and that is the whole reason the view consults
-    /// `host.mux`: these buttons send prefix-key keystrokes, so on a zellij or
-    /// herdr session they would type a control character into the pane instead
-    /// of switching tabs — the failure mode this row is most likely to have.
-    private var windowRow: some View {
+    /// All twenty are offered because the page lists twenty for each of the three
+    /// multiplexers. What a button sends is not uniform, though, and the row does
+    /// not pretend otherwise: tmux reads the bare digits up to nine and its command
+    /// prompt past that, herdr reads its own prefix, and zellij — which has no
+    /// prefix — reads Ctrl-T and the number as a tab-mode binding. That mapping
+    /// lives in `MuxCommand.selectTab` so this view cannot drift from it.
+    private var tabRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
-                ForEach(1...9, id: \.self) { index in
+                ForEach(MuxSettings.MuxCommand.selectableTabs, id: \.self) { index in
                     Button {
-                        coordinator.terminal?.selectWindow(
-                            mux: "tmux", session: "", selector: String(index)
-                        )
+                        coordinator.terminal?.selectTab(index, mux: host.mux)
                     } label: {
                         Text("\(index)")
                             .font(.system(.footnote, design: .monospaced))
@@ -1086,6 +1094,16 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         if let raw = ProcessInfo.processInfo.environment["CQUT_DEV_MUX_COMMAND"],
            let command = MuxSettings.MuxCommand(rawValue: raw) {
             DebugSeed.fireMuxCommandWhenConnected(view: view, command: command)
+        }
+        // The tab row's buttons live in a scroll view above the keyboard, so a
+        // script cannot tap one. `CQUT_DEV_TAB=<n>` presses the button for
+        // tab `n`, and `CQUT_DEV_TAB_MUX` names which multiplexer it should be
+        // read as — the mapping differs per multiplexer, so the host under test
+        // has to be told which one it is pretending to be.
+        if let raw = ProcessInfo.processInfo.environment["CQUT_DEV_TAB"],
+           let number = Int(raw) {
+            let mux = ProcessInfo.processInfo.environment["CQUT_DEV_TAB_MUX"] ?? "tmux"
+            DebugSeed.selectTabWhenConnected(view: view, number: number, mux: mux)
         }
         // Same idea for a custom shortcut: the bar cannot be tapped from a
         // script, so the binding is pressed for it and the bytes travel the

@@ -198,6 +198,31 @@ enum DebugSeed {
         }
     }
 
+    /// Presses a tab-row button once the session is live. Test-only.
+    ///
+    /// The row's buttons sit in a scroll view above the keyboard, so a script
+    /// cannot tap one; this reaches the same `selectTab` the button's action
+    /// calls, which is where the per-multiplexer mapping is applied. Pairs with
+    /// `cat -v` on the host, which renders a control byte as `^B` so the digit's
+    /// prefix is visible rather than silently eaten by a program that ignores it.
+    static func selectTabWhenConnected(
+        view: CQUTTerminalView, number: Int, mux: String, attempt: Int = 0
+    ) {
+        guard attempt < 60 else { return }
+        guard view.isLiveForTesting else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                selectTabWhenConnected(view: view, number: number, mux: mux, attempt: attempt + 1)
+            }
+            return
+        }
+        // The same delay as the mux-command seed, for the same reason: the byte
+        // is meant to be read by `cat -v` rather than by a shell prompt, and
+        // arriving first would let the shell eat it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            view.selectTabForTesting(number, mux: mux)
+        }
+    }
+
     static func pressShortcutWhenConnected(
         view: CQUTTerminalView, bytes: [UInt8], attempt: Int = 0
     ) {

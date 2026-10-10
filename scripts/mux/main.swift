@@ -205,6 +205,54 @@ check(MuxSettings.MuxCommand.matching(horizontal: .next, vertical: nil, mux: "ze
 check(MuxSettings.MuxCommand.matching(horizontal: nil, vertical: nil, mux: "tmux") == nil,
       "a sweep with no axis maps to nothing")
 
+// MARK: - The tab quick-access row
+
+// Twenty buttons on every multiplexer — the page lists "Tab 1–20" (and "Window
+// 1–20" for tmux) — but three different mechanisms underneath. This is the part
+// most likely to be wrong in a way nobody notices: a row that typed a digit into
+// a pane would look like a tab switch that did nothing.
+func selectTab(_ number: Int, _ mux: String?,
+               _ prefix: MuxSettings.Prefix = .controlB) -> [UInt8]? {
+    MuxSettings.MuxCommand.selectTab(number, mux: mux, prefix: prefix)
+}
+
+check(MuxSettings.MuxCommand.selectableTabs == 1...20, "the row offers tabs 1 through 20")
+
+// tmux: bare digits up to nine, command prompt past it. Asserting the *nine*
+// case matters because it is the one that changed shape — a fix for 10+ that
+// routed everything through the prompt would still pass a test that only knew
+// about 10.
+check(selectTab(1, "tmux") == [0x02, 0x31], "tmux tab 1 is prefix then the bare digit")
+check(selectTab(9, "tmux") == [0x02, 0x39], "tmux tab 9 is prefix then the bare digit")
+check(selectTab(10, "tmux") == [0x02] + Array(":select-window -t 10\n".utf8),
+      "tmux tab 10 goes through the command prompt, which is the only way it can")
+
+// herdr: its own prefix for 1–9, and its tab command past that rather than a
+// chord the page itself warns "may need a custom binding".
+check(selectTab(3, "herdr") == [0x02, 0x33], "herdr tab 3 is its prefix then the digit")
+check(selectTab(12, "herdr") == Array("herdr tab focus 12\n".utf8),
+      "herdr past nine uses its own tab command rather than a guessed chord")
+
+// zellij: Ctrl-T + the number, and — the trap — NOT the `zellij action` line
+// the other zellij commands use. That line needs a shell to run it, and the
+// shell is not what has focus while zellij is on screen.
+check(selectTab(2, "zellij") == [0x14, 0x32], "zellij tab 2 is Ctrl-T then the digit")
+check(selectTab(7, "zellij") == [0x14, 0x37], "and so is tab 7")
+check(!(selectTab(2, "zellij") ?? []).starts(with: Array("zellij action".utf8)),
+      "the tab row does not use zellij's line command, which needs the shell")
+// Ctrl-T is not any of the prefixes, so a user who rebinds their prefix cannot
+// accidentally change what a zellij tab button sends.
+check(selectTab(2, "zellij") == selectTab(2, "zellij", .controlA),
+      "zellij's tab row ignores the configured prefix, since zellij has none")
+
+check(selectTab(1, nil) == nil, "a host with no multiplexer has no tab row")
+check(selectTab(0, "tmux") == nil, "tab 0 is out of range")
+check(selectTab(21, "tmux") == nil, "and so is tab 21")
+
+// The row is only drawn when it has somewhere to send, which is this same call —
+// so a host that gets nil here must not get a row of buttons.
+check(selectTab(1, "zellij") != nil, "a zellij host gets the row")
+
 if failures > 0 {
     print("\nMUX_FAIL  (\(failures) of \(checks) failed)")
     exit(1)
