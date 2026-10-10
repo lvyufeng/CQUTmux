@@ -37,6 +37,7 @@ cd "$ROOT"
 
 PURE_FILES=(
   App/Shared/ISODate.swift
+  App/Shared/ActivityPhase.swift
   App/Features/Agents/AgentEvent.swift
   App/Features/Agents/AgentActivityPreview.swift
   App/Features/Agents/AgentActivitySettings.swift
@@ -103,16 +104,115 @@ let one = [sample[0]]
 check(AgentActivityPreview.content(for: one)?.summary.contains("1 approval waiting") == true,
       "a single approval did not read as singular")
 
-// Nothing pending, nothing decided: no activity. This is the case an
-// activity-per-event implementation gets wrong, badging the Lock Screen for an
-// event that asks nothing of the user.
+// A notice with nothing pending *does* show now — that is the point of the
+// phase work — but it must show as a finished turn, not as something waiting.
+// The failure this guards is the opposite of the old one: an activity that
+// surfaces every event is right, and one that dresses a finished turn in the
+// raised hand is a false claim that the user is needed.
 let chatter = AgentEvent(
     id: 5, at: ISODate.string(from: Date()), source: "claude", kind: .notice,
     title: "Read Sources/App.swift", body: nil, decision: nil, answer: nil, data: nil
 )
-check(AgentActivityPreview.content(for: [chatter]) == nil,
-      "a notice with nothing pending started an activity")
+let chatContent = AgentActivityPreview.content(for: [chatter])
+check(chatContent != nil, "a finished turn did not show on the activity")
+check(chatContent?.phase == .taskComplete, "a bare notice was not task_complete: \(String(describing: chatContent?.phase))")
+check(chatContent?.phase.isAwaiting == false, "a finished turn wore the awaiting style")
+check(chatContent?.pending == 0, "a finished turn counted as pending")
+
+// Nothing at all still shows nothing: the activity needs a fact to report.
 check(AgentActivityPreview.content(for: []) == nil, "no events started an activity")
+
+// A timestamp is required to pick "the latest". Without one there is no newest
+// event, only whichever the poll listed first — and the activity would then say
+// a different thing on every update.
+let undated = AgentEvent(
+    id: 55, at: "not a timestamp", source: "claude", kind: .notice,
+    title: "no time", body: nil, decision: nil, answer: nil, data: nil
+)
+check(AgentActivityPreview.content(for: [undated]) == nil,
+      "an event with no parseable timestamp still produced an activity")
+
+// The phase of a tool that is mid-flight. This is the state the activity could
+// not express at all before: neither waiting nor finished.
+let running = AgentEvent(
+    id: 56, at: ISODate.string(from: Date()), source: "claude", kind: .notice,
+    category: "tool_running", title: "Building", body: nil, decision: nil,
+    answer: nil, data: nil
+)
+check(AgentActivityPreview.content(for: [running])?.phase == .toolRunning,
+      "a tool_running event did not show as working")
+
+// An approval that has been answered is *running*, not done — allowing the tool
+// lets it run. The activity used to linger at zero with no phase at all.
+let allowed = AgentEvent(
+    id: 57, at: ISODate.string(from: Date()), source: "claude", kind: .approval,
+    title: "Run rm -rf build/", body: nil, decision: "allow", answer: nil, data: nil
+)
+check(AgentActivityPreview.content(for: [allowed])?.phase == .toolRunning,
+      "an answered approval did not show as working")
+
+// The lifecycle end. `sessionEnded` is final: it is the one phase the activity
+// shows and then dismisses rather than holding open.
+let ended = AgentEvent(
+    id: 58, at: ISODate.string(from: Date()), source: "claude", kind: .notice,
+    title: "Bye", body: nil, decision: nil, answer: nil,
+    data: AgentEvent.Payload(sessionEnded: true)
+)
+let endedContent = AgentActivityPreview.content(for: [ended])
+check(endedContent?.phase == .sessionEnded, "a session-ended event was not session_ended")
+check(endedContent?.phase.isFinal == true, "session_ended was not marked final")
+check(ActivityPhase.sessionEnded.isFinal, "sessionEnded.isFinal is false")
+
+// `endsSession` is only true for an explicit marker. Every hook that predates it
+// sends no field, and `nil` must not read as "the session ended" — which would
+// make every ordinary event a final phase and dismiss the activity instantly.
+check(!chatter.endsSession, "an event with no sessionEnded field was read as an ending")
+check(!(AgentActivityPreview.content(for: [chatter])?.phase.isFinal ?? true),
+      "an ordinary event produced a final phase")
+
+// The waiting approval outranks everything. A decision is the only thing that
+// asks the user for something, so an activity that showed "working" while an
+// approval sat unanswered would hide the one thing it exists to surface —
+// even when the working event is newer.
+let newer = AgentEvent(
+    id: 60, at: ISODate.string(from: Date().addingTimeInterval(60)), source: "codex",
+    kind: .notice, category: "tool_running", title: "Newer", body: nil,
+    decision: nil, answer: nil, data: nil
+)
+let pendingApproval = AgentEvent(
+    id: 59, at: ISODate.string(from: Date()), source: "claude", kind: .approval,
+    title: "Waiting", body: nil, decision: nil, answer: nil, data: nil
+)
+let mixed = AgentActivityPreview.content(for: [pendingApproval, newer])
+check(mixed?.phase == .approvalRequired,
+      "a pending approval lost to a newer running event: \(String(describing: mixed?.phase))")
+check(mixed?.pending == 1, "the pending approval was not counted alongside a running one")
+
+// The newest event decides the phase when nothing is waiting. Two notices of
+// different kinds, so the outcome can only be right if the *latest* is chosen.
+let olderDone = AgentEvent(
+    id: 61, at: ISODate.string(from: Date().addingTimeInterval(-120)), source: "claude",
+    kind: .notice, title: "older done", body: nil, decision: nil, answer: nil, data: nil
+)
+let newestRunning = AgentEvent(
+    id: 62, at: ISODate.string(from: Date().addingTimeInterval(120)), source: "claude",
+    kind: .notice, category: "tool_running", title: "newer running", body: nil,
+    decision: nil, answer: nil, data: nil
+)
+check(AgentActivityPreview.content(for: [olderDone, newestRunning])?.phase == .toolRunning,
+      "the newest event did not decide the phase")
+check(AgentActivityPreview.content(for: [newestRunning, olderDone])?.phase == .toolRunning,
+      "the phase depended on the order the events arrived in")
+
+// Every phase has a glyph and a label. A phase with an empty symbol renders as a
+// missing-glyph box on the Lock Screen and reads as a crash.
+for phase in ActivityPhase.allCases {
+    check(!phase.symbol.isEmpty, "\(phase.rawValue) has no symbol")
+    check(!phase.shortLabel.isEmpty, "\(phase.rawValue) has no label")
+}
+check(ActivityPhase.approvalRequired.isAwaiting, "approval_required is not awaiting")
+check(!ActivityPhase.toolRunning.isAwaiting, "tool_running was treated as awaiting")
+check(!ActivityPhase.taskComplete.isAwaiting, "task_complete was treated as awaiting")
 
 // A resolved approval lingers at zero rather than vanishing: blinking out
 // mid-answer looks like the app forgot what it was showing.

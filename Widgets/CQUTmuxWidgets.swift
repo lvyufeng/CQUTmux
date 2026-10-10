@@ -23,9 +23,19 @@ struct AgentApprovalWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label("\(context.state.pending)", systemImage: "hand.raised.fill")
-                        .foregroundStyle(.orange)
-                        .font(.headline)
+                    // The count only when something is waiting; otherwise the
+                    // phase's own glyph. A permanent raised hand on a session
+                    // that is merely working is the false claim this feature
+                    // exists to avoid.
+                    if context.state.phase.isAwaiting {
+                        Label("\(context.state.pending)", systemImage: context.state.phase.symbol)
+                            .foregroundStyle(.orange)
+                            .font(.headline)
+                    } else {
+                        Label(context.state.phase.shortLabel, systemImage: context.state.phase.symbol)
+                            .foregroundStyle(.green)
+                            .font(.headline)
+                    }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     Text(context.attributes.hostName)
@@ -39,11 +49,16 @@ struct AgentApprovalWidget: Widget {
                     }
                 }
             } compactLeading: {
-                Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
+                Image(systemName: context.state.phase.symbol)
+                    .foregroundStyle(context.state.phase.isAwaiting ? .orange : .green)
             } compactTrailing: {
-                Text("\(context.state.pending)").font(.caption2.weight(.bold))
+                // The count while something waits, nothing while it does not:
+                // a "0" beside a working gear reads as "zero of what?".
+                Text(context.state.phase.isAwaiting ? "\(context.state.pending)" : "")
+                    .font(.caption2.weight(.bold))
             } minimal: {
-                Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
+                Image(systemName: context.state.phase.symbol)
+                    .foregroundStyle(context.state.phase.isAwaiting ? .orange : .green)
             }
         }
         // Surfaces the same activity on the watch's Smart Stack, where a
@@ -80,11 +95,11 @@ struct AgentActivityView: View {
     /// it is asking about.
     private var lockScreen: some View {
         HStack(spacing: 12) {
-            Image(systemName: "hand.raised.fill")
+            Image(systemName: context.state.phase.symbol)
                 .font(.title2)
-                .foregroundStyle(.orange)
+                .foregroundStyle(context.state.phase.isAwaiting ? .orange : .green)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(context.state.pending) approval\(context.state.pending == 1 ? "" : "s") waiting")
+                Text(headline)
                     .font(.headline)
                 Text("\(context.state.latestSource) · \(context.state.latestTitle)")
                     .font(.caption)
@@ -96,17 +111,28 @@ struct AgentActivityView: View {
         .padding()
     }
 
+    /// The bold line: the waiting count while something is waiting, the phase's
+    /// name otherwise. The two are the same sentence at different times, and
+    /// deriving both here keeps them from drifting.
+    private var headline: String {
+        let waiting = context.state.pending
+        if context.state.phase.isAwaiting {
+            return "\(waiting) approval\(waiting == 1 ? "" : "s") waiting"
+        }
+        return context.state.phase.shortLabel
+    }
+
     /// The watch face's Smart Stack: the count has to be readable at a glance
     /// and nothing else is worth the space. The agent name goes underneath
     /// because with several agents running "2 waiting" alone does not say which
     /// one is stuck.
     private var watch: some View {
         HStack(spacing: 8) {
-            Image(systemName: "hand.raised.fill")
+            Image(systemName: context.state.phase.symbol)
                 .font(.title3)
-                .foregroundStyle(.orange)
+                .foregroundStyle(context.state.phase.isAwaiting ? .orange : .green)
             VStack(alignment: .leading, spacing: 0) {
-                Text("\(context.state.pending) waiting")
+                Text(context.state.phase.isAwaiting ? "\(context.state.pending) waiting" : context.state.phase.shortLabel)
                     .font(.headline)
                     .lineLimit(1)
                 Text(shortSource)

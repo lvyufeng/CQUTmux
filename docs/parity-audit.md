@@ -29,15 +29,16 @@ inbox's project grouping plus its toolbar fill; half of the host-locale claim
 windows; the browser-preview listener metadata; and `cqutmux diff`'s browser
 viewer, which closes a deliberate divergence, and the `cqutmux context` probe.
 Most recently the Inbox's five categories, which also turned up a gateway that
-was dropping the field the bridges were already sending.
+was dropping the field the bridges were already sending, and the Live Activity's
+latest-event and session-lifecycle phases.
 See the progress list below.
 The "Read first" change also had an adversarial pass that refuted two claims it
 first shipped with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 61 |
-| partial | 13 |
+| closed | 62 |
+| partial | 12 |
 | deliberate-divergence | 1 |
 | missing | 1 |
 
@@ -941,8 +942,11 @@ evidence. What is missing, in one line each:
   no syntax highlighting, no historical commits.
 - The Live Activity shows a pending approval but is static — it cannot be
   answered from the Lock Screen or the Island.
-- The activity is scoped to approvals; task-complete and tool-running events do
-  not reach it, and there is no session lifecycle.
+- The Live Activity now carries the four lifecycle phases — approval needed,
+  working, done and session ended — in addition to the pending count, so
+  task-complete and tool-running events reach it and a finished session lingers
+  before dismissing. What it still cannot do is take the answer: the Lock Screen
+  and the Island show the approval but the buttons remain in the app (entry 61).
 
 **Genuinely absent**
 - APNs push-to-start. No token registration on either side; the host's APNs

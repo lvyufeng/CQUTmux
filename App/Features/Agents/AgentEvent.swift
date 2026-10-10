@@ -120,6 +120,15 @@ struct AgentEvent: Identifiable, Codable, Hashable {
         /// for the same reason, for a question answered elsewhere.
         var decision: String?
         var answer: String?
+        /// Set by the host on the one event that says a session has ended.
+        ///
+        /// Deliberately not one of `Category`'s five: those describe what an
+        /// event *is* to the Inbox, and none of them is "and this was the last
+        /// one". A session's end is a lifecycle fact about the stream of events,
+        /// not a category of any single one, so folding it into `Category` would
+        /// have forced every other category to answer a question it has no
+        /// opinion on.
+        var sessionEnded: Bool?
 
         // Spelled out because `for` is a keyword, and every field has to be listed
     // once the list exists — an omitted one decodes as nil with no error. Doing
@@ -127,7 +136,7 @@ struct AgentEvent: Identifiable, Codable, Hashable {
     // while every unit check still passed: they build the payload directly
     // instead of decoding it, so a mistake in this list is invisible to them.
     private enum CodingKeys: String, CodingKey {
-        case teammate, session, cwd, options, decision, answer
+        case teammate, session, cwd, options, decision, answer, sessionEnded
         case `for` = "for"
     }
         /// The choices an agent's question offers.
@@ -197,6 +206,12 @@ struct AgentEvent: Identifiable, Codable, Hashable {
     /// was answered. The gateway sends no session on those, so this is the only
     /// thing that ties the notice to the row it belongs to.
     var resolvesEventID: Int? { data?.for }
+
+    /// Whether the host marked this as the end of a session. Read through a
+    /// computed property rather than at each call site so the absent-field case
+    /// (`nil`, from every hook that predates the marker) cannot be mistaken for
+    /// an explicit `false` somewhere and turn every event into an ending.
+    var endsSession: Bool { data?.sessionEnded == true }
 
     /// Empty when the gateway sent no title or body, so views can test one
     /// thing instead of unwrapping in each of them.

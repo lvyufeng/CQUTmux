@@ -25,6 +25,15 @@ final class ActivityManager {
         case failed(String)
     }
 
+    /// How long a finished session's activity stays up before it dismisses
+    /// itself.
+    ///
+    /// A session ending is the one thing the activity reports that is *over*:
+    /// ending it the instant the event arrives is a flash the user will not
+    /// see, and leaving it forever is a Lock Screen that never clears. The
+    /// linger is what makes "session ended" a thing you can actually read.
+    static let lingerDuration: TimeInterval = 5 * 60
+
     private var activity: Activity<AgentActivityAttributes>?
 
     @discardableResult
@@ -47,12 +56,20 @@ final class ActivityManager {
 
         let state = AgentActivityAttributes.ContentState(
             pending: content.pending,
+            phase: content.phase,
             latestTitle: content.title,
             latestSource: content.source
         )
 
+        // A final phase is shown and *then* dismissed, not held open. The end
+        // is scheduled rather than immediate so the user sees that the session
+        // finished; `.immediate` here would make the whole phase invisible.
+        if content.phase.isFinal {
+            return showFinal(state: state, hostName: hostName)
+        }
+
         if let activity {
-            Task { await activity.update(.init(state: state, staleDate: nil)) }
+            Task { await activity.update(.init(state: state, staleDate: staleDate())) }
             return .updated
         }
 
@@ -60,12 +77,60 @@ final class ActivityManager {
         do {
             activity = try Activity.request(
                 attributes: AgentActivityAttributes(hostName: hostName),
-                content: .init(state: state, staleDate: nil)
+                content: .init(state: state, staleDate: staleDate())
             )
             return .started
         } catch {
             return .failed(error.localizedDescription)
         }
+    }
+
+    /// Shows a finished session and schedules it away.
+    ///
+    /// The activity is *updated* to the final state first — otherwise the Lock
+    /// Screen would keep showing "Working" while the dismissal counted down —
+    /// and only then handed a dismissal date. `dismissalPolicy: .after` leaves
+    /// it on screen until then and removes it after, which is the linger.
+    private func showFinal(
+        state: AgentActivityAttributes.ContentState,
+        hostName: String
+    ) -> Outcome {
+        let until = Date().addingTimeInterval(Self.lingerDuration)
+        let content = ActivityContent(state: state, staleDate: until)
+
+        // Nothing on screen: requesting it *with* a dismissal date is correct
+        // too, and skips showing an intermediate state the device never needs.
+        guard let activity else {
+            guard ActivityAuthorizationInfo().areActivitiesEnabled else { return .unavailable }
+            do {
+                self.activity = try Activity.request(
+                    attributes: AgentActivityAttributes(hostName: hostName),
+                    content: content,
+                    pushType: nil
+                )
+                Task { await self.activity?.end(content, dismissalPolicy: .after(until)) }
+                return .started
+            } catch {
+                return .failed(error.localizedDescription)
+            }
+        }
+
+        Task {
+            await activity.update(content)
+            await activity.end(content, dismissalPolicy: .after(until))
+        }
+        self.activity = nil
+        return .ended
+    }
+
+    /// When the content should be considered out of date.
+    ///
+    /// Not nil: an activity whose updates stop — the app was suspended, the
+    /// connection dropped — would otherwise sit there presenting stale counts as
+    /// current. A stale date lets the system dim it, which is the honest
+    /// reading of "this was true when it was written".
+    private func staleDate() -> Date {
+        Date().addingTimeInterval(15 * 60)
     }
 
     @discardableResult

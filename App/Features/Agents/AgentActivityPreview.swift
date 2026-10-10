@@ -16,6 +16,10 @@ enum AgentActivityPreview {
     /// render at all.
     struct Content: Equatable {
         var pending: Int
+        /// What the activity is about. The pending count is one fact about that;
+        /// this is the other, and the one that lets the activity say "working"
+        /// or "done" instead of only ever wearing the raised hand.
+        var phase: ActivityPhase
         var title: String
         var source: String
 
@@ -23,9 +27,13 @@ enum AgentActivityPreview {
         /// Settings footer, so the screen says which event it is talking about
         /// rather than only that one exists.
         var summary: String {
-            pending > 0
-                ? "\(pending) approval\(pending == 1 ? "" : "s") waiting · \(source)"
-                : "\(source) · \(title)"
+            if pending > 0 {
+                return "\(pending) approval\(pending == 1 ? "" : "s") waiting · \(source)"
+            }
+            // Nothing is waiting, so the phase is the whole story — a summary
+            // that read "claude · Working" would leave the user to guess
+            // whether working meant the agent was busy or they were.
+            return "\(phase.shortLabel) · \(source) · \(title)"
         }
     }
 
@@ -47,30 +55,65 @@ enum AgentActivityPreview {
 
     /// Decides what the activity shows, or nil when it should not be up.
     ///
-    /// Nil in two cases, and the second is the one worth stating: no events at
-    /// all, and events with nothing pending and no resolved approval to report.
-    /// The activity exists for a *waiting* approval, and a notice — an agent's
-    /// chatter — putting a hand-raised badge on the Lock Screen would be a claim
-    /// that something needs the user when nothing does.
+    /// An approval that is waiting is the one thing that outranks everything
+    /// else: it is the only event that asks the user for something, and an
+    /// activity that showed "working" while a decision sat unanswered would be
+    /// hiding the very thing it exists to surface.
+    ///
+    /// With nothing waiting, the phase follows the newest event the user's
+    /// agents produced. It is `nil` only when there is genuinely nothing to say:
+    /// no events, or events with no timestamp at all — which cannot be ordered,
+    /// so "the latest" would be whichever the poll happened to list first, and
+    /// the activity would say a different thing on every update.
     static func content(for events: [AgentEvent]) -> Content? {
         let pending = events.filter(\.isPending)
         if let first = pending.first {
             return Content(
                 pending: pending.count,
+                phase: .approvalRequired,
                 title: label(first.displayTitle),
                 source: label(first.sourceLabel)
             )
         }
-        // Nothing pending, but a decision that just landed: showing "0 waiting"
-        // briefly is better than the activity blinking out mid-answer, and it is
-        // ended on the next update once the event falls out of the poll window.
-        guard let resolved = events.first(where: { $0.kind == .approval && $0.decision != nil })
-        else { return nil }
+
+        // Newest by time, falling back to id — the gateway's ids are monotonic,
+        // so they order what the clock cannot, and two events sharing a second
+        // must not make the activity flicker between them.
+        guard let newest = events.sorted(by: isOlder).last, newest.date != nil else { return nil }
+
         return Content(
             pending: 0,
-            title: label(resolved.displayTitle),
-            source: label(resolved.sourceLabel)
+            phase: phase(of: newest),
+            title: label(newest.displayTitle),
+            source: label(newest.sourceLabel)
         )
+    }
+
+    /// Which lifecycle phase one event puts the activity in.
+    ///
+    /// An answered approval is `toolRunning`, not `taskComplete`: allowing a
+    /// tool lets it *run*, and the previous `Content` already lingered at zero
+    /// rather than calling it done. `sessionEnded` is checked first because it
+    /// is the only final phase — it must win over whatever the carrying event's
+    /// category would otherwise say, or the linger would be skipped.
+    static func phase(of event: AgentEvent) -> ActivityPhase {
+        if event.endsSession { return .sessionEnded }
+        switch event.eventCategory {
+        case .approvalRequired: return .approvalRequired
+        case .toolRunning: return .toolRunning
+        case .taskComplete, .toolFinished: return .taskComplete
+        // A session *starting* is not a state for the Lock Screen to hold: the
+        // activity exists to report what a running agent is doing, and "a
+        // session began" is the moment before there is anything to report.
+        case .sessionStarted: return .taskComplete
+        }
+    }
+
+    private static func isOlder(_ left: AgentEvent, _ right: AgentEvent) -> Bool {
+        switch (left.date, right.date) {
+        case let (left?, right?) where left != right: return left < right
+        default: return left.id < right.id
+        }
     }
 
     /// An empty string is not a title. The fallback is a word rather than
