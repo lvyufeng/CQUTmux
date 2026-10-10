@@ -25,15 +25,15 @@ that is still open.
 
 **Since then, more closed** — "Read first" on a pending approval; the Watch
 inbox's project grouping plus its toolbar fill; half of the host-locale claim
-(LANG and LC_ALL now cross, the rc injection does not); and the per-agent Usages
-windows. See the progress list below. The "Read first" change also had an
-adversarial pass that refuted two claims it first shipped with, both folded into
-the fix.
+(LANG and LC_ALL now cross, the rc injection does not); the per-agent Usages
+windows; and the browser-preview listener metadata. See the progress list below.
+The "Read first" change also had an adversarial pass that refuted two claims it
+first shipped with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 56 |
-| partial | 17 |
+| closed | 57 |
+| partial | 16 |
 | deliberate-divergence | 2 |
 | missing | 1 |
 
@@ -857,7 +857,23 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   `scripts/usage-check.sh` (29 checks) runs plain node with no gateway, and
   making `windowsFor` return the default for every source reddens 7 of them.
 
-### The 18 that are still open, grouped by what is actually missing
+- **What is listening, not just which port is open.** The port scan returned bare
+  numbers, and the phone tagged a hard-coded set (3000, 5173, …) "dev" whether or
+  not a dev server was on it — which cannot tell the server you started from a
+  system daemon. `host/cqutmux-hook/listeners.mjs` now reads `lsof`/`ss` into
+  sockets carrying the process command, pid and bind address, probes each for
+  HTTP, and labels the framework; `PreviewView` shows that name beside the port,
+  with a lock glyph for a loopback-only listener, since a server bound to
+  `127.0.0.1` is not reachable through the SSH session even though its port is
+  open.
+  Writing the check caught a real bug: `lsof` prints the process name as the
+  kernel holds it, so `Google Chrome` is one command spanning two columns — the
+  first parser split on whitespace and reported a pid that belonged to nothing.
+  It now anchors on the first all-digit field. `scripts/listeners-check.sh` (43
+  checks) runs plain node; assuming single-word commands reddens exactly the two
+  cases covering it.
+
+### The 17 that are still open, grouped by what is actually missing
 
 A second independent pass on 2026-10-10 rewrote each of these with file:line
 evidence. What is missing, in one line each:
@@ -887,8 +903,6 @@ evidence. What is missing, in one line each:
 - Side-by-side diff and line-level modify highlights are absent.
 - The Browse tab walks the tree and opens files, but as plain monospaced text —
   no syntax highlighting, no historical commits.
-- The port scan works; the listener metadata (name, PID, bind address, framework
-  label) is never probed.
 - The Live Activity shows a pending approval but is static — it cannot be
   answered from the Lock Screen or the Island.
 - The activity is scoped to approvals; task-complete and tool-running events do

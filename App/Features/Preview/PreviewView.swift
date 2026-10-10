@@ -77,18 +77,31 @@ struct PreviewView: View {
 
             if loadingPorts {
                 HStack { ProgressView(); Text("Looking for listening ports…") }
-            } else if let ports = board?.ports, !ports.isEmpty {
+            } else if let listeners = board?.listeners, !listeners.isEmpty {
                 Section("Listening now") {
-                    ForEach(ports, id: \.self) { candidate in
+                    ForEach(listeners) { listener in
                         Button {
-                            open(candidate)
+                            open(listener.port)
                         } label: {
                             HStack {
-                                Text(verbatim: String(candidate))
+                                Text(verbatim: String(listener.port))
                                     .font(.system(.body, design: .monospaced))
+                                if let name = Self.describe(listener) {
+                                    Text(name)
+                                        .font(.caption2)
+                                        .foregroundStyle(themes.current.accentColor)
+                                        .lineLimit(1)
+                                }
                                 Spacer()
-                                if Self.commonPorts.contains(candidate) {
-                                    Text("dev").font(.caption2).foregroundStyle(themes.current.accentColor)
+                                // A loopback-only server is not reachable through
+                                // the SSH session, so the port being open is not
+                                // the whole story and saying so is the difference
+                                // between "connection refused" and a reason.
+                                if listener.scope == "loopback" {
+                                    Image(systemName: "lock.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                        .accessibilityLabel("host-local only")
                                 }
                                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                             }
@@ -163,6 +176,16 @@ struct PreviewView: View {
             }
         }
         error = "Timed out connecting to the host."
+    }
+
+    /// What to call a listener: its framework if we know one, else its command,
+    /// else nothing rather than a bare "dev" that every port would get.
+    static func describe(_ listener: PortBoard.Listener) -> String? {
+        if let framework = listener.framework, !framework.isEmpty { return framework }
+        guard let command = listener.command, !command.isEmpty else { return nil }
+        // The last path component, so `/usr/bin/node` reads `node`.
+        let name = (command as NSString).lastPathComponent
+        return name.isEmpty ? nil : name
     }
 
     private static let commonPorts: Set<Int> = [3000, 5173, 4200, 8000, 8080]

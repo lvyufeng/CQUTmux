@@ -34,6 +34,7 @@ import { readTranscript } from './transcript.mjs'
 import { recentDirectories } from './recent.mjs'
 import { commandHistory } from './history.mjs'
 import { windowsForSource } from './usage.mjs'
+import { parseLsof, parseSs, describe } from './listeners.mjs'
 import { terminal as qrTerminal } from './qr.mjs'
 import { sendGesture, stopAllSessions, touchHelperAvailable } from './simtouch.mjs'
 
@@ -440,34 +441,66 @@ async function copyToHostClipboard(text, enabled = true) {
 }
 
 async function listeningPorts() {
-  let stdout
+  let sockets
   try {
     // lsof covers macOS and most BSDs; ss covers Linux.
-    ;({ stdout } = await run('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN']))
+    const { stdout } = await run('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN'])
+    sockets = parseLsof(stdout)
   } catch (lsofError) {
     try {
-      ;({ stdout } = await run('ss', ['-ltn']))
+      const { stdout } = await run('ss', ['-ltn'])
+      sockets = parseSs(stdout)
     } catch (ssError) {
-      return { available: false, error: 'neither lsof nor ss is available', ports: [] }
+      return { available: false, error: 'neither lsof nor ss is available', ports: [], listeners: [] }
     }
-    const ports = new Set()
-    for (const line of stdout.split('\n').slice(1)) {
-      const match = line.match(/:(\d+)\s/)
-      if (match) ports.add(Number(match[1]))
-    }
-    return { available: true, ports: [...ports].sort((a, b) => a - b) }
   }
 
-  const ports = new Set()
-  for (const line of stdout.split('\n').slice(1)) {
-    const match = line.match(/:(\d+)\s+\(LISTEN\)/)
-    if (match) ports.add(Number(match[1]))
-  }
-  const all = [...ports].sort((a, b) => a - b).filter(scanPortAllowed)
+  const allowed = sockets.filter(s => scanPortAllowed(s.port))
+  // Probe each candidate for HTTP, so the app can say what it is rather than
+  // only that something is there. Bounded and best-effort: a host with a
+  // firewall that drops rather than refuses would otherwise hang this.
+  const probes = new Map()
+  await Promise.all(allowed.slice(0, 24).map(async socket => {
+    const headers = await probeHttp(socket)
+    if (headers) probes.set(socket.port, { headers })
+  }))
+
+  const listeners = describe(allowed, probes)
   // Dev-looking ports first, then anything else, so the common case is on top.
-  const hinted = all.filter(p => DEV_PORT_HINTS.has(p))
-  const rest = all.filter(p => !DEV_PORT_HINTS.has(p))
-  return { available: true, ports: [...new Set([...hinted, ...rest])] }
+  const hinted = listeners.filter(l => DEV_PORT_HINTS.has(l.port))
+  const rest = listeners.filter(l => !DEV_PORT_HINTS.has(l.port))
+  const ordered = [...hinted, ...rest]
+  return {
+    available: true,
+    // The bare list stays: it is what older app builds read, and a port number
+    // is still the thing that gets opened.
+    ports: ordered.map(l => l.port),
+    listeners: ordered,
+  }
+}
+
+/// A bounded HEAD request for a listener's response headers, or null when it
+/// does not speak HTTP. Deliberately shallow: the presence of a response, not
+/// its body, is what names the framework.
+async function probeHttp(socket) {
+  const { request } = await import('node:http')
+  return await new Promise(resolve => {
+    let done = false
+    const finish = value => { if (!done) { done = true; resolve(value) } }
+    const req = request(
+      { host: '127.0.0.1', port: socket.port, method: 'HEAD', path: '/', timeout: 800,
+        headers: { 'User-Agent': 'cqutmux-listener-probe' } },
+      res => {
+        res.resume()
+        const headers = {}
+        for (const [k, v] of Object.entries(res.headers)) headers[k] = String(v)
+        finish(headers)
+      },
+    )
+    req.on('timeout', () => { req.destroy(); finish(null) })
+    req.on('error', () => finish(null))
+    req.end()
+  })
 }
 
 // Booted iOS simulators on the host, for the app's simulator preview. Parses

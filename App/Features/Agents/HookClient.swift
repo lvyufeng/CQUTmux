@@ -519,6 +519,26 @@ struct PortBoard: Codable {
     var available: Bool
     var error: String?
     var ports: [Int]
+    /// What each listening port actually is. Defaulted so a host that predates
+    /// the field still decodes — the port list alone is still usable.
+    var listeners: [Listener] = []
+
+    struct Listener: Codable, Identifiable {
+        var port: Int
+        /// The process command, when `lsof` gave one. Absent on hosts where only
+        /// `ss` is available, which carries no process name without root.
+        var command: String?
+        var pid: Int?
+        /// The address it bound, e.g. `127.0.0.1:3000` or `*:8080`.
+        var address: String
+        /// `loopback`, `all` or `address` — whether a phone reaching in through
+        /// the SSH session can actually get at it.
+        var scope: String
+        /// True when the port answered an HTTP request. Absent means it did not.
+        var http: Bool?
+        var framework: String?
+        var id: Int { port }
+    }
 }
 
 /// Directories the host's agents have been working in, discovered from their
