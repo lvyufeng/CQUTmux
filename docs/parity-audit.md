@@ -37,16 +37,17 @@ and its derived header; the host-locale rc injection that finishes the
 locale claim; resuming the last session on relaunch; and the session
 picker's Recent tab, which returns to a folder rather than a session; and
 the code viewers' treatment of a font collection, which the terminal
-renders and the diff viewer does not; and the diff viewer's side-by-side,
-line-paired layout.
+renders and the diff viewer does not; the diff viewer's side-by-side,
+line-paired layout; and the chat-mode composer, which now drafts voice,
+text and images into one message.
 See the progress list below.
 The "Read first" change also had an adversarial pass that refuted two claims it
 first shipped with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 70 |
-| partial | 4 |
+| closed | 71 |
+| partial | 3 |
 | deliberate-divergence | 1 |
 | missing | 1 |
 

@@ -114,7 +114,31 @@ let trickyOut = string(ChatComposer.payload(for: tricky, bracketed: true))
 check(trickyOut.hasPrefix("\u{1B}[200~"), "the paste was not opened")
 check(trickyOut.hasSuffix("\u{1B}[201~\r"), "the paste was not closed")
 
-print("PASS: sendable, delivery mode, submit, trim, and multi-byte round-trip")
+// 6. Drafting: voice, text and images join one message. The joining fails
+//    silently in both directions — a path appended with no space makes one
+//    nonsense token, and one appended after an existing space makes a double
+//    space the user never typed and cannot see.
+check(ChatComposer.appending("run the tests", to: "") == "run the tests",
+      "drafting into an empty draft should be the piece alone")
+check(ChatComposer.appending("a/b.png", to: "look at") == "look at a/b.png",
+      "a piece after a word needs one space between them")
+check(ChatComposer.appending("a/b.png", to: "look at ") == "look at a/b.png",
+      "a draft already ending in a space must not gain a second")
+check(ChatComposer.appending("a/b.png", to: "look at\n") == "look at\na/b.png",
+      "a newline in the draft is respected, not doubled")
+check(ChatComposer.appending("  dictated  ", to: "so") == "so dictated",
+      "the added piece is trimmed at its edges")
+check(ChatComposer.appending("", to: "unchanged") == "unchanged",
+      "adding nothing changes nothing")
+// The result must still be sendable and must submit as one message — the point
+// of drafting is a single payload, not two.
+let drafted = ChatComposer.appending("a/b.png", to: "look at this")
+check(ChatComposer.isSendable(drafted), "a drafted message is sendable")
+check(string(ChatComposer.payload(for: drafted, bracketed: true))
+        == "\u{1B}[200~look at this a/b.png\u{1B}[201~\r",
+      "the drafted message leaves as one payload")
+
+print("PASS: sendable, delivery mode, submit, trim, multi-byte round-trip, and drafting")
 SWIFT
 
 swift "$WORK/main.swift"

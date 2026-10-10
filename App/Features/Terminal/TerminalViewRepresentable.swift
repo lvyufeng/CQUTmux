@@ -21,6 +21,11 @@ struct TerminalScreen: View {
     @State private var settings = SpeechSettings()
     @State private var speechModels = WhisperModelStore()
     @State private var dictation: Dictation?
+    /// Chat mode's draft, held here rather than inside `ChatComposerBar` so the
+    /// other two ways a message is composed — a dictated phrase and an uploaded
+    /// image's path — land in the same field. A draft the bar owned privately
+    /// would be a second place a message is assembled, and the two would drift.
+    @State private var composerDraft = ""
     @State private var showSessions = false
     /// The agent conversation, opened from the toolbar icon.
     @State private var showChat = false
@@ -267,6 +272,7 @@ struct TerminalScreen: View {
                     // prefix keys into the pane, which is command-mode behaviour
                     // and not what a message field is for.
                     ChatComposerBar(
+                        draft: $composerDraft,
                         send: { text in
                             coordinator.terminal?.sendComposed(text) ?? false
                         },
@@ -275,7 +281,11 @@ struct TerminalScreen: View {
                             // sits in the agent's input for the user to review
                             // or finish — `typeText`'s contract exactly.
                             coordinator.terminal?.typeText(text)
-                        }
+                        },
+                        // Attaching from inside the composer puts the uploaded
+                        // path into the same draft, so an agent receives the
+                        // sentence and the image together.
+                        attach: { showAttachSources = true }
                     )
                 } else if InputSettings.showsBar(
                     hideWithHardwareKeyboard: input.hideBarWithHardwareKeyboard,
@@ -367,7 +377,13 @@ struct TerminalScreen: View {
                             // what was heard before it runs, so submitting it
                             // would be the one thing the setting exists to
                             // prevent.
-                            if settings.autoSend {
+                            if input.chatMode {
+                                // In chat mode the phrase is drafted, not sent:
+                                // the whole point is that voice, text and images
+                                // leave as one message. Sending here would fire
+                                // a turn before the user had added the rest.
+                                composerDraft = ChatComposer.appending(text, to: composerDraft)
+                            } else if settings.autoSend {
                                 coordinator.terminal?.sendDictatedLine(text)
                             } else {
                                 coordinator.terminal?.typeText(text)
@@ -719,9 +735,14 @@ struct TerminalScreen: View {
         // placeholder rather than an empty sheet in that window.
         if let client = connection.client {
             ImageAnnotatorView(image: image, client: client) { path in
-                // Drop the uploaded path into the prompt; the user finishes
-                // the message and submits it themselves.
-                coordinator.terminal?.typeText(path + " ")
+                // In chat mode the path joins the draft so the sentence and the
+                // image are sent as one message; otherwise it is typed into the
+                // prompt for the user to finish and submit themselves.
+                if input.chatMode {
+                    composerDraft = ChatComposer.appending(path, to: composerDraft)
+                } else {
+                    coordinator.terminal?.typeText(path + " ")
+                }
                 pastedNotice = "Sent to \(path)"
                 Task {
                     try? await Task.sleep(for: .seconds(3))

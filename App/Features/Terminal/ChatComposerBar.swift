@@ -16,6 +16,10 @@ import SwiftUI
 /// the system, in a view no agent can repaint, and the finished string is what
 /// gets delivered.
 struct ChatComposerBar: View {
+    /// The draft, owned by the screen rather than by this bar: a dictated
+    /// phrase and an uploaded image's path have to land in the same field, and a
+    /// field this bar owned privately could not receive them.
+    @Binding var draft: String
     /// Sends the text. Returns whether it went, so a failed send keeps the
     /// draft rather than dropping it on the floor.
     let send: (String) -> Bool
@@ -23,9 +27,11 @@ struct ChatComposerBar: View {
     /// see it in the session before committing — the same escape hatch a
     /// cut-off prompt needs.
     let insert: (String) -> Void
+    /// Opens the attachment sources. The chosen image's path comes back through
+    /// `draft`, so an image and a sentence are one message.
+    var attach: () -> Void = {}
     @Environment(ThemeStore.self) private var themes
 
-    @State private var draft = ""
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -48,6 +54,16 @@ struct ChatComposerBar: View {
                         in: RoundedRectangle(cornerRadius: 16)
                     )
                     .onSubmit(submit)
+
+                // Attach first: it is the one control that works on an empty
+                // field (an image alone is a message), so it cannot be gated on
+                // there being a draft the way the two send controls are.
+                Button(action: attach) {
+                    Image(systemName: "paperclip")
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Add an image")
 
                 // Insert without submitting, and only while there is something
                 // to insert. A second button rather than a long press, because

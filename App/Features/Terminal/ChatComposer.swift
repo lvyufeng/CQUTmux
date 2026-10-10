@@ -40,6 +40,31 @@ enum ChatComposer {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// The draft with one more piece added — a dictated phrase, or the path of
+    /// an uploaded image.
+    ///
+    /// Chat mode drafts the whole message before it is sent, so voice, typed
+    /// text and images all land in the same field and leave as one payload.
+    /// The joining is what fails silently: an image path appended to a sentence
+    /// with no space between them makes one nonsense token, and one appended to
+    /// a field that already ends in a space makes a double space the user never
+    /// typed and cannot see. So the rule is a function of the two strings, kept
+    /// here where a check can drive it.
+    ///
+    /// The addition is trimmed at its edges — a dictated phrase arrives with
+    /// stray whitespace, and an image path never needs it — but a *newline* at
+    /// the end of the draft is respected: it means the user pressed Return
+    /// inside the field, and the next piece belongs on its own line.
+    static func appending(_ addition: String, to draft: String) -> String {
+        let piece = addition.trimmingCharacters(in: .whitespacesAndNewlines)
+        if piece.isEmpty { return draft }
+        if draft.isEmpty { return piece }
+        // A newline or an existing space already separates the two, so adding
+        // another would be a space the user did not type.
+        if let last = draft.last, last.isWhitespace { return draft + piece }
+        return draft + " " + piece
+    }
+
     /// The bytes to write for a message, or nil when there is nothing to send.
     ///
     /// The text is trimmed at the edges only: leading and trailing blank space
