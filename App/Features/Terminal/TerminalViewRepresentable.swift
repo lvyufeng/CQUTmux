@@ -22,6 +22,22 @@ struct TerminalScreen: View {
     @State private var speechModels = WhisperModelStore()
     @State private var dictation: Dictation?
     @State private var showSessions = false
+    /// The agent conversation, opened from the toolbar icon.
+    @State private var showChat = false
+    /// Directories the user has been in, for the chat's transcript path.
+    @State private var recents = RecentDirectoryStore()
+
+    /// The directory whose transcript the chat icon opens.
+    ///
+    /// The newest directory the user browsed on this host, falling back to "."
+    /// — which is the gateway's own working directory. The shell's live cwd is
+    /// what this really wants, and nothing reports it: reading it would mean
+    /// probing the pane on every open, and a wrong guess is a chat that says
+    /// "no session found" rather than the wrong conversation, because the
+    /// transcript is looked up per directory.
+    private var chatPath: String {
+        recents.recent(for: host).first ?? "."
+    }
     @State private var annotating: PendingImage?
     /// The four ways an image can arrive, presented as one chooser. The
     /// clipboard case is handled inline (there is nothing to present); the
@@ -100,6 +116,20 @@ struct TerminalScreen: View {
             .navigationTitle(host.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // The agent icon: one tap from the session to its
+                // conversation. Moshi reaches Chat View from the terminal
+                // rather than only from the Code pane because the terminal is
+                // where you are while the agent runs, and walking to another
+                // tab to read what it just did is the trip this saves.
+                ToolbarItem(placement: .topBarLeading) {
+                    if connection.client != nil {
+                        Button {
+                            showChat = true
+                        } label: {
+                            Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     StatusBadge(
                         status: coordinator.status,
@@ -159,6 +189,13 @@ struct TerminalScreen: View {
                 }
             }
             .sheet(isPresented: $showSessions) { sessionPicker }
+            .sheet(isPresented: $showChat) {
+                if let client = connection.client {
+                    NavigationStack {
+                        ChatView(client: client, path: chatPath)
+                    }
+                }
+            }
             .sheet(isPresented: $newConnection) {
                 // The same screen the Terminal tab shows when nothing is
                 // connected, reached without leaving the session. Dismissing it

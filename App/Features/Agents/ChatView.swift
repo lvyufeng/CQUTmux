@@ -19,6 +19,16 @@ struct ChatView: View {
     @State private var error: String?
     @State private var loading = true
     @State private var follow = true
+    /// The agent, model and session for the header. Derived from the transcript
+    /// on each load rather than stored on the wire: the header is a reading of
+    /// the messages, not a field the gateway has to remember to send.
+    @State private var header = ChatHeader(agent: "Agent")
+    /// The working tree's changes, fetched alongside the transcript so the
+    /// header can say what the diff control would open. Nil until the first
+    /// fetch lands, which is why the control only appears once it knows.
+    @State private var changed: DiffResult?
+    @State private var showDiff = false
+    @State private var showPreview = false
 
     /// Reading the log on a timer rather than being pushed to. The log is a
     /// file the agent appends to; there is no event to subscribe to, and a
@@ -26,6 +36,15 @@ struct ChatView: View {
     /// for its own sake. Three seconds is short enough to feel live while a
     /// turn is running and long enough not to matter when it is not.
     private let refresh = Duration.seconds(3)
+
+    /// The agent whose log this reads.
+    ///
+    /// A constant because the gateway's transcript reader knows exactly one
+    /// agent's log format (`~/.claude/projects/...`), so naming any other here
+    /// would be a header that says something the reader cannot deliver. It
+    /// becomes a parameter when a second agent's transcript is readable, not
+    /// before.
+    private static let agentName = "Claude Code"
 
     var body: some View {
         Group {
@@ -52,13 +71,51 @@ struct ChatView: View {
         .navigationTitle("Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task { await load() }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+            // The agent, its model and the session id, under the title. What
+            // each says and how it is shortened is `ChatHeader`'s job — three
+            // derivations that fail silently if done inline in a view.
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text("Chat").font(.headline)
+                    Text(header.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button {
+                        Task { await load() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    // Both controls only appear when there is something behind
+                    // them: a diff button over a clean tree and a preview button
+                    // over a host with no server running are buttons that can
+                    // only fail, and the header would have claimed them.
+                    if let changed, !changed.files.isEmpty {
+                        Button {
+                            showDiff = true
+                        } label: {
+                            Label("Changes (\(changed.files.count))", systemImage: "plus.forwardslash.minus")
+                        }
+                    }
+                    Button {
+                        showPreview = true
+                    } label: {
+                        Label("Browser preview", systemImage: "safari")
+                    }
+                } label: {
+                    Label("More", systemImage: "ellipsis.circle")
+                }
+            }
+        }
+        .sheet(isPresented: $showDiff) {
+            if let changed { ChatDiffSheet(changed: changed) }
+        }
+        .sheet(isPresented: $showPreview) {
+            PreviewView(client: client)
         }
         .task { await poll() }
     }
@@ -108,6 +165,17 @@ struct ChatView: View {
         do {
             let next = try await client.transcript(path: path)
             transcript = next
+            header = ChatHeader(
+                agent: Self.agentName,
+                model: ChatHeader.model(in: next.messages),
+                session: ChatHeader.session(fromFile: next.file)
+            )
+            // The changes are fetched with the transcript so the header can name
+            // them. A failure here is not the chat's failure — the transcript
+            // still reads — so it leaves `changed` nil rather than setting the
+            // view's error, which is reserved for the conversation itself.
+            changed = try? await client.gitDiff(path: path)
+            header.setControls(ChatHeader.controls(fileCount: changed?.files.count, isRepo: changed?.isRepo == true))
             // An error the gateway reported while still returning a page is
             // kept for the empty state and cleared once there is something to
             // show; a stale error over a working view is noise.
@@ -116,6 +184,55 @@ struct ChatView: View {
             self.error = "\(error)"
         }
         loading = false
+    }
+}
+
+/// The working tree's changes, opened from the chat header.
+///
+/// Deliberately a plain reading rather than the Code tab's diff viewer: that one
+/// is built around remembering a reader's place across a long review, and this
+/// is a glance at what changed while reading the conversation. The unified diff
+/// is shown whole, tinted, with the same `+`/`-` markers the tool cards use.
+private struct ChatDiffSheet: View {
+    let changed: DiffResult
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Changed files") {
+                    ForEach(changed.files) { file in
+                        HStack(spacing: 8) {
+                            Text(file.status)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(file.name).font(.callout)
+                                if !file.directory.isEmpty {
+                                    Text(file.directory)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                if !changed.diff.isEmpty {
+                    Section("Diff") {
+                        Text(changed.diff)
+                            .font(.system(.caption2, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .navigationTitle("Changes")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }
 
