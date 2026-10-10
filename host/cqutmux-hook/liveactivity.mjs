@@ -150,14 +150,14 @@ export function tokenKindFor(event) {
  * the text the Lock Screen renders, matching the fields the app's own
  * `ContentState` decodes.
  */
-export function payload({ action, phase, event, hostName, title, source, pending }) {
+export function payload({ action, phase, event, hostName, title, source, pending, eventID }) {
   const bundle = 'app.cqutmux.ios'
   const headers = {
     'apns-push-type': 'liveactivity',
     'apns-priority': '10',
     'apns-topic': `${bundle}.push-type.liveactivity`,
   }
-  const aps = { 'content-state': contentState({ phase, title, source, pending }) }
+  const aps = { 'content-state': contentState({ phase, title, source, pending, eventID }) }
 
   if (action === 'end') {
     aps.event = 'end'
@@ -189,12 +189,17 @@ export function payload({ action, phase, event, hostName, title, source, pending
  * rather than throwing for the optional ones, so a mismatch renders an
  * activity that is silently about nothing.
  */
-function contentState({ phase, title, source, pending }) {
+function contentState({ phase, title, source, pending, eventID }) {
   return {
     pending: Number.isFinite(pending) ? pending : (phase === 'approval_required' ? 1 : 0),
     phase: phase || 'approval_required',
     latestTitle: title || 'Agent',
     latestSource: source || 'Agent',
+    // The approval the Lock Screen buttons will answer. It has to be the real
+    // gateway id — the widget passes it straight back — so a phase that asks
+    // nothing, or a caller that does not know one, sends 0 rather than a guess
+    // that would decide some other approval.
+    latestEvent: phase === 'approval_required' && Number.isInteger(eventID) ? eventID : 0,
   }
 }
 

@@ -177,7 +177,8 @@ final class ActivityManager {
             pending: content.pending,
             phase: content.phase,
             latestTitle: content.title,
-            latestSource: content.source
+            latestSource: content.source,
+            latestEvent: content.eventID
         )
 
         // A final phase is shown and *then* dismissed, not held open. The end

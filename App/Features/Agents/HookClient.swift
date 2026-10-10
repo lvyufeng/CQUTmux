@@ -267,6 +267,46 @@ final class HookClient {
         send(decision: allow ? "allow" : "deny", answer: nil, for: event)
     }
 
+    /// Sends a decision made away from the app — on the Lock Screen, in the
+    /// Dynamic Island — by its event id rather than the event itself.
+    ///
+    /// The widget has no copy of the event to hand over, only the id it wrote
+    /// into the shared queue, so this resolves the id against what the client
+    /// already holds. An id it does not know is dropped rather than sent blind:
+    /// the events it holds *are* the pending approvals, and a decision about one
+    /// it never saw is a decision about something the host may no longer have.
+    @discardableResult
+    func resolve(id: Int, allow: Bool, answer: String? = nil) -> Bool {
+        guard let event = events.first(where: { $0.id == id }) else { return false }
+        if let answer {
+            send(decision: "allow", answer: answer, for: event)
+        } else {
+            send(decision: allow ? "allow" : "deny", answer: nil, for: event)
+        }
+        return true
+    }
+
+    /// Drains the decisions the widget left in the App Group and sends them.
+    ///
+    /// Called when a connection comes up and when the app returns to the front:
+    /// those are the two moments a decision made while the app was away can be
+    /// acted on. Draining clears the queue, so a decision is sent once — left in
+    /// place it would be re-sent on every later connection, and a host that
+    /// recorded five denials for one approval would be reading a queue that
+    /// never emptied rather than five decisions.
+    ///
+    /// Returns the ids it acted on, so a caller can say what happened.
+    @discardableResult
+    func drainMobileDecisions(_ queue: MobileDecisionQueue = MobileDecisionQueue()) -> [Int] {
+        var acted: [Int] = []
+        for decision in queue.drain() {
+            if resolve(id: decision.id, allow: decision.allow, answer: decision.answer) {
+                acted.append(decision.id)
+            }
+        }
+        return acted
+    }
+
     /// Answers a question by choosing one of its options. The decision is
     /// recorded as "allow" so a consumer that knows nothing about options
     /// still reads the question as answered rather than left hanging.

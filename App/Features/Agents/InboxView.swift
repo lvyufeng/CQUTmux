@@ -172,6 +172,15 @@ struct InboxView: View {
             .onChange(of: client.events) { _, events in
                 let hostName = connection.host?.displayName ?? "Host"
                 activity.update(hostName: hostName, events: events)
+                // A decision made on the Lock Screen was written to the App
+                // Group, not sent; it is sent now that there is a client and the
+                // events it names are in hand. Draining as the events arrive
+                // rather than on a timer, because resolving by id needs the
+                // event to be loaded and this is the moment it is.
+                let acted = client.drainMobileDecisions()
+                if !acted.isEmpty {
+                    ApprovalNotifier.clear(ids: acted)
+                }
                 let fresh = ledger.fresh(from: events, isFirstLoad: !sawFirstPage)
                 sawFirstPage = true
                 if !fresh.isEmpty { Task { await ApprovalNotifier.notify(fresh, hostName: hostName) } }

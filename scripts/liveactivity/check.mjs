@@ -192,6 +192,26 @@ check(state.pending === 2 && state.phase === 'approval_required'
 check(start.body.aps['relevance-score'] === 100,
       'an approval scores above a working update')
 
+// The id the Lock Screen buttons answer. It has to be the real gateway id or a
+// tap decides some other approval — and 0 for a phase that asks nothing, since a
+// button on a "working" activity would be answering a question nobody asked.
+const withID = payload({
+  action: 'upsert', phase: 'approval_required', event: 'start',
+  title: 'T', source: 'claude', pending: 1, eventID: 42,
+})
+check(withID.body.aps['content-state'].latestEvent === 42,
+      'an approval carries the event id its buttons will answer')
+
+const noID = payload({ action: 'upsert', phase: 'approval_required', event: 'start',
+                       title: 'T', source: 'claude', pending: 1 })
+check(noID.body.aps['content-state'].latestEvent === 0,
+      'an approval with no id known sends 0 rather than a guess')
+
+const working = payload({ action: 'upsert', phase: 'tool_running', event: 'update',
+                          title: 'T', source: 'claude', eventID: 42 })
+check(working.body.aps['content-state'].latestEvent === 0,
+      'a working phase carries no id, so no button answers anything')
+
 const update = payload({
   action: 'upsert', phase: 'tool_running', event: 'update',
   title: 'Edit App.swift', source: 'codex', pending: 0,

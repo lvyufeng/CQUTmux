@@ -22,6 +22,10 @@ enum AgentActivityPreview {
         var phase: ActivityPhase
         var title: String
         var source: String
+        /// The approval the Lock Screen's buttons answer, or 0 when the phase
+        /// asks nothing. Carried alongside the text it belongs to rather than
+        /// looked up at tap time — the activity may be gone by then.
+        var eventID: Int = 0
 
         /// One sentence describing what the activity shows. Used for the
         /// Settings footer, so the screen says which event it is talking about
@@ -72,7 +76,11 @@ enum AgentActivityPreview {
                 pending: pending.count,
                 phase: .approvalRequired,
                 title: label(first.displayTitle),
-                source: label(first.sourceLabel)
+                source: label(first.sourceLabel),
+                // The *first* pending approval, matching the title shown. The
+                // buttons and the text have to name the same event, or a tap
+                // would decide something other than what the user read.
+                eventID: first.id
             )
         }
 

@@ -47,6 +47,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.cqutmux.ios.widgets
         TARGETED_DEVICE_FAMILY: "1,2"
+        # The Lock Screen buttons write a decision into the App Group for the
+        # app to send. Without this the extension writes into its own container
+        # and nothing reads it — a tap that looks like it worked and does
+        # nothing.
+        CODE_SIGN_ENTITLEMENTS: Widgets/CQUTmuxWidgets.entitlements
 
   CQUTmuxWatchWidgets:
     type: app-extension

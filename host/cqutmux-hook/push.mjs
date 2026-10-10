@@ -213,6 +213,7 @@ export function createPushService(args) {
         event: decision.event,
         title: record.title || record.body || '',
         source: record.source || '',
+        eventID: record.id,
       }), nowSeconds)
       const body = JSON.stringify(built.body)
       await Promise.all([...targets].map(t => post(t, {

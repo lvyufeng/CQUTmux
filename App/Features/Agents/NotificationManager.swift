@@ -72,4 +72,23 @@ enum ApprovalNotifier {
             try? await center.add(request)
         }
     }
+
+    /// Takes the notifications for these approvals off the Lock Screen.
+    ///
+    /// Called when a decision arrives from the Live Activity's buttons: the
+    /// answer is on its way to the host, but the notification for it is still
+    /// sitting there asking, and a banner that keeps requesting a decision
+    /// already made reads as one that was not registered. The identifier is
+    /// built the same way `notify` builds it — the two have to agree or this
+    /// removes nothing, which is exactly the silent case.
+    static func clear(ids: [Int]) {
+        guard !ids.isEmpty else { return }
+        let identifiers = ids.map { "cqutmux.approval.\($0)" }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: identifiers)
+        // Pending as well as delivered: a notification posted while the app was
+        // backgrounded may not have fired yet, and removing only what is already
+        // on screen would let it appear afterwards — asking about an approval
+        // this call just answered.
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: identifiers)
+    }
 }

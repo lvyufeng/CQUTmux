@@ -1,6 +1,7 @@
 import WidgetKit
 import SwiftUI
 import ActivityKit
+import AppIntents
 
 @main
 struct CQUTmuxWidgets: WidgetBundle {
@@ -92,21 +93,39 @@ struct AgentActivityView: View {
     }
 
     /// The phone's Lock Screen: a wide row with the count, the agent and what
-    /// it is asking about.
+    /// it is asking about — and, while something is waiting, the two buttons.
     private var lockScreen: some View {
-        HStack(spacing: 12) {
-            Image(systemName: context.state.phase.symbol)
-                .font(.title2)
-                .foregroundStyle(context.state.phase.isAwaiting ? .orange : .green)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(headline)
-                    .font(.headline)
-                Text("\(context.state.latestSource) · \(context.state.latestTitle)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: context.state.phase.symbol)
+                    .font(.title2)
+                    .foregroundStyle(context.state.phase.isAwaiting ? .orange : .green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(headline)
+                        .font(.headline)
+                    Text("\(context.state.latestSource) · \(context.state.latestTitle)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
             }
-            Spacer()
+            // Only while an approval is actually waiting. Buttons on an activity
+            // that is merely "working" would be answering a question nobody
+            // asked, and the id they carry would name no event.
+            if context.state.phase.isAwaiting, context.state.latestEvent > 0 {
+                HStack(spacing: 10) {
+                    Button(intent: ApprovalIntent(event: context.state.latestEvent, allow: true)) {
+                        Label("Allow", systemImage: "checkmark")
+                    }
+                    .tint(.green)
+                    Button(intent: ApprovalIntent(event: context.state.latestEvent, allow: false)) {
+                        Label("Deny", systemImage: "xmark")
+                    }
+                    .tint(.red)
+                }
+                .font(.caption)
+            }
         }
         .padding()
     }
