@@ -791,6 +791,12 @@ struct UsageWindow: Codable, Identifiable {
     var label: String
     var percent: Double
     var resetIn: String?
+    /// Set when the window is a credit balance rather than a rate over time
+    /// (Grok Build). The host flags it so the board can word it correctly — a
+    /// credit balance shown as "60% used" reads as a rate limit that refills,
+    /// which is not what it is. Absent for every other agent, and defaulted so a
+    /// host that predates the field still decodes.
+    var credit: Bool = false
     var id: String { label }
 }
 

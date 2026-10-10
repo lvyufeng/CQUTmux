@@ -131,7 +131,7 @@ final class AgentConnection {
                     label: entry.label,
                     pace: entry.pace,
                     windows: entry.windows.map {
-                        .init(label: $0.label, percent: $0.percent, resetIn: $0.resetIn)
+                        .init(label: $0.label, percent: $0.percent, resetIn: $0.resetIn, credit: $0.credit)
                     }
                 )
             },

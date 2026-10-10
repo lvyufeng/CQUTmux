@@ -162,6 +162,10 @@ enum WatchPayload {
             /// has no idea when the phone generated it and a countdown computed
             /// from a stale timestamp would tick down wrongly.
             var resetIn: String?
+            /// Set when the window is a credit balance, not a rate over time
+            /// (Grok Build). Defaulted so a payload from a host that predates
+            /// the field still decodes.
+            var credit: Bool = false
             var id: String { label }
         }
 

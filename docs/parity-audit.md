@@ -23,16 +23,17 @@ read, the Chat View composer, six `cqutmux-hook` subcommands, the
 `missing` entry as genuinely absent, and rewrote the evidence on every entry
 that is still open.
 
-**Since then, more closed** — "Read first" on a pending approval, and the Watch
-inbox's project grouping plus its toolbar fill (see the progress list below),
-which move entries from `partial` to `closed`. The "Read first" change also had
-an adversarial pass that refuted two claims it first shipped with, both folded
-into the fix.
+**Since then, more closed** — "Read first" on a pending approval; the Watch
+inbox's project grouping plus its toolbar fill; half of the host-locale claim
+(LANG and LC_ALL now cross, the rc injection does not); and the per-agent Usages
+windows. See the progress list below. The "Read first" change also had an
+adversarial pass that refuted two claims it first shipped with, both folded into
+the fix.
 
 | Status | Count |
 |---|---|
-| closed | 55 |
-| partial | 18 |
+| closed | 56 |
+| partial | 17 |
 | deliberate-divergence | 2 |
 | missing | 1 |
 
@@ -841,6 +842,21 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   and a non-interactive `~/.bashrc`. No helper writes any rc file, so shells the
   agent spawns still see the host's own locale.
 
+- **Per-agent Usages windows.** Every source used to be measured against the
+  same fixed 5h/7d pair — Claude Code's limits, stated on behalf of agents that
+  do not have them. `host/cqutmux-hook/usage.mjs` now holds one window set per
+  source string the hooks emit: Claude Code keeps 5h/7d; Codex gets a variable
+  set with human labels (`5h`, `weekly`); Kimi Code a weekly window; Grok Build a
+  credit window, flagged so it is not read as a rate limit that refills; OpenCode
+  a single provider-agnostic rolling window rather than an invented pair. An
+  agent the host does not model falls back to Claude's set, because an empty card
+  reads as "no usage" — a different and false statement.
+  The flag crosses both surfaces: `HookClient.UsageWindow` decodes it (defaulted,
+  so a host that predates the field still decodes), the phone words it
+  "% credits", and it rides the shared watch payload to render as "% cr".
+  `scripts/usage-check.sh` (29 checks) runs plain node with no gateway, and
+  making `windowsFor` return the default for every source reddens 7 of them.
+
 ### The 18 that are still open, grouped by what is actually missing
 
 A second independent pass on 2026-10-10 rewrote each of these with file:line
@@ -877,8 +893,6 @@ evidence. What is missing, in one line each:
   answered from the Lock Screen or the Island.
 - The activity is scoped to approvals; task-complete and tool-running events do
   not reach it, and there is no session lifecycle.
-- Usages renders per-source rows, but every source gets the same hard-coded
-  Claude 5h/7d windows.
 
 **Genuinely absent**
 - APNs push-to-start. No token registration on either side; the host's APNs

@@ -33,6 +33,7 @@ import { herdrStatus, herdrSnapshot, herdrApprove, herdrRead, herdrFocusPane, he
 import { readTranscript } from './transcript.mjs'
 import { recentDirectories } from './recent.mjs'
 import { commandHistory } from './history.mjs'
+import { windowsForSource } from './usage.mjs'
 import { terminal as qrTerminal } from './qr.mjs'
 import { sendGesture, stopAllSessions, touchHelperAvailable } from './simtouch.mjs'
 
@@ -322,22 +323,10 @@ async function listDirectory(dir) {
   return { path: relative(args.root, dir) || '.', entries: items }
 }
 
-// Agent rate-limit windows. Claude Code enforces a 5-hour rolling window and a
-// 7-day window; the burn pace compares elapsed wall-clock against usage.
-const WINDOWS = [
-  { label: '5h', ms: 5 * 60 * 60 * 1000, cap: 200 },
-  { label: '7d', ms: 7 * 24 * 60 * 60 * 1000, cap: 800 },
-]
-
-function humanize(ms) {
-  if (ms <= 0) return 'now'
-  // Round to whole minutes first, so 59.6m carries into the hour instead of
-  // printing "4h 60m".
-  const totalMinutes = Math.round(ms / 60000)
-  const h = Math.floor(totalMinutes / 60)
-  const m = totalMinutes % 60
-  return h > 0 ? `${h}h ${m}m` : `${m}m`
-}
+// Per-agent rate-limit windows live in `usage.mjs`, with their rules, so they can
+// be checked without a gateway. They are not one shape: Claude Code has fixed
+// 5h/7d windows, Codex a variable labelled set, OpenCode whatever its provider
+// exposes, Kimi and Grok weekly or credit windows.
 
 function usageSnapshot() {
   const now = Date.now()
@@ -352,21 +341,13 @@ function usageSnapshot() {
 
   const entries = []
   for (const [source, times] of bySource) {
-    const windows = WINDOWS.map(w => {
-      const used = times.filter(t => now - t < w.ms).length
-      const percent = Math.min(100, Math.round((used / w.cap) * 1000) / 10)
-      // Reset when the oldest event in the window ages out.
-      const oldest = times.filter(t => now - t < w.ms).sort((a, b) => a - b)[0]
-      return {
-        label: w.label,
-        percent,
-        resetIn: oldest ? humanize(oldest + w.ms - now) : null,
-      }
-    })
-    // Pace: is recent burn faster than the window averages?
-    const recent = times.filter(t => now - t < WINDOWS[0].ms).length
-    const pace = recent > WINDOWS[0].cap * 0.5
-      ? `${source} is burning the 5h window fast`
+    const windows = windowsForSource(source, times, now)
+    // Pace: is the agent halfway through the shortest window it has? Measured
+    // against *this agent's* first window, so one whose windows start at a day
+    // is not paced as if it had Claude Code's five hours.
+    const shortest = windows[0]
+    const pace = shortest && shortest.percent >= 50
+      ? `${source} is burning the ${shortest.label} window fast`
       : `${source} usage pace is steady`
     entries.push({ source, label: source.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), windows, pace })
   }

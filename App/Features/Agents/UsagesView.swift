@@ -77,7 +77,7 @@ private struct UsageRow: View {
             HStack {
                 Text(window.label).font(.subheadline.weight(.medium))
                 Spacer()
-                Text("\(Int(window.percent))%")
+                Text(window.credit ? "\(Int(window.percent))% credits" : "\(Int(window.percent))%")
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(window.percent > 85 ? .red : .primary)
                 if let reset = window.resetIn {

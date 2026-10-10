@@ -91,7 +91,9 @@ struct WatchUsageView: View {
                 Text(window.label).font(.caption)
                 // Rounded, and shown even at 0: "0%" is a measurement, and a
                 // blank where a number should be reads as missing data.
-                Text("\(Int(window.percent.rounded()))%")
+                Text(window.credit
+                     ? "\(Int(window.percent.rounded()))% cr"
+                     : "\(Int(window.percent.rounded()))%")
                     .font(.headline)
                     .monospacedDigit()
                 if let reset = window.resetIn {
