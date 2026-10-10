@@ -48,22 +48,33 @@ implementation under another name.
   and hung. Fixed in `scripts/cli-check.sh` (drives the server and asserts it
   stops on SIGTERM).
 
-## Genuinely open (verified present, not implemented)
+## Gaps this pass found — all since closed
 
-Each was confirmed by a verifier that searched the working tree for a
-counterpart under another name and found none.
+At the time of the audit (`ffd8af1`) each of these was confirmed still open by a
+verifier that searched the working tree for a counterpart under another name and
+found none. They have since been implemented; the table is kept as the record of
+what the pass found, with the commit that closed each. The *Evidence* column
+describes the state **as found**, not as it is now.
 
-| Gap | Evidence |
-|---|---|
-| Session picker has no per-multiplexer tab and no "Skip" | `SessionPickerView.Tab` is `case sessions, recent` only; zellij sessions *do* appear, in the shared list. No `Skip` action anywhere. |
-| Scroll-past-bottom keyboard dismissal is not configurable | `keyboardDismissMode = .interactive` set once at `CQUTTerminalView.swift:147`; the scrolling doc calls it configurable. |
-| Notifications: no push-token display, no image test, no simulator guard | `deviceToken` is `private(set)` and the UI shows only "Registered"; `sendTest()` posts text-only; no `targetEnvironment(simulator)` guard. |
-| Support: no log export, no transcript collection, report is a fixed fact list | `SupportView.swift` builds a fixed version/device/system/host block; no Subject/Setup/Expected/Actual template; no log surfaces. |
-| Deep links have no `pane` / `tab` parameter | `DeepLink.Target.session` carries only `mux/name/window`. |
+| Gap as found | Evidence at `ffd8af1` | Closed by |
+|---|---|---|
+| Session picker has no per-multiplexer tab and no "Skip" | `SessionPickerView.Tab` was `case sessions, recent` only; zellij sessions appeared in the shared list. No `Skip` action anywhere. | `3830cb9` (per-mux tabs), `8614641` (Skip starts a plain shell) |
+| Scroll-past-bottom keyboard dismissal is not configurable | `keyboardDismissMode = .interactive` set once; the scrolling doc calls it configurable. | `6b5da96` (Input setting → `.interactive`/`.none`) |
+| Notifications: no push-token display, no image test, no simulator guard | UI showed only "Registered"; `sendTest()` posted text-only; no `targetEnvironment(simulator)` guard. | `543fcc9` (token display, image test, simulator guard) |
+| Support: no log export, no transcript collection, report is a fixed fact list | `SupportView.swift` built a fixed version/device/system/host block; no Subject/Setup/Expected/Actual template; no log surfaces. | `543fcc9` (template, transcript), `932d0a5` (unified-log export) |
+| Deep links have no `pane` / `tab` parameter | `DeepLink.Target.session` carried only `mux/name/window`. | `3b76647` (`tab` alias, tmux `pane`), `c2074f4` (herdr `pane`, parsed *and* consumed) |
 
-(`moshi-hook service` on Windows was in this table and is now closed — see above.
-It is recorded there, not here, because the entry is built and rule-checked; the
-only thing still unverified is running it on a real Windows machine.)
+Each closure was re-verified against the working tree on 2026-10-11 by a
+verifier reading the code, not the commit messages; every sub-claim came back
+closed. Two caveats stand and neither reopens a row: the herdr pane jump needs a
+live gateway client and shows a notice without one (a designed, reported
+fallback), and the push-token display only shows a token once APNs has issued
+one, so without a paid profile it correctly reads "Not registered".
+
+(`moshi-hook service` on Windows was in the earlier draft of this table and is
+now closed — see above. It is recorded there, not here, because the entry is
+built and rule-checked; the only thing still unverified is running it on a real
+Windows machine.)
 
 ## Claims that were FALSE (refuted, do not record as gaps)
 
