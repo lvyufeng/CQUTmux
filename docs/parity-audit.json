@@ -396,9 +396,9 @@
     {
       "page": "diff-viewer",
       "claim": "Changes are shown as a phone-tuned side-by-side diff with line-level add/remove/modify highlights.",
-      "status": "partial",
-      "evidence": "The diff is rendered as raw unified-diff text lines tinted red/green (CodePanelView.swift:350-374). There is no side-by-side column layout and no modified-hunk distinct highlight.",
-      "verification": "Searched the whole repo (Swift app, Node gateway, docs, vendored packages). The only diff renderer is DiffText in App/Features/Code/CodePanelView.swift:350-374, a flat VStack of raw unified-diff lines with red/green/cyan/secondary tinting, shown in a single Section (line 252). No side-by-side/column layout, no paired before/after columns, and no distinct modified-hunk highlight exist. DiffResult (HookClient.swift:564-573) only holds isRepo/files/raw diff String, and the gateway (host/cqutmux-hook/index.mjs:372) just runs `git diff --no-color` and returns that string; the CLI `diff` command merely prints statuses. A repo-wide grep for side/column/split/before-after/old-new/modify diff constructs (excluding build artifacts) hit only those same three files. No decision record documents side-by-side as deliberately omitted. So the capability genuinely does not exist; 'partial' is correct.\n\nRe-verified 2026-10-10 (independent pass): still partial. The diff viewer exists end to end (per-file narrowing via GET /diff?file=, terminal-font rendering, remembered file/line), but the claim's defining feature — a phone-tuned side-by-side layout with add/remove/modify highlights — is not built: every diff view is a single-column stack of raw unified-diff text lines tinted red/green/cyan.\n\nEvidence: App/Features/Code/CodePanelView.swift:476-560 (FileDiffView) renders one ScrollView/VStack of raw text lines via ForEach(lines(diff.diff)) — no pairing into old/new columns anywhere; App/Features/Code/CodePanelView.swift:582-591 (DiffPalette) only distinguishes +/-/@@ prefixes (no \"~\"/modified-hunk highlight). host/cqutmux-hook/index.mjs runs `git diff --no-color` and returns the raw string (per docs/parity-audit.json:401), and DiffResult (HookClient.swift:814) carries only isRepo/files/diff. Repo-wide grep for side-by-side/column/split/before-after diff constructs returns nothing but these files and the docs note itself (docs/parity-audit.md:73), which still lists \"side-by-side layout, syntax highlighting\" as unbuilt."
+      "status": "closed",
+      "evidence": "App/Features/Code/SideBySideDiff.swift (new, Foundation-only) turns a unified diff into hunks of paired rows: removed on the left, added on the right, a removed+added pair collapsed into a single `modified` row, and deletions/insertions with an empty side when the runs are uneven. Pairing is local to a run of consecutive changes and does not cross a context line. CodePanelView's new `SideBySideDiffView`/`SideBySideRow` draw two capped columns with a divider, per-side red/green tint and gutter markers, and the full-width `@@` header above each hunk; both the per-file `FileDiffView` and the whole-tree `All changes` section use it. The remembered scroll position moves from a line id to a hunk id, which is the unit a diff is read by and the only stable id now that a row holds two lines.",
+      "verification": "Re-verified 2026-10-10: closed. scripts/sidebyside-check.sh (36 checks) drives the layout rule against real unified hunks: a modification collapses to one `modified` row (not two), insertions/deletions keep an empty side, two changes on opposite sides of a context line stay two rather than pairing across it, an uneven run pairs only min(removed, added) and keeps the leftover as a deletion, the pair takes the first removed line, row order follows the diff, the `diff --git`/`---`/`+++` preamble is not laid out as content, a `\\ No newline at end of file` marker is not a row, and multi-hunk/empty/binary inputs behave. Four mutations redden it: pairing across a context line, not pairing at all, keeping the `+`/`-`/space marker, and laying out the preamble — the last two of which also crash the run (the always-pair mutation indexes past the shorter run, exit 133). Both targets build (BUILD SUCCEEDED). Recording the limits: the layout rule is pinned, but the two-column *rendering* was not asserted in a live simulator run — a headless check cannot read columns — and horizontal scrolling with very long lines is a known phone-width compromise rather than a faithful two-pane editor."
     },
     {
       "page": "diff-viewer",
@@ -683,8 +683,8 @@
     }
   ],
   "counters": {
-    "closed": 69,
-    "partial": 5,
+    "closed": 70,
+    "partial": 4,
     "deliberate-divergence": 1,
     "missing": 1
   }

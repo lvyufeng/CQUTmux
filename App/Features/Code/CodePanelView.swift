@@ -311,11 +311,14 @@ struct CodePanelView: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    // The whole-tree diff is still worth having under the list
-                    // — it is how you see the shape of a change across files —
-                    // so it stays, below what you would normally tap first.
+                    // The whole-tree diff stays under the list — it is how you
+                    // see the shape of a change across files — but laid out as
+                    // two columns so a modification reads as one change rather
+                    // than as an unrelated deletion and insertion.
                     Section("All changes") {
-                        DiffText(diff.diff, font: fonts.codeFont(), spacing: fonts.lineSpacing)
+                        SideBySideDiffView(
+                            text: diff.diff, font: fonts.codeFont(), spacing: fonts.lineSpacing
+                        )
                     }
                 }
             }
@@ -413,6 +416,96 @@ struct CodePanelView: View {
 }
 
 /// Renders a unified diff with the usual red/green tinting.
+/// The diff as two columns: removed on the left, added on the right.
+///
+/// Phone-tuned rather than faithful: a phone cannot show two full columns of
+/// source, so each side is capped in width and scrolls horizontally, and the
+/// pairing is what carries the meaning. A hunk header is full width above its
+/// rows — it is not content and has no side.
+private struct SideBySideDiffView: View {
+    let text: String
+    var font: UIFont = .monospacedSystemFont(ofSize: 11, weight: .regular)
+    var spacing: Double = 1
+
+    var body: some View {
+        let hunks = SideBySideDiff.hunks(in: text)
+        if hunks.isEmpty {
+            // A diff with no hunks — binary, mode change — has nothing to lay
+            // out, and a bare empty box reads as a failed load.
+            Text(text.isEmpty ? "No textual changes." : text)
+                .font(Font(font))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(hunks.enumerated()), id: \.offset) { _, hunk in
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(hunk.header)
+                            .font(Font(font))
+                            .foregroundStyle(.cyan)
+                            .padding(.vertical, 1)
+                        ForEach(Array(hunk.rows.enumerated()), id: \.offset) { _, row in
+                            SideBySideRow(row: row, font: font, spacing: spacing)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One paired row: the old line on the left, the new line on the right.
+///
+/// The two sides share a divider so a modification reads across it. Each side
+/// is half the width and scrolls horizontally on its own — a phone cannot fit
+/// two columns of source, and wrapping a code line reads as two lines.
+private struct SideBySideRow: View {
+    let row: SideBySideDiff.Row
+    var font: UIFont
+    var spacing: Double
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            side(row.left, tint: row.kind == .removed || row.kind == .modified ? .red : nil)
+            Rectangle()
+                .fill(.secondary.opacity(0.25))
+                .frame(width: 1)
+            side(row.right, tint: row.kind == .added || row.kind == .modified ? .green : nil)
+        }
+    }
+
+    @ViewBuilder
+    private func side(_ line: SideBySideDiff.Line?, tint: Color?) -> some View {
+        let marker = Self.marker(for: line?.kind)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 3) {
+                Text(marker)
+                    .font(Font(font))
+                    .foregroundStyle(tint ?? .secondary)
+                Text(line?.text.isEmpty == false ? line!.text : " ")
+                    .font(Font(font))
+                    .foregroundStyle(tint ?? .primary)
+                    .lineSpacing(spacing)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background((tint ?? .clear).opacity(0.08))
+    }
+
+    /// The gutter marker per side, so a row says at a glance which side
+    /// changed. A nil line is a gap and takes a blank gutter rather than a
+    /// stray dash.
+    private static func marker(for kind: SideBySideDiff.Line.Kind?) -> String {
+        switch kind {
+        case .removed: "-"
+        case .added: "+"
+        case .context: " "
+        case nil: " "
+        }
+    }
+}
+
 private struct DiffText: View {
     let text: String
     /// The terminal's own font, so the code being reviewed is set in the same
@@ -502,13 +595,22 @@ private struct FileDiffView: View {
                 ScrollViewReader { proxy in
                     ScrollView([.horizontal, .vertical]) {
                         VStack(alignment: .leading, spacing: 0) {
-                            ForEach(lines(diff.diff), id: \.number) { line in
-                                Text(line.text.isEmpty ? " " : line.text)
-                                    .font(Font(font))
-                                    .lineSpacing(spacing)
-                                    .foregroundStyle(DiffPalette.color(for: line.text))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .id(line.number)
+                            // Laid out side by side, one id per hunk. The
+                            // remembered position is the hunk, which is the unit
+                            // a diff is read by — a line id would have to change
+                            // meaning now that a row holds two lines.
+                            ForEach(Array(SideBySideDiff.hunks(in: diff.diff).enumerated()), id: \.offset) { index, hunk in
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(hunk.header)
+                                        .font(Font(font))
+                                        .foregroundStyle(.cyan)
+                                        .padding(.vertical, 2)
+                                    ForEach(Array(hunk.rows.enumerated()), id: \.offset) { _, row in
+                                        SideBySideRow(row: row, font: font, spacing: spacing)
+                                    }
+                                }
+                                .padding(.bottom, 8)
+                                .id(index)
                             }
                         }
                         .padding()
@@ -569,12 +671,6 @@ private struct FileDiffView: View {
         }
     }
 
-    /// One entry per line, numbered so the scroll target survives.
-    private func lines(_ text: String) -> [(number: Int, text: String)] {
-        text.split(separator: "\n", omittingEmptySubsequences: false)
-            .enumerated()
-            .map { (number: $0.offset, text: String($0.element)) }
-    }
 }
 
 /// The usual red/green tinting, in one place so the list and the file view
