@@ -51,8 +51,8 @@ first shipped with, both folded into the fix.
 | Status | Count |
 |---|---|
 | closed | 72 |
-| partial | 3 |
-| deliberate-divergence | 1 |
+| partial | 2 |
+| deliberate-divergence | 2 |
 | missing | 0 |
 
 (The machine-readable `counters` field in `parity-audit.json` had drifted three
@@ -930,6 +930,8 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
 A second independent pass on 2026-10-10 rewrote each of these with file:line
 evidence. What is missing, in one line each:
 
+**Moved out of the half-built list:** theme import's missing half — the gallery it imports *from* — is now built as a bundled catalogue of 40 real palettes rather than a client for Moshi's 570-theme `/themes` server. Browsing, searching and re-fetching by slug all work; the source and the count are the deliberate divergence, and the screen says so.
+
 **Half-built (the surrounding feature works, the named part does not)**
 - The session picker has no Recent tab; recents live in the Code page's Go To
   Directory sheet.
@@ -940,7 +942,6 @@ evidence. What is missing, in one line each:
 - The interactive session can now be given a locale (`Settings → Integrations`, exported as both `LANG` and `LC_ALL` and carried by SSH and Mosh), but nothing writes `~/.zshenv` or a non-interactive `~/.bashrc`, so shells the agent spawns itself still see the host's default locale. The rc-injection half is unbuilt.
 - The diff viewer does take the custom font (that half is done); `.ttc`/`.otc`
   handling and the fallback are not.
-- Theme import is complete; the 570-theme `/themes` gallery it can import *from*
   does not exist.
 - Inbox rows now carry all five named categories (approval_required,
   task_complete, session_started, tool_running, tool_finished) as well as the

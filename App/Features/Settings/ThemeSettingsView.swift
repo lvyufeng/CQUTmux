@@ -110,6 +110,7 @@ final class ThemeStore {
 struct ThemeSettingsView: View {
     @Environment(ThemeStore.self) private var themes
     @State private var importing = false
+    @State private var browsing = false
     /// A theme that replaced one with the same id. Worth saying, because the
     /// user's earlier version is gone and the screen looks unchanged otherwise.
     @State private var updated: String?
@@ -133,13 +134,18 @@ struct ThemeSettingsView: View {
             }
             Section {
                 Button {
+                    browsing = true
+                } label: {
+                    Label("Theme gallery", systemImage: "square.grid.2x2")
+                }
+                Button {
                     importing = true
                 } label: {
                     Label("Import theme…", systemImage: "square.and.arrow.down")
                 }
             } footer: {
-                Text("Paste a theme copied from Moshi, open a `cqutmux://theme` link, or "
-                     + "scan its QR code.")
+                Text("Browse the bundled gallery, or paste a theme copied from Moshi, "
+                     + "open a `cqutmux://theme` link, or scan its QR code.")
             }
         }
         .navigationTitle("Theme")
@@ -151,7 +157,11 @@ struct ThemeSettingsView: View {
             // directly. The sheet, its parse and its error path are all real;
             // only the tap is stood in for.
             if ProcessInfo.processInfo.environment["CQUT_DEV_IMPORT"] == "1" { importing = true }
+            if ProcessInfo.processInfo.environment["CQUT_DEV_GALLERY"] == "1" { browsing = true }
             #endif
+        }
+        .sheet(isPresented: $browsing) {
+            ThemeGalleryView()
         }
         .sheet(isPresented: $importing) {
             ThemeImportView { theme in
