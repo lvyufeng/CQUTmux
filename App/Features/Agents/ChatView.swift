@@ -157,9 +157,12 @@ private struct MessageView: View {
     private func blockView(_ block: AgentBlock) -> some View {
         switch block.kind {
         case .text:
-            Text(block.displayText)
-                .font(.callout)
-                .textSelection(.enabled)
+            // Split rather than handed to `Text` whole. A fenced block drawn as
+            // prose loses its monospacing and its line breaks, and an inline
+            // image is drawn as the literal characters `![alt](url)`; both read
+            // as the agent having sent rubbish rather than as the app not
+            // having parsed it. What to split on is decided in `ChatMarkdown`.
+            InlineText(text: block.displayText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(message.role == .user ? 10 : 0)
                 .background(
@@ -258,5 +261,83 @@ private struct ToolCard: View {
                     .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
             }
         }
+    }
+}
+
+/// A message's prose, with its code blocks and images drawn as themselves.
+///
+/// The split itself is `ChatMarkdown`'s job and is checked without a simulator;
+/// this only decides how each piece looks. A code block gets monospacing and
+/// horizontal scroll — a long line must not be wrapped, because wrapping a
+/// command changes what it looks like it does — and an image that cannot be
+/// loaded falls back to its alt text rather than an empty box, since the agent
+/// describing what it sent is more use than nothing.
+private struct InlineText: View {
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(ChatMarkdown.segments(in: text).enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case .prose(let prose):
+                    Text(prose)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                case .code(let language, let body):
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let language {
+                            Text(language)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            Text(body)
+                                .font(.system(.callout, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
+                        .padding(8)
+                        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+                    }
+
+                case .image(let url, let alt):
+                    InlineImage(url: url, alt: alt)
+                }
+            }
+        }
+    }
+}
+
+/// One image from a message, or its alt text when it cannot be shown.
+private struct InlineImage: View {
+    let url: String
+    let alt: String
+
+    var body: some View {
+        if let link = URL(string: url), link.scheme != nil {
+            AsyncImage(url: link) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFit()
+                case .failure:
+                    fallback
+                default:
+                    ProgressView()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        } else {
+            // A URL the app cannot even parse is not an image to fetch; the
+            // alt text is the whole of what the agent meant.
+            fallback
+        }
+    }
+
+    private var fallback: some View {
+        Text(alt.isEmpty ? url : alt)
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 }
