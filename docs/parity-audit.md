@@ -23,10 +23,15 @@ read, the Chat View composer, six `cqutmux-hook` subcommands, the
 `missing` entry as genuinely absent, and rewrote the evidence on every entry
 that is still open.
 
+**Since then, one more closed** — "Read first" on a pending approval (see the
+progress list below), which moves one entry from `partial` to `closed`. An
+adversarial pass over that change also refuted two claims it first shipped
+with, both folded into the fix.
+
 | Status | Count |
 |---|---|
-| closed | 51 |
-| partial | 22 |
+| closed | 52 |
+| partial | 21 |
 | deliberate-divergence | 2 |
 | missing | 1 |
 
@@ -111,6 +116,23 @@ These are ordinary features that simply have not been built:
 
 Being worked through after the audit. Each entry below was a confirmed gap that
 has since been closed, with the check that pins it.
+
+- **"Read first" on a pending approval** — the pending event's body is now
+  drawn on the row (`AgentEvent.promptText` / `promptClampLines` /
+  `promptOffersReading`, `InboxView.SessionRow`), clamped to four lines with a
+  Read first / Show less toggle, and the same reading goes to the Watch with the
+  same clamp and an expand. Two things this got wrong before it was right, both
+  invisible on a screen: the body the hook sends is `json.dumps(tool_input)`, so
+  a multi-line command arrives as one physical line with `\\n` escaped — shown
+  verbatim the row was braces and backslashes, and the four-line clamp never
+  fired; and the clamp counted lines while the button counted characters, so a
+  body could be folded away with no way to open it. `promptText` renders the
+  command (the same reading `AgentBlock.toolSummary` already gives the Chat
+  view) and the toggle is gated on the clamp's own line count. Pinned by
+  `scripts/inbox-check.sh` (79 checks), including a fixture in the exact shape
+  the hook puts on the wire. The two sibling surfaces that announce a pending
+  approval — the Live Activity and the push notification text — still show the
+  title alone and are tracked separately.
 
 - **Enter / Backspace / keyboard-show-hide bar keys** — added to
   `InputSettings.Item`; `sendEnter` (CR) and `sendBackspace` (BS) are distinct
@@ -745,14 +767,12 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   sync carries both, and every chord and the tab row resolve through
   `prefix(for:)`.
 
-### The 22 that are still open, grouped by what is actually missing
+### The 21 that are still open, grouped by what is actually missing
 
 A second independent pass on 2026-10-10 rewrote each of these with file:line
 evidence. What is missing, in one line each:
 
 **Half-built (the surrounding feature works, the named part does not)**
-- Approvals have Allow/Deny but no "read first": the pending prompt's body is
-  not rendered on the phone at all.
 - The session picker has no Recent tab; recents live in the Code page's Go To
   Directory sheet.
 - The app resumes a backgrounded session on foreground, but nothing restores the

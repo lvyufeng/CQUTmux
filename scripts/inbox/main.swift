@@ -44,6 +44,7 @@ func event(
     kind: AgentEvent.Kind = .notice,
     source: String = "claude-code",
     title: String = "Task finished",
+    body: String? = nil,
     session: String? = "s1",
     cwd: String? = nil,
     decision: String? = nil,
@@ -67,7 +68,7 @@ func event(
         source: source,
         kind: kind,
         title: title,
-        body: nil,
+        body: body,
         decision: decision,
         answer: nil,
         data: payload
@@ -86,6 +87,88 @@ let waiting = column(of: [event(1, age: 5, kind: .approval)])
 check(waiting.rows(in: .needsYou).count == 1, "an unanswered approval is in Needs you")
 check(waiting.rows(in: .working).isEmpty, "and not in Working")
 check(waiting.rows.first?.pending != nil, "and the row keeps the event that is waiting")
+
+// The pending event's *body* has to survive onto the row, because it is what
+// the row renders above Allow/Deny and what "read first" expands. The board
+// dropped it once — the row read `title` only — so a pending approval was
+// answered from the tool name alone, which is precisely the blind answer the
+// page warns about. Asserting on `pending` (not on a copy of the body) keeps
+// this a check of the path the view actually reads.
+let withPrompt = column(of: [
+    event(1, age: 5, kind: .approval, title: "Bash",
+          body: #"{"command":"rm -rf build","description":"Delete the build output"}"#)
+])
+check(withPrompt.rows.first?.pending?.displayBody.contains("rm -rf build") == true,
+      "a pending approval carries its prompt body through to the row")
+check(withPrompt.rows.first?.pending?.displayTitle == "Bash",
+      "and keeps the tool name as the title, so the two are not the same field")
+
+// What the row *draws* is the command, not the JSON envelope around it. The
+// hook stringifies tool_input, so the body on the wire is `{"command":"rm -rf
+// build",…}` with the argument escaped inside — shown verbatim the row is
+// braces and backslashes where the command should be, which is the same
+// "answered from the tool name" failure wearing a different hat.
+check(withPrompt.rows.first?.pending?.promptText == "rm -rf build",
+      "and the row draws the command, not the JSON it arrived in")
+// A question's body is the question, not a tool input; it has to survive too.
+let questionBody = column(of: [
+    event(1, age: 5, kind: .approval, title: "Which database?",
+          body: "Pick the one the migrations target.",
+          options: [AgentEvent.Payload.Option(label: "Postgres", value: "pg")])
+])
+check(questionBody.rows.first?.pending?.displayBody == "Pick the one the migrations target.",
+      "a pending question carries its body too")
+
+// MARK: - Reading it before answering
+
+// The other half of "answer blind": even with the body on the row, an approval
+// whose prompt runs to a hundred lines has the Allow button somewhere below the
+// fold. So an approval is clamped and offered an expand, while a question is
+// shown whole — its body *is* the question, and there is nothing to reveal.
+//
+// This is asserted here rather than seen on a screen because a `Text`'s line
+// limit is not visible in a screenshot in the direction that matters: a body
+// clamped where it should be whole, and a body whole where it should be
+// clamped, both just render as text. The first live run of this looked exactly
+// right and could not have told the two apart.
+let shortApproval = event(1, age: 5, kind: .approval, title: "Bash", body: "ls -la")
+check(shortApproval.promptClampLines == AgentEvent.promptClampLines,
+      "an approval's prompt is clamped to four lines")
+check(!shortApproval.promptOffersReading, "and a short one offers no expand to nothing")
+
+let longApproval = event(1, age: 5, kind: .approval, title: "Edit",
+                         body: (0..<20).map { "+++ line \($0)" }.joined(separator: "\n"))
+check(longApproval.promptClampLines == AgentEvent.promptClampLines, "a long approval is clamped too")
+check(longApproval.promptOffersReading, "and is the case Read first exists for")
+check(longApproval.promptLineCount > AgentEvent.promptClampLines,
+      "so it is genuinely hiding lines, not offering an expand that reveals nothing")
+
+// The bug this pair of rules shipped with: the clamp counted lines and the
+// button counted characters, so a body could be folded away with no way to open
+// it. `String(repeating: "x\n", count: 5)` is ten characters — nowhere near any
+// length threshold — but six lines, two of which four lines do not show. It was
+// rendering with no "Read first" at all, which is the blind answer arriving
+// through the door this feature opened. Pin the unit: the button appears
+// exactly when the clamp hides a line.
+let denseShort = event(1, age: 5, kind: .approval, title: "Bash",
+                       body: String(repeating: "x\n", count: 5))
+check(denseShort.displayBody.count < 20, "a short body by character count")
+check(denseShort.promptLineCount > AgentEvent.promptClampLines, "is still more lines than four")
+check(denseShort.promptOffersReading, "so it offers the expand its clamp is hiding behind")
+// And the other side: one long line has nothing folded, so no button.
+let oneLongLine = event(1, age: 5, kind: .approval, title: "Bash",
+                        body: "echo " + String(repeating: "a", count: 300))
+check(oneLongLine.promptLineCount == 1, "a single long line is one line")
+check(!oneLongLine.promptOffersReading, "so it offers no expand that would reveal nothing")
+
+// A question is the other way round: shown whole, never offering to expand.
+let longQuestion = event(1, age: 5, kind: .approval, title: "Which database?",
+                         body: "Pick the one the migrations target, and check it against staging first — "
+                             + "the credentials differ between the two and a mismatch shows up only at run time.",
+                         options: [.init(label: "Postgres", value: "pg")])
+check(longQuestion.isQuestion, "an event with options is a question")
+check(longQuestion.promptClampLines == .max, "a question's body is shown whole")
+check(!longQuestion.promptOffersReading, "and a question never offers to expand its own question")
 
 let answered = column(of: [event(1, age: 5, kind: .approval, decision: "allow")])
 check(answered.rows(in: .working).count == 1,
@@ -340,6 +423,27 @@ check(decoded?.data?.cwd == "/Users/x/work/api", "and its working directory")
 check(decoded?.projectName == "api", "which yields the project name for grouping")
 check(decoded?.isQuestion == true, "and a question is still a question after decoding")
 check(decoded?.options.count == 2, "with its options intact — not silently dropped")
+
+// The approval body exactly as `claude-code-hook.sh` sends it: `json_string`
+// runs `json.dumps` on tool_input, so a multi-line command arrives as *one*
+// physical line with `\n` escaped inside the string. Read off a live gateway
+// this is 186 characters and zero real newlines — which is why the clamp never
+// fired on the real path while the character-gated button did, the failure this
+// whole section exists to catch. The fixture is copied from the hook, not
+// hand-typed, so it keeps that shape.
+let toolInput = """
+{"id":3,"at":"2023-11-14T22:13:20.123Z","source":"claude-code","kind":"approval",
+ "title":"Bash","body":"{\\"command\\": \\"set -e\\\\nnpm ci\\\\nnpm run build\\\\nsleep 5\\\\ncurl -sf localhost/health\\", \\"timeout\\": 120000, \\"description\\": \\"Smoke-test the server\\"}",
+ "data":{"session":"sess-b"}}
+"""
+let call = try? JSONDecoder().decode(AgentEvent.self, from: Data(toolInput.utf8))
+check(call?.displayBody.contains("\\n") == true,
+      "a real tool input keeps its newlines escaped, as the hook sends them")
+check(call?.promptText == "set -e\nnpm ci\nnpm run build\nsleep 5\ncurl -sf localhost/health",
+      "and the row draws the command with those newlines restored, not the JSON")
+check(call?.promptLineCount == 5, "so the line count is the command's, not the escaped string's")
+check(call?.promptOffersReading == true,
+      "and the expand appears because six lines is more than four — on the real wire shape")
 
 // The resolution notice the gateway emits resolves an approval and names no
 // session of its own.

@@ -135,6 +135,62 @@ struct AgentEvent: Identifiable, Codable, Hashable {
     var displayTitle: String { title ?? "" }
     var displayBody: String { body ?? "" }
 
+    /// The body as it is drawn on the row: the tool input takes apart into the
+    /// lines it was written as, and a question's prose is left alone.
+    ///
+    /// A tool input arrives as JSON — `{"command": "set -e\na\nb", "description":
+    /// …}` when a hook stringifies it, or a raw diff — so rendered verbatim the
+    /// row shows braces and escaped `\n` instead of the command being approved.
+    /// `toolSummary` in `AgentBlock` already answers exactly this for the Chat
+    /// view; this is the same reading for the Inbox.
+    var promptText: String {
+        guard !isQuestion else { return displayBody }
+        guard let data = displayBody.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return displayBody }
+        // A tool's meaningful argument, in the order the Chat view already
+        // prefers them — so both surfaces name the same call the same way.
+        for key in ["command", "file_path", "path", "pattern", "url", "query", "description"] {
+            if let value = object[key] as? String, !value.isEmpty { return value }
+        }
+        if let content = object["content"] as? String, !content.isEmpty { return content }
+        // A tool whose only input is the text to write (Write/Edit): the field
+        // is named by the tool, so fall back to the longest string in it rather
+        // than showing a JSON blob.
+        let strings = object.values.compactMap { $0 as? String }.filter { !$0.isEmpty }
+        return strings.max { $0.count < $1.count } ?? displayBody
+    }
+
+    /// The logical lines of `promptText`, which is the unit the clamp counts.
+    ///
+    /// Split out because it is the *one* thing the clamp and the button both
+    /// read. Counting characters for the button and lines for the clamp is how
+    /// a body could be folded away with no way to open it — the failure this
+    /// feature exists to prevent. One count, two readers, so they cannot differ.
+    var promptLineCount: Int { promptText.components(separatedBy: .newlines).count }
+
+    /// How many lines of the prompt the row shows before it needs expanding.
+    ///
+    /// A question is short — its body *is* the question — so it is shown whole.
+    /// A tool input is clamped so a large one cannot push the Allow button off
+    /// the screen. A `Text`'s own limit cannot be read off a screenshot in the
+    /// direction that matters — a body clamped where it should be whole and a
+    /// body whole where it should be clamped both render as text — so the rule
+    /// lives here and is checked in `scripts/inbox-check.sh`.
+    static let promptClampLines = 4
+    var promptClampLines: Int { isQuestion ? .max : Self.promptClampLines }
+
+    /// Whether the row should offer the expand affordance.
+    ///
+    /// Exactly when the clamp is folding something away: more lines than it
+    /// shows. Not a character count — that is a different unit and a body of
+    /// five short lines hides two of them while being nowhere near any length
+    /// threshold. On a short body the button would sit there revealing nothing,
+    /// and on a question there is nothing hidden to reveal.
+    var promptOffersReading: Bool {
+        !isQuestion && promptLineCount > Self.promptClampLines
+    }
+
     /// Short label for the agent that produced it, e.g. "Claude Code".
     var sourceLabel: String {
         switch source {

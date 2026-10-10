@@ -146,7 +146,11 @@ final class AgentConnection {
                     id: $0.id,
                     source: $0.sourceLabel,
                     title: $0.displayTitle,
-                    body: $0.displayBody,
+                    // The same reading the Inbox draws: the tool input taken
+                    // apart into the command or the file, not the JSON envelope
+                    // it travelled in. The watch clamps it too, so sending the
+                    // raw body here would clamp braces and backslashes.
+                    body: $0.promptText,
                     options: $0.options.map { .init(label: $0.label, value: $0.value) }
                 )
             }

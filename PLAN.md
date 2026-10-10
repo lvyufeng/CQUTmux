@@ -65,7 +65,7 @@
 | Agent 层 | Chat View（Inbox）、approvals、teammate 卡片 | P3 |
 | Agent 层 | Diff Viewer、文件浏览器、浏览器预览、模拟器预览 | P3 |
 | Agent 层 | Usages 看板（5h/7d 用量与 burn pace） | P4 |
-| Agent 层 | **Inbox 看板**：Needs you / Working / Done 三栏、**一个会话一行**（新事件并入而不是堆行）、按项目分组、**归档**（完成 10 分钟、任何东西 6 小时、左滑立即归档） | P5 ✅ 规则实测（58）+ 端到端实测 |
+| Agent 层 | **Inbox 看板**：Needs you / Working / Done 三栏、**一个会话一行**（新事件并入而不是堆行）、按项目分组、**归档**（完成 10 分钟、任何东西 6 小时、左滑立即归档） | P5 ✅ 规则实测（79）+ 端到端实测 |
 | 通知 | 本地/远程推送、webhook 告警 | P4 |
 | 系统 | Live Activity / Dynamic Island / Apple Watch | P4 / P6 ✅ 表盘实测 |
 | 系统 | **Apple Watch 两个页签**：Inbox（原有）+ **Usage**（每账号限额环、显示最紧的窗口、色带绿/橙/红、含"更新于"）；手机每 3 分钟推一次用量到 `applicationContext`，与审批各自独立 | P6 ✅ 界面实测 + 端到端回归 |
@@ -131,7 +131,7 @@ Option 想修饰的那个字母。因此「含任何 ASCII 就整串放行」是
 
 **Inbox 看板**（Moshi `docs/agents-usages`：三栏板 + 会话合并 + 归档）。此前 Inbox 是**一条事件一行的流水**，
 那等于把阅读的活交给用户：一个会话二十条事件就是二十行，真正在等你回答的那条混在中间，而且从此永不消失。
-现按 Moshi 的规则重做——`InboxBoard.swift`（只依赖 Foundation，故 58 项规则可无宿主驱动）：
+现按 Moshi 的规则重做——`InboxBoard.swift`（只依赖 Foundation，故 79 项规则可无宿主驱动）：
 
 - **三栏**：有待答 approval/问题 → Needs you；**已答的 approval → Working 而非 Done**（答了意味着 agent 刚开始做，
   不是做完）；其余 → Done。本 App 自己的"approval allow"通知**不参与定栏**——它是完成形状的，读成完成会让每行
@@ -594,6 +594,8 @@ CJK 输入依赖 SwiftTerm 的
 
 | 原生 Windows 宿主 | **审计确认缺口（第 12 条），本轮补上。**（Moshi：Windows 宿主用 PowerShell `Get-Command` 解析 `herdr.exe`。）Windows 上两件事必须不同，且**只在没人看着的那个平台上出错**：① `execFile('herdr', …)` **永远找不到** `herdr.exe`（也找不到包管理器的 `.cmd` shim），所以 win32 上探测走 PowerShell 的 `Get-Command`（等价于 `command -v`）而不是裸名；② herdr 的 API socket 在 macOS/Linux 是 Unix domain socket，在 Windows 是**命名管道**，所以路径按平台推导（`\\.\pipe\herdr-<account>`，名字做过 sanitize，分隔符逃不出管道命名空间，且带账号名，同机两个用户不撞）。<br>**判定抽成新的纯模块 `host/cqutmux-hook/platform.mjs`**：接收平台字符串、返回描述、**不做任何 spawn**——因为出错的正是这些判定，而被检查过的判定比不可测的代码有价值。`scripts/windows-host-check.sh`（18 项）钉住每个平台的程序、参数、存在信号与 socket 路径。<br>**诚实的边界**：本仓库的网关**只在 Linux/macOS 上跑过**，Windows 分支只经纯函数断言、**未端到端验证**。POSIX 路径未变，`scripts/herdr-test.sh` 对真实 herdr server 仍然通过 | ✅ 判定已实测；**Windows 运行时未验证**（已在审计中写明） |
 | Inbox 上下文环 | **审计确认缺口（第 66 条），本轮补上。**（Moshi：Inbox 每行有一个小环显示**上下文窗口剩余**，低于约 15% 时告警，同一读数也喂表盘。）事件里**没有** token 计数（网关的 event 不带），所以读数取自 agent **自己的 transcript 日志**，与 Chat 视图读的是同一份。<br>**算法是关键，因此放进 Foundation-only 的 `ContextWindow`**：窗口是**最后一轮**的 `input_tokens + cache_read + cache_creation + output_tokens`，**不是跨轮求和**——input 每轮都要重发，求和会把同一个窗口按消息数重复计数，把一个健康的会话显示成永远满，**看着合理的错值**。只报 0 的一轮被跳过而不是画成 0%（agent 正在 compaction 时会谎称上下文是空的）；比例 clamp 到 1，超限读成"满"而不是超过环的末端；limit 为 0 不读成除零。<br>**分母是唯一诚实的假设**：日志记录每轮用了多少 token，但从不记录能装多少。所以窗口大小是设置项（Settings → Agents → Context window，默认 200k，0 隐藏环），页脚直说是假设、请按模型改。<br>**只有拿到读数才画环**：读不到日志的会话留空槽，而不是对着没人量过的数字画。读数**按目录缓存一份**——transcript 读是宿主上的文件读，Inbox 几秒轮询一次，按行取会为一个每轮才变一次的数制造大量流量。`scripts/context-window-check.sh` 钉住算法，`scripts/transcript-check.sh` 补齐网关透传数值、丢弃字符串计数的用例。**实测**（模拟器 + 真网关 + 真日志）：181k/200k 的一轮显示 **91%** 且为告警色 | ✅ 已实现并实测 |
+
+| 待批审批的 "Read first" | **审计确认缺口（introduction 页第 1 条：approvals 要能"先读后答"），本轮补上。** Moshi 的审批卡片在 Allow/Deny 之外还有一个"先看一眼再决定"的入口；此前 Inbox 行**只画标题**（工具名，如 `Bash`），prompt 正文（命令、要改的文件）**根本没渲染**，等于凭工具名答一个问题。<br>**实现**：`AgentEvent.promptText`（正文里是 JSON 的 tool_input，拆成它真正想说的那句话——命令或文件路径，与 Chat 视图 `AgentBlock.toolSummary` 同一套读法）、`promptClampLines` / `promptOffersReading`（四行封顶 + Read first / Show less 切换），`InboxView.SessionRow` 渲染；同一读法经 `AgentConnection` 快照送到表盘，表盘同样封顶并可展开。<br>**这一版先写错了两处，都被对抗式复核抓出来，且两处都看不出来**：① 宿主 `claude-code-hook.sh` 发的是 `json.dumps(tool_input)`——多行命令**在线上是一条物理行**，`\n` 是转义的两个字符。逐字渲染出来的是花括号和反斜杠，而且四行封顶**在真实路径上从不触发**（实测：186 字符、0 个真换行、5 个 `\n` 字面量）。② 封顶按**行**数、按钮按**字符**数，两个单位互不相干，于是"五行短命令"会被折掉两行**且不给任何展开入口**——正是这个功能存在的意义（别盲答）从它自己新开的那扇门里溜回来。修法：两处都读**同一个行数**（`promptLineCount`），正文先经 `promptText` 还原成多行。<br>**钉住**：`scripts/inbox-check.sh`（79 项），含一条**按 hook 真实写法**构造的 wire 用例（转义 `\n` 的 tool_input）与两个方向的单位用例。**已编译验证**：App target 与 watch target 均 `BUILD SUCCEEDED`。<br>**仍缺（另记）**：Live Activity 与推送通知正文仍只给标题，两者在上面各处已单独记录为未完成 | ✅ 已实现（规则实测 + 双 target 编译通过） |
 
 ## 5. 主要风险
 

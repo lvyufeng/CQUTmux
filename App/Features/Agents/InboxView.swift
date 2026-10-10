@@ -255,6 +255,9 @@ private struct SessionRow: View {
     let answer: (AgentEvent, String) -> Void
     let context: ContextStore
     @State private var expanded = false
+    /// Whether the pending prompt's body has been expanded to its full length.
+    /// Per row, so opening one does not open every pending prompt on the board.
+    @State private var readFirst = false
     @Environment(ThemeStore.self) private var themes
 
     var body: some View {
@@ -281,6 +284,40 @@ private struct SessionRow: View {
             }
 
             if let event = row.pending {
+                // What the agent is actually asking. The row's own line is the
+                // *title* — the tool name — and without this the prompt was
+                // answered from that alone, which is the "answer blind" case:
+                // the body is the command or the file being changed, and it is
+                // the part being approved.
+                //
+                // Shown whole for a question (its text is the question) and
+                // clamped for a tool input, with a toggle for the rest. The
+                // calling is the model's — `promptText` is the body with the
+                // tool input taken apart into lines, `promptClampLines` and
+                // `promptOffersReading` decide how much shows and whether
+                // there is anything to reveal. Checked in `scripts/inbox-check.sh`:
+                // a line limit cannot be read off a screenshot in the direction
+                // that matters.
+                if !event.promptText.isEmpty {
+                    Text(event.promptText)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(readFirst ? nil : event.promptClampLines)
+                        .textSelection(.enabled)
+                }
+                // The toggle's count is the lines the clamp is actually
+                // hiding, so the two numbers on screen agree.
+                if event.promptOffersReading {
+                    let hidden = event.promptLineCount - AgentEvent.promptClampLines
+                    Button(
+                        readFirst ? "Show less" : "Read first (\(hidden) more lines)"
+                    ) {
+                        withAnimation { readFirst.toggle() }
+                    }
+                    .font(.caption2)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(themes.current.accentColor)
+                }
                 EventActions(event: event, resolve: resolve, answer: answer)
             }
 

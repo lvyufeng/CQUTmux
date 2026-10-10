@@ -17,6 +17,14 @@ import WidgetKit
 struct ApprovalListView: View {
     @State private var link = WatchLink.shared
     @State private var sent: [Int: Bool] = [:]
+    /// Whether the pending item's body is opened past its clamp. One list shows
+    /// one waiting agent at a time in practice, so a single flag is enough;
+    /// scoping it per item would be state with nothing to distinguish.
+    @State private var bodyRead = false
+
+    /// The same four lines the phone clamps its prompt to, so the wrist and the
+    /// phone fold the same body at the same place.
+    private static let bodyClampLines = 4
 
     private var items: [WatchPayload.Snapshot.Item] { link.items }
 
@@ -38,10 +46,25 @@ struct ApprovalListView: View {
                             .font(.headline)
                             .lineLimit(3)
                         if !item.body.isEmpty {
+                            // Clamped *and* openable, which is the pair the
+                            // phone already makes. A wrist is a worse place to
+                            // answer blind than a phone, not a better one — a
+                            // multi-line command or diff was folded at four
+                            // lines here with no way to see the rest, and the
+                            // body arrives as the command now rather than as
+                            // the JSON it travelled in (AgentConnection).
                             Text(item.body)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                                .lineLimit(4)
+                                .lineLimit(bodyRead ? nil : Self.bodyClampLines)
+                            if !item.isQuestion, item.body
+                                .components(separatedBy: .newlines).count > Self.bodyClampLines {
+                                Button(bodyRead ? "Show less" : "Show all") {
+                                    bodyRead.toggle()
+                                }
+                                .font(.caption2)
+                                .buttonStyle(.plain)
+                            }
                         }
 
                         if let allow = sent[item.id] {
