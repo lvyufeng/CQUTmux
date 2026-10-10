@@ -36,6 +36,7 @@ import { commandHistory } from './history.mjs'
 import { windowsForSource } from './usage.mjs'
 import { parseLsof, parseSs, describe } from './listeners.mjs'
 import { renderDiffHtml } from './diffpage.mjs'
+import { detectContext, sessionIndexFromTmux, contextPayload } from './context.mjs'
 import { terminal as qrTerminal } from './qr.mjs'
 import { sendGesture, stopAllSessions, touchHelperAvailable } from './simtouch.mjs'
 
@@ -1215,7 +1216,7 @@ const SETTABLE = [
 
 const COMMANDS = new Set([
   'pair', 'install', 'uninstall', 'serve', 'status', 'doctor', 'logs', 'diff',
-  'set', 'usage', 'version', 'update', 'help',
+  'set', 'usage', 'version', 'update', 'help', 'context',
 ])
 
 function usage() {
@@ -1223,6 +1224,7 @@ function usage() {
 
   cqutmux <dir>          open (or attach to) a tmux session for a project
   cqutmux diff           diff viewer for the current repo, in the browser
+  cqutmux context        this shell's terminal context (multiplexer/pane/cwd) as JSON
   cqutmux status         gateway health, if one is running here
   cqutmux doctor         check that this host is ready for the app
   cqutmux logs [-f]      tail the gateway log
@@ -1331,6 +1333,8 @@ async function runCommand(name, argv) {
       return usageCommand(argv.includes('--sync'))
     case 'version':
       return versionCommand()
+    case 'context':
+      return contextCommand()
     case 'update':
       return update(argv)
   }
@@ -2336,6 +2340,31 @@ function isOurs(group, bridge) {
 /// Non-blocking by design: it prints the URL and exits once the page has been
 /// opened, so `cqutmux diff` can be run from a hook or a script without leaving
 /// something behind. (The app's own Diff viewer reads `/diff` directly.)
+/// `cqutmux context` — one-shot terminal-context probe, no gateway.
+///
+/// Runs from the user's own shell and prints where it is, so a prompt, a status
+/// line, or a hook can label the session. It never contacts the daemon: the
+/// whole point is that it answers when nothing else is running, from the
+/// environment the shell itself carries.
+async function contextCommand() {
+  const context = detectContext(process.env)
+  // tmux marks a shell with the session *index* in `$TMUX`, but the name is
+  // what a person recognises, so ask tmux for it when tmux is the answer and
+  // fall back to the index only if the query fails. Best-effort by design: a
+  // probe that errored because tmux was busy would be worse than one that
+  // reported the pane it knows.
+  if (context.kind === 'tmux') {
+    try {
+      const { stdout } = await run('tmux', ['display-message', '-p', '#{session_name}'])
+      const name = stdout.trim()
+      if (name) context.session = name
+    } catch {
+      // Keep the index from $TMUX.
+    }
+  }
+  process.stdout.write(JSON.stringify(contextPayload(context, process.cwd())) + '\n')
+}
+
 async function diff(argv) {
   // Argument order is free: a bare token is the repo path, `--port` takes the
   // next token, `--no-open` takes none. Parsed in a loop rather than by

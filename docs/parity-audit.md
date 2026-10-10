@@ -27,14 +27,15 @@ that is still open.
 inbox's project grouping plus its toolbar fill; half of the host-locale claim
 (LANG and LC_ALL now cross, the rc injection does not); the per-agent Usages
 windows; the browser-preview listener metadata; and `cqutmux diff`'s browser
-viewer, which closes a deliberate divergence. See the progress list below.
+viewer, which closes a deliberate divergence, and the `cqutmux context` probe.
+See the progress list below.
 The "Read first" change also had an adversarial pass that refuted two claims it
 first shipped with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 59 |
-| partial | 15 |
+| closed | 60 |
+| partial | 14 |
 | deliberate-divergence | 1 |
 | missing | 1 |
 
@@ -893,7 +894,22 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   returns, so the server was killed the instant it started — the command now
   holds until a signal; and a clean tree rendered an empty `<ul></ul>`.
 
-### The 16 that are still open, grouped by what is actually missing
+- **`cqutmux context`, the daemon-less terminal probe.** The `cqutmux <dir>`
+  launcher existed; the probe did not. `host/cqutmux-hook/context.mjs` reads the
+  shell's own environment — `ZELLIJ`/`ZELLIJ_PANE_ID`, `TMUX`/`TMUX_PANE`,
+  `HERDR_ENV`/`HERDR_SESSION`/`HERDR_PANE` — and prints `{kind, session, pane,
+  cwd}` as JSON, contacting no gateway: the point is that it answers from a
+  prompt or a status line when nothing else is running.
+  The rule that fails silently is precedence when multiplexers nest: a zellij
+  inside a tmux pane has *both* sets of variables, and reporting the outer frame
+  is valid JSON naming the wrong place. Zellij wins, because it is the innermost
+  session and the one the keystrokes go to. For tmux the session *name* is asked
+  of tmux (`display-message -p '#{session_name}'`), since `$TMUX` carries only
+  the session index; the index is the fallback when that query fails.
+  `scripts/context-check.sh` (32 checks) runs plain node; checking tmux before
+  zellij reddens the 3 nested cases.
+
+### The 15 that are still open, grouped by what is actually missing
 
 A second independent pass on 2026-10-10 rewrote each of these with file:line
 evidence. What is missing, in one line each:
@@ -912,7 +928,6 @@ evidence. What is missing, in one line each:
   does not exist.
 - Inbox rows carry a needs-you/working/done column, not the five named
   categories.
-- `cqutmux <dir>` exists; `moshi-hook context` has no counterpart.
 - Chat View renders message blocks; Markdown, code and image separation do not.
 - Chat View is the 4th segment of the Code pane, not a toolbar agent-icon entry,
   and its header lacks the agent/model/session line and the diff/preview
