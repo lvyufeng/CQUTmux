@@ -28,6 +28,16 @@ struct ApprovalListView: View {
 
     private var items: [WatchPayload.Snapshot.Item] { link.items }
 
+    /// The items grouped by project, the same way the phone's Inbox groups
+    /// them. Built from the flat list the link carries, so the only things the
+    /// push has to add are each item's project name and its timestamp — the
+    /// grouping itself is the same shared code the check pins.
+    private var groups: [WatchPayload.Snapshot.Group] {
+        WatchPayload.Snapshot(items: items).groups
+    }
+
+    private var isGrouped: Bool { WatchPayload.Snapshot(items: items).isGrouped }
+
     var body: some View {
         Group {
             if items.isEmpty {
@@ -37,73 +47,83 @@ struct ApprovalListView: View {
                     description: Text("Open CQUTmux on your iPhone and connect to a host.")
                 )
             } else {
-                List(items) { item in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(item.source)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text(item.title)
-                            .font(.headline)
-                            .lineLimit(3)
-                        if !item.body.isEmpty {
-                            // Clamped *and* openable, which is the pair the
-                            // phone already makes. A wrist is a worse place to
-                            // answer blind than a phone, not a better one — a
-                            // multi-line command or diff was folded at four
-                            // lines here with no way to see the rest, and the
-                            // body arrives as the command now rather than as
-                            // the JSON it travelled in (AgentConnection).
-                            Text(item.body)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(bodyRead ? nil : Self.bodyClampLines)
-                            if !item.isQuestion, item.body
-                                .components(separatedBy: .newlines).count > Self.bodyClampLines {
-                                Button(bodyRead ? "Show less" : "Show all") {
-                                    bodyRead.toggle()
+                List {
+                    ForEach(groups) { group in
+                        Section {
+                            ForEach(group.items) { item in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(item.source)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text(item.title)
+                                        .font(.headline)
+                                        .lineLimit(3)
+                                    if !item.body.isEmpty {
+                                        // Clamped *and* openable, which is the pair the
+                                        // phone already makes. A wrist is a worse place to
+                                        // answer blind than a phone, not a better one — a
+                                        // multi-line command or diff was folded at four
+                                        // lines here with no way to see the rest, and the
+                                        // body arrives as the command now rather than as
+                                        // the JSON it travelled in (AgentConnection).
+                                        Text(item.body)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(bodyRead ? nil : Self.bodyClampLines)
+                                        if !item.isQuestion, item.body
+                                            .components(separatedBy: .newlines).count > Self.bodyClampLines {
+                                            Button(bodyRead ? "Show less" : "Show all") {
+                                                bodyRead.toggle()
+                                            }
+                                            .font(.caption2)
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+
+                                    if let allow = sent[item.id] {
+                                        Label(
+                                            allow ? "Approved" : "Denied",
+                                            systemImage: allow ? "checkmark.circle.fill" : "xmark.circle.fill"
+                                        )
+                                        .font(.caption2)
+                                        .foregroundStyle(allow ? .green : .orange)
+                                    } else if item.isQuestion {
+                                        // An agent waiting on a choice is waiting just
+                                        // as much as one waiting on permission, and
+                                        // this is the case where reaching for the phone
+                                        // is most annoying.
+                                        VStack(spacing: 4) {
+                                            ForEach(item.options) { option in
+                                                Button(option.label) { answer(item, option.value) }
+                                                    .buttonStyle(.bordered)
+                                            }
+                                        }
+                                    } else {
+                                        HStack {
+                                            Button(role: .destructive) { decide(item, allow: false) } label: {
+                                                Image(systemName: "xmark")
+                                            }
+                                            .buttonStyle(.borderedProminent)
+                                            .tint(.red)
+
+                                            Spacer()
+
+                                            Button { decide(item, allow: true) } label: {
+                                                Image(systemName: "checkmark")
+                                            }
+                                            .buttonStyle(.borderedProminent)
+                                            .tint(.green)
+                                        }
+                                    }
                                 }
-                                .font(.caption2)
-                                .buttonStyle(.plain)
+                                .padding(.vertical, 2)
                             }
-                        }
-
-                        if let allow = sent[item.id] {
-                            Label(
-                                allow ? "Approved" : "Denied",
-                                systemImage: allow ? "checkmark.circle.fill" : "xmark.circle.fill"
-                            )
-                            .font(.caption2)
-                            .foregroundStyle(allow ? .green : .orange)
-                        } else if item.isQuestion {
-                            // An agent waiting on a choice is waiting just
-                            // as much as one waiting on permission, and
-                            // this is the case where reaching for the phone
-                            // is most annoying.
-                            VStack(spacing: 4) {
-                                ForEach(item.options) { option in
-                                    Button(option.label) { answer(item, option.value) }
-                                        .buttonStyle(.bordered)
-                                }
-                            }
-                        } else {
-                            HStack {
-                                Button(role: .destructive) { decide(item, allow: false) } label: {
-                                    Image(systemName: "xmark")
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.red)
-
-                                Spacer()
-
-                                Button { decide(item, allow: true) } label: {
-                                    Image(systemName: "checkmark")
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.green)
+                        } header: {
+                            if isGrouped, !group.title.isEmpty {
+                                Text(group.title)
                             }
                         }
                     }
-                    .padding(.vertical, 2)
                 }
             }
         }

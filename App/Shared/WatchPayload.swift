@@ -52,6 +52,16 @@ enum WatchPayload {
             var source: String
             var title: String
             var body: String
+            /// The project the agent is working in — the last path component
+            /// of its cwd, the same name the phone groups by. Empty when the
+            /// hook reported no directory.
+            var project: String = ""
+            /// When the hook raised this, used to order the project headings
+            /// newest-first the way the phone does. Optional because a watch
+            /// running an older build, or a payload from before this field
+            /// existed, simply has none — those sort last rather than being
+            /// dropped.
+            var at: Date?
             /// A question's choices, empty for an approval. The watch renders
             /// them as buttons: an agent waiting on a choice is waiting just as
             /// much as one waiting on permission, and it is the case where
@@ -67,6 +77,65 @@ enum WatchPayload {
             var isQuestion: Bool { !options.isEmpty }
         }
         var items: [Item]
+
+        /// One project's worth of waiting items.
+        struct Group: Identifiable, Hashable, Sendable {
+            /// Empty for items whose hook reported no working directory.
+            var title: String
+            var items: [Item]
+            /// The most recent `at` among the items, used only to order the
+            /// headings. Nil when none of them carried one.
+            var newest: Date?
+            var id: String { title }
+        }
+
+        /// The items grouped by project, the way the phone's Inbox groups them.
+        ///
+        /// The ordering is the phone's, because a wrist that regrouped the same
+        /// events differently would be a second opinion rather than the same
+        /// board. Groups holding something waiting come first — which on the
+        /// watch is every group, so that rule is a no-op here; then comes the
+        /// unnamed group, last, on the phone's reasoning that a directory-less
+        /// item is a leftover rather than a project; then the rest by recency,
+        /// newest first. An item with no directory is still shown — it is a
+        /// waiting approval, not an empty cell — it simply arrives at the end.
+        ///
+        /// One rule is ours because the phone's comparator has no answer for it:
+        /// two named groups that are equally recent are ordered by name. The
+        /// phone falls back to comparing timestamps there, and identical ones
+        /// leave its order to dictionary iteration — which the watch list,
+        /// rebuilding from a dictionary on every push, would be free to
+        /// reshuffle between redraws.
+        var groups: [Group] {
+            var byProject: [String: [Item]] = [:]
+            var order: [String] = []
+            for item in items {
+                if byProject[item.project] == nil { order.append(item.project) }
+                byProject[item.project, default: []].append(item)
+            }
+            return order
+                .map { Group(title: $0, items: byProject[$0] ?? [], newest: Self.newest(byProject[$0] ?? [])) }
+                .sorted { left, right in
+                    // The phone's precedence, in its order: something waiting
+                    // first (every group here, so it is a no-op), then the
+                    // leftovers, then recency. The leftovers come *before*
+                    // recency: an item with no directory is a leftover whatever
+                    // its age, and a wrist that led with it would be leading
+                    // with the least actionable thing it has.
+                    if left.title.isEmpty != right.title.isEmpty { return !left.title.isEmpty }
+                    if (left.newest == nil) != (right.newest == nil) { return left.newest != nil }
+                    if left.newest != right.newest { return (left.newest ?? .distantPast) > (right.newest ?? .distantPast) }
+                    return left.title < right.title
+                }
+        }
+
+        private static func newest(_ items: [Item]) -> Date? {
+            items.compactMap(\.at).max()
+        }
+
+        /// Whether a header earns its row: only when the items came from more
+        /// than one place.
+        var isGrouped: Bool { groups.count > 1 }
     }
 
     struct Decision: Codable, Sendable {
@@ -125,6 +194,17 @@ enum WatchPayload {
         var peakPercent: Double? {
             entries.compactMap { $0.tightest?.percent }.max()
         }
+    }
+
+    /// The inbox tab's toolbar glyph: a filled tray only when something is
+    /// actually waiting.
+    ///
+    /// Not a cosmetic choice. The tray is the one mark that says "there is an
+    /// approval on your wrist", and a tray that is always full claims work
+    /// whenever the wearer glances — which is worse than showing nothing,
+    /// because it teaches them to ignore the one signal worth looking at.
+    static func inboxGlyph(hasItems: Bool) -> String {
+        hasItems ? "tray.full" : "tray"
     }
 
     static func encode<T: Encodable>(_ value: T) -> Data? {

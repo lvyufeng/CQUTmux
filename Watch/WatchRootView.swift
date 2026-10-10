@@ -69,10 +69,11 @@ struct WatchRootView: View {
                     .accessibilityLabel(tab == .inbox ? Tab.usage.label : Tab.inbox.label)
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    // Doubles as the tab indicator: the filled tray means the
-                    // inbox is showing, so the wearer can tell where they are
-                    // without a title taking a row.
-                    Image(systemName: tab.icon)
+                    // The tray's fill reports whether anything is waiting, not
+                    // which tab is showing. A permanently full tray would say
+                    // "there is work" every time the wearer glanced down, which
+                    // is the one signal on this screen worth trusting.
+                    Image(systemName: WatchPayload.inboxGlyph(hasItems: !WatchLink.shared.items.isEmpty))
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
                 }

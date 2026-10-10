@@ -23,17 +23,22 @@ read, the Chat View composer, six `cqutmux-hook` subcommands, the
 `missing` entry as genuinely absent, and rewrote the evidence on every entry
 that is still open.
 
-**Since then, one more closed** — "Read first" on a pending approval (see the
-progress list below), which moves one entry from `partial` to `closed`. An
-adversarial pass over that change also refuted two claims it first shipped
-with, both folded into the fix.
+**Since then, more closed** — "Read first" on a pending approval, and the Watch
+inbox's project grouping plus its toolbar fill (see the progress list below),
+which move entries from `partial` to `closed`. The "Read first" change also had
+an adversarial pass that refuted two claims it first shipped with, both folded
+into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 54 |
-| partial | 19 |
+| closed | 55 |
+| partial | 18 |
 | deliberate-divergence | 2 |
 | missing | 1 |
+
+(The machine-readable `counters` field in `parity-audit.json` had drifted three
+entries behind the per-entry statuses; this pass recomputes it from the entries
+themselves, so the table above and that field now agree.)
 
 **Read the numbers with care.** "Closed" means a counterpart exists and was
 traced end to end by a reader that was trying to refute it. It does not mean
@@ -106,7 +111,7 @@ These are ordinary features that simply have not been built:
 - Chat View: Markdown/code/image rendering, approval bar, mini-diffs. (Composer now exists as Chat Mode — see the progress list.)
 - Diff viewer: side-by-side layout, syntax highlighting, commit browsing,
   remembering the open file, terminal-font reuse.
-- Watch: grouping, usage complication, freshness (the context ring now feeds the data the complication would show).
+- Watch: freshness (the context ring now feeds the data the complication would show; grouping and the usage complication are done).
 - Voice: language picker, auto-send toggle.
 - Command-history key, keyboard show/hide key (the latter now added).
 - Windows host support (PowerShell/herdr.exe probe).
@@ -786,7 +791,33 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   sync carries both, and every chord and the tab row resolve through
   `prefix(for:)`.
 
-### The 19 that are still open, grouped by what is actually missing
+- **The Watch inbox groups by project.** The phone's board has grouped its
+  waiting rows by project since `InboxBoard.groups(in:)`, but the push flattened
+  them first: `WatchPayload.Snapshot.Item` carried only id/source/title/body/options,
+  so the wrist drew one flat list and the headings could not survive the wire. It
+  now carries `project` and `at`, and `Snapshot.groups` / `isGrouped` do the
+  grouping on the watch side. The ordering is the phone's, in the phone's
+  precedence: something waiting first (a no-op here - everything on the wrist is
+  waiting), then the unnamed group last, then recency newest-first. One rule is
+  deliberately not the phone's: two named groups tied on recency order by name,
+  because the phone's comparator falls back to comparing timestamps and leaves
+  equal ones to dictionary iteration - which a list rebuilt from a dictionary on
+  every push could reshuffle between redraws, so the same two projects could swap
+  places while the wearer watched.
+  Writing the check found a real bug in that comparator: the first version sorted
+  recency ahead of unnamed-last, and the "unnamed last even when its item is
+  newest" case failed. The fix was to the code, not the check.
+  The claim also named a toolbar icon whose fill mirrors whether events are
+  active. `WatchRootView`'s trailing glyph was a static `tab.icon` that reported
+  the *selected tab*, so the tray read `tray.full` on an empty inbox - a mark
+  that says "there is work" every time the wearer glances down, which is worse
+  than showing nothing. It is now `WatchPayload.inboxGlyph(hasItems:)`.
+  Pinned by `scripts/watch-inbox-check.sh` (26 checks) over the Foundation-only
+  payload the watch target compiles; the same clip runs as a SwiftUI
+  `ForEach(groups) { Section { ForEach(group.items) } }` in `ApprovalListView`,
+  with no header drawn when there is only one group.
+
+### The 18 that are still open, grouped by what is actually missing
 
 A second independent pass on 2026-10-10 rewrote each of these with file:line
 evidence. What is missing, in one line each:
@@ -824,8 +855,6 @@ evidence. What is missing, in one line each:
   not reach it, and there is no session lifecycle.
 - Usages renders per-source rows, but every source gets the same hard-coded
   Claude 5h/7d windows.
-- The Watch inbox is a flat list — the phone's project grouping is flattened
-  before the push, so it cannot survive.
 
 **Genuinely absent**
 - APNs push-to-start. No token registration on either side; the host's APNs

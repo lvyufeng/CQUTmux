@@ -151,6 +151,15 @@ final class AgentConnection {
                     // it travelled in. The watch clamps it too, so sending the
                     // raw body here would clamp braces and backslashes.
                     body: $0.promptText,
+                    // The same project name the phone's Inbox groups by, so
+                    // the wrist shows the same sections rather than regrouping
+                    // the same events its own way.
+                    project: $0.projectName ?? "",
+                    // Carried so the watch can order the headings newest-first
+                    // the way the phone's board does. A timestamp that failed
+                    // to parse is nil, which sorts its group last rather than
+                    // making it disappear.
+                    at: $0.date,
                     options: $0.options.map { .init(label: $0.label, value: $0.value) }
                 )
             }
