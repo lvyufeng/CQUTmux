@@ -9,6 +9,35 @@ Result: **76 confirmed gaps, 30 claims refuted.** The raw findings — claim,
 status, file:line evidence, and the verifier's reasoning — are in
 `docs/parity-audit.json`.
 
+## Status as of 2026-10-10
+
+Re-verified a second time, one agent per open gap, each told to judge the claim
+against the working tree rather than trust this file — because this file has
+been wrong before. Three earlier notes (the two-finger multiplexer sweeps,
+Herdr's separate prefix, the Zellij tab row) described features as missing when
+they were already implemented and the note had simply gone stale.
+
+That pass moved **6 more entries to closed** (the pinch-to-zoom option, OSC 52
+read, the Chat View composer, six `cqutmux-hook` subcommands, the
+`always-on-discovery` and `usage-collection` toggles), confirmed the single
+`missing` entry as genuinely absent, and rewrote the evidence on every entry
+that is still open.
+
+| Status | Count |
+|---|---|
+| closed | 51 |
+| partial | 22 |
+| deliberate-divergence | 2 |
+| missing | 1 |
+
+**Read the numbers with care.** "Closed" means a counterpart exists and was
+traced end to end by a reader that was trying to refute it. It does not mean
+every path is exercised on a real device: several entries carry an explicit
+limit in their `verification` field (a widget's placement on a face cannot be
+observed headlessly; the simulator drops App Group entitlements; the tab row's
+button press was verified by bytes on the wire rather than by a tap). Those
+limits are recorded per entry rather than averaged away here.
+
 This exists because the project's own PLAN.md had accumulated ✅ marks that a
 second reader did not agree with. Several features marked done are, on
 inspection, partly done or done differently, and that is worth recording
@@ -715,3 +744,53 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   one silently rebind every herdr chord. `Settings → Multiplexer` carries both,
   sync carries both, and every chord and the tab row resolve through
   `prefix(for:)`.
+
+### The 22 that are still open, grouped by what is actually missing
+
+A second independent pass on 2026-10-10 rewrote each of these with file:line
+evidence. What is missing, in one line each:
+
+**Half-built (the surrounding feature works, the named part does not)**
+- Approvals have Allow/Deny but no "read first": the pending prompt's body is
+  not rendered on the phone at all.
+- The session picker has no Recent tab; recents live in the Code page's Go To
+  Directory sheet.
+- The app resumes a backgrounded session on foreground, but nothing restores the
+  last host/session at cold launch.
+- Chat mode's composer takes typed text only — the mic and image buttons are in
+  the bar it replaces.
+- Multi-step shortcuts parse and send, but with no delay between steps.
+- `LANG` is set for the host; `LC_ALL` is set nowhere and no rc file is written.
+- The diff viewer does take the custom font (that half is done); `.ttc`/`.otc`
+  handling and the fallback are not.
+- Theme import is complete; the 570-theme `/themes` gallery it can import *from*
+  does not exist.
+- Inbox rows carry a needs-you/working/done column, not the five named
+  categories.
+- `cqutmux <dir>` exists; `moshi-hook context` has no counterpart.
+- Chat View renders message blocks; Markdown, code and image separation do not.
+- Chat View is the 4th segment of the Code pane, not a toolbar agent-icon entry,
+  and its header lacks the agent/model/session line and the diff/preview
+  controls.
+- Tool cards exist; mini diffs, task groups and expanded plan cards do not.
+- `cqutmux diff` prints the changed-file list and reroutes to the app's Diff
+  view; it opens no browser viewer (see the deliberate-divergence note for why).
+- Side-by-side diff and line-level modify highlights are absent.
+- The Browse tab walks the tree and opens files, but as plain monospaced text —
+  no syntax highlighting, no historical commits.
+- The port scan works; the listener metadata (name, PID, bind address, framework
+  label) is never probed.
+- The Live Activity shows a pending approval but is static — it cannot be
+  answered from the Lock Screen or the Island.
+- The activity is scoped to approvals; task-complete and tool-running events do
+  not reach it, and there is no session lifecycle.
+- Usages renders per-source rows, but every source gets the same hard-coded
+  Claude 5h/7d windows.
+- The attachment sheet is clipboard-only; Camera, Photo library and Files are not
+  offered.
+- The Watch inbox is a flat list — the phone's project grouping is flattened
+  before the push, so it cannot survive.
+
+**Genuinely absent**
+- APNs push-to-start. No token registration on either side; the host's APNs
+  sender emits alert pushes only. This is the one `missing` entry.
