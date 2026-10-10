@@ -38,8 +38,8 @@ first shipped with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 63 |
-| partial | 11 |
+| closed | 64 |
+| partial | 10 |
 | deliberate-divergence | 1 |
 | missing | 1 |
 
@@ -939,7 +939,9 @@ evidence. What is missing, in one line each:
 - Chat View is the 4th segment of the Code pane, not a toolbar agent-icon entry,
   and its header lacks the agent/model/session line and the diff/preview
   controls.
-- Tool cards exist; mini diffs, task groups and expanded plan cards do not.
+- Tool cards now draw the call's shape: an edit as a mini diff with a
+  `+n −m` collapsed row, a todo list as a checklist, a plan as rendered
+  Markdown. An unrecognised tool still falls back to the raw-JSON card.
 - Side-by-side diff and line-level modify highlights are absent.
 - The Browse tab walks the tree and opens files, but as plain monospaced text —
   no syntax highlighting, no historical commits.

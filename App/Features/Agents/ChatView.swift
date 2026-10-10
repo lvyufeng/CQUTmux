@@ -190,10 +190,10 @@ private struct MessageView: View {
             .tint(.secondary)
 
         case .tool:
-            ToolCard(summary: block.toolSummary, detail: block.input ?? "", isError: false)
+            ToolCallCard(summary: block.toolSummary, detail: block.input ?? "", isError: false, toolName: block.name)
 
         case .result:
-            ToolCard(summary: block.isError == true ? "Failed" : "Result",
+            ToolCallCard(summary: block.isError == true ? "Failed" : "Result",
                      detail: block.displayText, isError: block.isError == true)
 
         case .unknown:
@@ -226,11 +226,28 @@ private struct MessageView: View {
 
 /// A tool call or its output. Collapsed to one line by default — a session is
 /// mostly tool calls, and expanded they would be the whole view.
-private struct ToolCard: View {
+///
+/// Expanded, the card draws the call's *shape* when it has one: an edit as a
+/// mini diff, a task list as a checklist, a plan as Markdown. What shape a call
+/// is comes from `ToolShape`, and is decided there rather than here because
+/// every rule in it fails silently — an unrecognised shape still renders, as
+/// JSON, so nothing reports an error and the card merely looks like the wrong
+/// thing.
+private struct ToolCallCard: View {
+    /// The summary line. Doubles as the tool name for shape lookup, because the
+    /// transcript only carries the rendered summary, not the raw call.
     let summary: String
     let detail: String
     let isError: Bool
+    /// The tool's own name, when a caller has it. Without it the card cannot
+    /// classify and shows the detail as it did before — the safe fallback.
+    var toolName: String? = nil
     @State private var open = false
+
+    private var shape: ToolShape.Shape {
+        guard let toolName else { return .plain }
+        return ToolShape.shape(name: toolName, input: detail)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -238,9 +255,9 @@ private struct ToolCard: View {
                 open.toggle()
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: isError ? "exclamationmark.triangle" : "wrench.and.screwdriver")
+                    Image(systemName: symbol)
                         .font(.caption2)
-                    Text(summary)
+                    Text(collapsedSummary)
                         .font(.system(.caption, design: .monospaced))
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -253,13 +270,153 @@ private struct ToolCard: View {
             .buttonStyle(.plain)
 
             if open {
-                Text(detail.isEmpty ? "(empty)" : detail)
-                    .font(.system(.caption2, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+                expanded
             }
+        }
+    }
+
+    private var symbol: String {
+        if isError { return "exclamationmark.triangle" }
+        switch shape {
+        case .diff: return "plus.forwardslash.minus"
+        case .tasks: return "checklist"
+        case .plan: return "list.bullet.rectangle"
+        case .plain: return "wrench.and.screwdriver"
+        }
+    }
+
+    /// The collapsed label. A diff says how much changed and to what file — the
+    /// two things a reader scans for — rather than dumping the first line of
+    /// JSON.
+    private var collapsedSummary: String {
+        if case .diff(let diff) = shape {
+            let file = diff.path.map { ($0 as NSString).lastPathComponent } ?? "file"
+            return "\(file)  +\(diff.added) −\(diff.removed)"
+        }
+        return summary
+    }
+
+    @ViewBuilder
+    private var expanded: some View {
+        switch shape {
+        case .diff(let diff):
+            MiniDiffView(diff: diff)
+        case .tasks(let items):
+            TaskListView(items: items)
+        case .plan(let text):
+            // A plan is Markdown the agent wrote on purpose, so it is rendered
+            // through the same splitter the message prose uses rather than
+            // shown with its `#` characters intact.
+            InlineText(text: text)
+                .padding(8)
+                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+        case .plain:
+            Text(detail.isEmpty ? "(empty)" : detail)
+                .font(.system(.caption2, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+}
+
+/// A condensed edit: the changed lines, with unchanged context above and below.
+private struct MiniDiffView: View {
+    let diff: ToolShape.MiniDiff
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let path = diff.path {
+                Text(path)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 6)
+            }
+            // Lines are not wrapped: a wrapped diff line reads as two lines, and
+            // the reader cannot tell a long line from an added one.
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(diff.lines.enumerated()), id: \.offset) { _, line in
+                        HStack(spacing: 4) {
+                            Text(marker(line.kind))
+                                .foregroundStyle(color(line.kind))
+                            Text(line.text)
+                                .foregroundStyle(line.kind == .context ? .secondary : .primary)
+                        }
+                        .font(.system(.caption2, design: .monospaced))
+                        .textSelection(.enabled)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// The diff's own markers. `+`/`-` are what a reader looks for, so they are
+    /// the one thing not left to colour alone.
+    private func marker(_ kind: ToolShape.DiffLine.Kind) -> String {
+        switch kind {
+        case .added: "+"
+        case .removed: "-"
+        case .context: " "
+        }
+    }
+
+    private func color(_ kind: ToolShape.DiffLine.Kind) -> Color {
+        switch kind {
+        case .added: .green
+        case .removed: .red
+        case .context: .secondary
+        }
+    }
+}
+
+/// The agent's task list, as a checklist.
+private struct TaskListView: View {
+    let items: [ToolShape.TaskItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: symbol(item.status))
+                        .font(.caption2)
+                        .foregroundStyle(tint(item.status))
+                    Text(item.content)
+                        .font(.caption)
+                        .strikethrough(item.status == .completed)
+                        .foregroundStyle(item.status == .completed ? .secondary : .primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func symbol(_ status: ToolShape.TaskItem.Status) -> String {
+        switch status {
+        case .completed: "checkmark.circle.fill"
+        case .inProgress: "circle.dotted"
+        case .pending: "circle"
+        // Not a checkbox: the agent marked this in a way the app does not know,
+        // and drawing it as "not started" would misreport the agent's record.
+        case .unknown: "questionmark.circle"
+        }
+    }
+
+    private func tint(_ status: ToolShape.TaskItem.Status) -> Color {
+        switch status {
+        case .completed: .green
+        case .inProgress: .blue
+        case .pending: .secondary
+        case .unknown: .orange
         }
     }
 }
