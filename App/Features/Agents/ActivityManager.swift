@@ -36,6 +36,125 @@ final class ActivityManager {
 
     private var activity: Activity<AgentActivityAttributes>?
 
+    /// Reports a new or dead activity token to whoever holds the gateway
+    /// client.
+    ///
+    /// The manager does not talk to the host itself — it has no client — but
+    /// the host has to hold this token or a background push cannot start or
+    /// update the activity at all: an activity push is addressed to the token
+    /// the system minted with the activity, not to the device. `remove` is
+    /// passed so the same channel carries both ends of a token's life.
+    var onActivityToken: ((String, Bool) -> Void)?
+
+    /// The *other* token APNs needs, and the one the claim is named for.
+    ///
+    /// A per-activity token can only update or end an activity that already
+    /// exists. Starting one on a phone whose app is suspended needs a token
+    /// that belongs to the app rather than to any activity, which the system
+    /// hands over on its own stream. Registering the per-activity token and
+    /// calling that "push-to-start" would leave the actual cold start with
+    /// nothing to address — the very case the feature exists for.
+    var onPushToStartToken: ((String, Bool) -> Void)?
+
+    /// Cancelled on deinit; the stream never ends on its own.
+    private var pushToStartObserver: Task<Void, Never>?
+
+    /// Watches the push-to-start stream.
+    ///
+    /// `pushToStartTokenUpdates` yields the current token immediately when one
+    /// exists and again whenever it rotates, so this is both the initial
+    /// registration and the renewal in one — there is no separate "get the
+    /// token" call to keep in step with it.
+    private static let pushToStartKey = "cqutmux.activity.pushToStartToken"
+
+    func observePushToStart() {
+        guard pushToStartObserver == nil else { return }
+        pushToStartObserver = Task { [weak self] in
+            for await token in Activity<AgentActivityAttributes>.pushToStartTokenUpdates {
+                guard let self else { return }
+                // Hex, like every other token on this wire: the gateway's
+                // checks are on hex and the same bytes in another shape are
+                // refused as malformed.
+                let hex = token.map { String(format: "%02x", $0) }.joined()
+                self.reportPushToStart(hex)
+            }
+        }
+    }
+
+    /// Registers or removes the app-level token through the same switch the
+    /// per-activity one answers to.
+    ///
+    /// A push-to-start token left registered while the switch is off is the
+    /// same bug as a stale activity token, one level up: the host can begin an
+    /// activity on a device whose user turned them off.
+    private func reportPushToStart(_ hex: String) {
+        let defaults = UserDefaults.standard
+        let registered = defaults.string(forKey: Self.pushToStartKey)
+        switch AgentActivitySettings.activityTokenAction(token: hex, registered: registered) {
+        case .register(let token):
+            onPushToStartToken?(token, false)
+            defaults.set(token, forKey: Self.pushToStartKey)
+        case .unregister(let token):
+            onPushToStartToken?(token, true)
+            defaults.removeObject(forKey: Self.pushToStartKey)
+        case .none:
+            break
+        }
+    }
+
+    deinit { pushToStartObserver?.cancel() }
+
+    /// What the host was last told this device holds, so a re-registration of
+    /// the same token is skipped and the switch-off path knows what to remove.
+    /// Persisted rather than held in memory: the app is relaunched between the
+    /// activity that registered it and the one that ends it.
+    private static let registeredTokenKey = "cqutmux.activity.registeredToken"
+
+    /// Reports a new or dead activity token to whoever holds the gateway
+    /// client.
+    ///
+    /// The manager does not talk to the host itself — it has no client — but
+    /// the host has to hold this token or a background push cannot start or
+    /// update the activity at all: an activity push is addressed to the token
+    /// the system minted with the activity, not to the device.
+    ///
+    /// The decision lives in `AgentActivitySettings.activityTokenAction` so it
+    /// can be checked without ActivityKit: registering while the switch is off,
+    /// or leaving a token registered after it is turned off, are both quiet —
+    /// the host holds something this device will not show and the next push
+    /// starts an activity into nothing.
+    private func report(_ activity: Activity<AgentActivityAttributes>, ended: Bool = false) {
+        guard let data = activity.pushToken else { return }
+        // The token's hex is the only form the wire takes: the gateway's check
+        // is on hex, and the same bytes in any other shape are refused as
+        // malformed.
+        let hex = data.map { String(format: "%02x", $0) }.joined()
+        let defaults = UserDefaults.standard
+        let registered = defaults.string(forKey: Self.registeredTokenKey)
+
+        if ended {
+            guard registered == hex else { return }
+            onActivityToken?(hex, true)
+            defaults.removeObject(forKey: Self.registeredTokenKey)
+            return
+        }
+
+        let action = AgentActivitySettings.activityTokenAction(
+            token: hex,
+            registered: registered
+        )
+        switch action {
+        case .register(let token):
+            onActivityToken?(token, false)
+            defaults.set(token, forKey: Self.registeredTokenKey)
+        case .unregister(let token):
+            onActivityToken?(token, true)
+            defaults.removeObject(forKey: Self.registeredTokenKey)
+        case .none:
+            break
+        }
+    }
+
     @discardableResult
     func update(hostName: String, events: [AgentEvent]) -> Outcome {
         // The preference gates the whole feature, and reading it here rather
@@ -75,10 +194,12 @@ final class ActivityManager {
 
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return .unavailable }
         do {
-            activity = try Activity.request(
+            let activity = try Activity.request(
                 attributes: AgentActivityAttributes(hostName: hostName),
                 content: .init(state: state, staleDate: staleDate())
             )
+            self.activity = activity
+            report(activity)
             return .started
         } catch {
             return .failed(error.localizedDescription)
@@ -137,6 +258,11 @@ final class ActivityManager {
     func end() -> Outcome {
         guard let activity else { return .ended }
         self.activity = nil
+        // Reported before the activity goes: once it has ended the token is
+        // dead and can no longer be read off it, so the host would keep a
+        // token for an activity that no longer exists — and the next push
+        // would try to update nothing.
+        report(activity, ended: true)
         Task { await activity.end(nil, dismissalPolicy: .immediate) }
         return .ended
     }

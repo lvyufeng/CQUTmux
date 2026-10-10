@@ -263,6 +263,15 @@ function emit(event) {
       process.stderr.write(`[push] ${error.message || error}\n`)
     })
   }
+  // The Live Activity path, separate from the alert: an approval gets a banner
+  // *and* updates the activity, while a tool or session event only touches the
+  // activity. `running` is read from the registered activity tokens — the
+  // gateway knows an activity is up only because the app said so — and with
+  // none registered this is a no-op, which is exactly what it should be on a
+  // phone whose app has been force-quit.
+  push.notifyActivity(record, { running: push.activityTokens.size > 0 }).catch(error => {
+    process.stderr.write(`[push] ${error.message || error}\n`)
+  })
   return record
 }
 
@@ -1100,6 +1109,37 @@ const server = createServer(async (req, res) => {
     } catch { /* default to zooming in, which is what "pinch out" means */ }
     const result = await herdrZoomPane(args, zoomed)
     return json(res, result.ok ? 200 : 502, result)
+  }
+
+  // Activity tokens are per-activity and minted by the app when it starts
+  // one. Registering one is how the gateway learns an activity is up — which
+  // is what decides `start` from `update` — and unregistering is what turning
+  // the Live Activity off does, so the next push stops trying to start one.
+  if (req.method === 'POST' && url.pathname === '/push/activity-token') {
+    let body = {}
+    try {
+      body = JSON.parse((await readBody(req)).toString('utf8')) || {}
+    } catch {
+      return json(res, 400, { error: 'invalid JSON' })
+    }
+    const token = body.token || ''
+    // `kind` says which registration this is: `start` is the app-level
+    // push-to-start token, anything else the per-activity one. They take
+    // different pushes, so an app token landing in the per-activity set would
+    // be addressed with an update that has no activity to update.
+    const kind = body.kind === 'start' ? 'start' : 'activity'
+    const registered = body.remove
+      ? push.unregisterActivity(token)
+      : push.registerActivity(token, kind)
+    return json(res, 200, {
+      registered,
+      enabled: push.enabled,
+      // Both counts, because "one device is registered" is ambiguous the moment
+      // there are two kinds of token and the difference is how a cold start is
+      // reached or not.
+      activities: push.activityTokens.size,
+      starts: push.startTokens.size,
+    })
   }
 
   if (req.method === 'POST' && url.pathname === '/push/register') {

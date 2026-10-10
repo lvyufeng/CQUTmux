@@ -46,6 +46,44 @@ enum AgentActivitySettings {
         defaults.set(on, forKey: openInboxKey)
     }
 
+    /// What to do with the host's record of this device's activity.
+    ///
+    /// A Live Activity push cannot start an activity unless the host holds the
+    /// per-activity token the system minted when one began. That token is worth
+    /// registering only while the switch is on, so the two settings are read
+    /// together here rather than at the call site: turning the switch off has
+    /// to *unregister*, not merely stop registering, or the host keeps a token
+    /// for an activity this device will not show and the next push tries to
+    /// start one into nothing.
+    enum ActivityTokenAction: Equatable {
+        case register(String)
+        case unregister(String)
+        case none
+    }
+
+    static func activityTokenAction(
+        token: String?,
+        enabled: Bool = isEnabled(),
+        registered: String?,
+        in defaults: UserDefaults = .standard
+    ) -> ActivityTokenAction {
+        let turnedOff = !enabled
+        if turnedOff {
+            // Only the token the host was actually told about is unregistered.
+            // Sending an unregister for one it never saw is a request whose
+            // 200 means nothing happened, and it would also clear the app's
+            // memory of what the host holds.
+            guard let registered else { return .none }
+            return .unregister(registered)
+        }
+        guard let token, !token.isEmpty else { return .none }
+        // Already registered: re-sending the same token on every start is a
+        // no-op the host sees as a duplicate, and a token that changed is a new
+        // activity the host has to hear about.
+        if token == registered { return .none }
+        return .register(token)
+    }
+
     /// Clears both, which is what the test reset needs: a suite with no keys
     /// has to behave exactly like a fresh install.
     static func reset(in defaults: UserDefaults = .standard) {

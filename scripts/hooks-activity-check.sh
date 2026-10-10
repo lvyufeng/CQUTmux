@@ -18,6 +18,7 @@
 #    something waiting, and badging the Lock Screen for chatter is a false
 #    claim that the user is needed.
 # 4. The sample events the Settings test button shows parse with `ISODate`.
+# 5. What to do with the activity token when the switch is on or off.
 #    A locally built timestamp that parses to nil renders as a blank time, and
 #    the test would then be demonstrating a broken activity.
 # 5. Neither the app nor the widget swallows the one error this feature can
@@ -244,6 +245,42 @@ for event in sample {
 // And the ids are negative on purpose: a real event id comes from the gateway
 // and is positive, so a sample can never be mistaken for one the host sent.
 check(sample.allSatisfy { $0.id < 0 }, "a sample event used a real event id")
+
+// 5. What to do with the activity token. Registering while the switch is off,
+// or leaving a token registered after it is turned off, are both quiet: the
+// host holds a token for an activity this device will not show, and the next
+// push starts one into nothing.
+let tokenA = String(repeating: "a", count: 64)
+let tokenB = String(repeating: "b", count: 64)
+
+check(AgentActivitySettings.activityTokenAction(token: tokenA, enabled: true, registered: nil)
+        == .register(tokenA),
+      "a fresh token with the switch on is registered")
+// Re-sending the same token is a duplicate the host already has.
+check(AgentActivitySettings.activityTokenAction(token: tokenA, enabled: true, registered: tokenA)
+        == .none,
+      "an unchanged token is not re-registered")
+// A changed token is a new activity the host has to hear about.
+check(AgentActivitySettings.activityTokenAction(token: tokenB, enabled: true, registered: tokenA)
+        == .register(tokenB),
+      "a changed token is registered")
+// Off: unregister what the host holds. This is the case the switch exists for —
+// stopping the next one and leaving this one registered is a host that keeps
+// pushing into nothing.
+check(AgentActivitySettings.activityTokenAction(token: tokenA, enabled: false, registered: tokenA)
+        == .unregister(tokenA),
+      "turning the switch off unregisters the token the host holds")
+// Off with nothing registered is nothing to say, not an unregister for a token
+// the host never saw.
+check(AgentActivitySettings.activityTokenAction(token: tokenA, enabled: false, registered: nil)
+        == .none,
+      "turning off with nothing registered sends nothing")
+// An empty token is not a token.
+check(AgentActivitySettings.activityTokenAction(token: "", enabled: true, registered: nil) == .none,
+      "an empty token is not registered")
+check(AgentActivitySettings.activityTokenAction(token: nil, enabled: true, registered: tokenA)
+        == .none,
+      "a missing token does not unregister the one that is there")
 
 print("PASS: defaults, both toggles, and what the activity shows")
 SWIFT

@@ -150,6 +150,25 @@ struct InboxView: View {
                 // are dropped and the task above refetches against the new one.
                 context.invalidate()
             }
+            // The manager has no client, so the activity's push token is
+            // handed to the gateway from here — which is the only place that
+            // has both. Without this the host cannot start the activity while
+            // the app is backgrounded, which is the whole point of the
+            // push-to-start path; the in-app poll covers everything else.
+            .onAppear {
+                activity.onActivityToken = { token, remove in
+                    guard let client = connection.client else { return }
+                    Task { await client.registerActivityToken(token, remove: remove) }
+                }
+                // The push-to-start token is what lets the host *begin* an
+                // activity while the app is suspended; the per-activity one
+                // above can only update one that already exists.
+                activity.onPushToStartToken = { token, remove in
+                    guard let client = connection.client else { return }
+                    Task { await client.registerActivityToken(token, remove: remove, kind: "start") }
+                }
+                activity.observePushToStart()
+            }
             .onChange(of: client.events) { _, events in
                 let hostName = connection.host?.displayName ?? "Host"
                 activity.update(hostName: hostName, events: events)

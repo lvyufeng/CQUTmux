@@ -25,6 +25,8 @@ that is still open.
 
 **Later still** — browsing a commit's own tree from the History tab, and real syntax highlighting in the file viewer, which together close the "Browse tab walks the repo file tree at any past commit; files open as syntax-highlighted source" entry.
 
+**And the last `missing` entry is now `partial`** — the host builds and addresses Live Activity pushes (push-to-start to the app-level token, updates to the per-activity one) and the app obtains and uploads both tokens under the Live Activity switch. It stops short of `closed` on purpose: the `aps-environment` entitlement that would let a real device receive one needs a paid provisioning profile, so the payloads are checked but never delivered.
+
 **Since then, more closed** — "Read first" on a pending approval; the Watch
 inbox's project grouping plus its toolbar fill; the host-locale claim, both
 halves (LANG and LC_ALL cross, and `cqutmux locale` now writes the guarded
@@ -49,9 +51,9 @@ first shipped with, both folded into the fix.
 | Status | Count |
 |---|---|
 | closed | 72 |
-| partial | 2 |
+| partial | 3 |
 | deliberate-divergence | 1 |
-| missing | 1 |
+| missing | 0 |
 
 (The machine-readable `counters` field in `parity-audit.json` had drifted three
 entries behind the per-entry statuses; this pass recomputes it from the entries

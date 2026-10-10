@@ -238,6 +238,19 @@ final class HookClient {
         _ = try? await request("POST", "/push/register", body: body)
     }
 
+    /// Tells the host about this device's current Live Activity token, or that
+    /// one is gone.
+    ///
+    /// Separate from `registerPushToken`: that token is the *device*, and
+    /// survives everything; this one is per-activity and dies with it. A
+    /// failure is recorded rather than thrown for the same reason — the
+    /// in-app poll keeps the activity in step while the app runs, and a lost
+    /// registration only costs the background case.
+    func registerActivityToken(_ token: String, remove: Bool = false, kind: String = "activity") async {
+        let body = Data("{\"token\":\"\(token)\",\"remove\":\(remove),\"kind\":\"\(kind)\"}".utf8)
+        _ = try? await request("POST", "/push/activity-token", body: body)
+    }
+
     /// Pulls the next page immediately instead of waiting out the poll
     /// interval, for when a push has just told us something changed.
     func refreshNow() {
