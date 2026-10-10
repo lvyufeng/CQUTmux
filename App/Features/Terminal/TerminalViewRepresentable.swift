@@ -354,6 +354,28 @@ struct TerminalScreen: View {
                             mux: session.mux, session: session.name,
                             selector: session.window, pane: session.pane
                         )
+                        // herdr's pane is an opaque id that no prefix key can
+                        // name — `selectWindow` above can only focus its tab,
+                        // which is why the parser's `pane` would otherwise be
+                        // accepted and dropped. The socket API is the one thing
+                        // that names a pane, so the jump goes through the same
+                        // path Jump To uses. Nil client is not skip-and-forget:
+                        // the link named a pane and landing on the tab alone
+                        // would be a tap that quietly went somewhere else, so
+                        // it is shown like the other failed attachments.
+                        if session.mux == "herdr", let pane = session.pane, !pane.isEmpty {
+                            Task { @MainActor in
+                                guard let client = connection.client else {
+                                    notice("Open the gateway connection to jump to that pane")
+                                    return
+                                }
+                                do {
+                                    try await client.focusHerdrPane(pane)
+                                } catch {
+                                    notice("Could not jump to that pane")
+                                }
+                            }
+                        }
                     }
                 }
             }

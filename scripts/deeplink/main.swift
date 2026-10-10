@@ -10,8 +10,8 @@ import Foundation
 //
 // The cases below are grouped by the asymmetry the parser carries: tmux and
 // zellij address a window (and tmux a pane) by number and a typo must be
-// caught before it is typed at the shell, while herdr addresses a tab by an
-// opaque id and a number check there would reject every valid link.
+// caught before it is typed at the shell, while herdr addresses its tab and
+// pane by opaque ids and a number check there would reject every valid link.
 
 var failures = 0
 var checks = 0
@@ -81,7 +81,7 @@ check(target("cqutmux://tmux?session=work&pane=")
         == .session(mux: "tmux", name: "work", window: nil, pane: nil),
       "an empty tmux pane is treated as absent")
 
-// MARK: - herdr: the tab is an opaque id, the alias is read, the pane is not
+// MARK: - herdr: the tab and the pane are opaque ids, the alias is read
 
 // `tab` is herdr's spelling and rides in the `window` slot the rest of the app
 // already jumps with, so no second jump mechanism is needed.
@@ -104,11 +104,22 @@ check(target("cqutmux://tmux?session=work&tab=w1:t2")
         == .session(mux: "tmux", name: "work", window: nil, pane: nil),
       "tab is ignored on a tmux link")
 
-// herdr addresses neither panes nor numbered windows, so a pane is dropped
-// rather than misread as something the mux cannot jump to.
-check(target("cqutmux://herdr?workspace=w1&pane=2")
+// herdr's pane is an opaque `pane_id` from its snapshot, the same kind of value
+// as its tab — so it rides in the `pane` slot the terminal already jumps with,
+// rather than being dropped. The value is checked nowhere, because a number
+// check here would reject every valid id the mux hands out.
+check(target("cqutmux://herdr?workspace=w1&pane=w1:abc")
+        == .session(mux: "herdr", name: "w1", window: nil, pane: "w1:abc"),
+      "a herdr link reads its pane into the pane slot")
+check(target("cqutmux://herdr?workspace=w1&tab=w1:t2&pane=bolt")
+        == .session(mux: "herdr", name: "w1", window: "w1:t2", pane: "bolt"),
+      "a herdr link carries its tab and opaque pane together")
+
+// A blank value is still absent, so `pane=` on a herdr link attaches rather
+// than carrying an empty id.
+check(target("cqutmux://herdr?workspace=w1&pane=")
         == .session(mux: "herdr", name: "w1", window: nil, pane: nil),
-      "pane is ignored on a herdr link")
+      "an empty herdr pane is treated as absent")
 
 // MARK: - zellij: behaviour unchanged, it addresses neither
 
@@ -131,6 +142,19 @@ if let url = URL(string: "cqutmux://tmux?session=work&window=1&pane=2"),
           "the session accessor surfaces the pane to the caller")
 } else {
     check(false, "the session accessor surfaces the pane to the caller")
+}
+
+// The same accessor is what carries an opaque herdr pane, so it is checked
+// there too: a pane that reaches the target but not the accessor is still a
+// link that opens the wrong pane.
+if let url = URL(string: "cqutmux://herdr?workspace=w1&tab=w1:t2&pane=w1:abc"),
+   case .success(let link) = DeepLink.parse(url),
+   let session = link.session {
+    check(session.mux == "herdr" && session.name == "w1"
+            && session.window == "w1:t2" && session.pane == "w1:abc",
+          "the session accessor surfaces an opaque herdr pane")
+} else {
+    check(false, "the session accessor surfaces an opaque herdr pane")
 }
 
 if failures > 0 {

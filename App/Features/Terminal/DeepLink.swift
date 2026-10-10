@@ -8,7 +8,7 @@ import Foundation
 ///
 ///   cqutmux://tmux?session=<name>[&window=<n>][&pane=<n>]
 ///   cqutmux://zellij?session=<name>
-///   cqutmux://herdr?workspace=<id>[&session=<name>][&tab=<w1:t2>]
+///   cqutmux://herdr?workspace=<id>[&session=<name>][&tab=<w1:t2>][&pane=<id>]
 ///   cqutmux://host?host=<name-or-hostname>
 ///   cqutmux://theme
 ///   cqutmux://inbox
@@ -19,12 +19,13 @@ import Foundation
 /// common case here is one host.
 struct DeepLink: Equatable {
     enum Target: Equatable {
-        /// Attach to a multiplexer session, optionally landing on a window and,
-        /// for tmux, a pane inside it.
+        /// Attach to a multiplexer session, optionally landing on a window and a
+        /// pane inside it.
         ///
         /// `window` and `pane` are strings because not every mux addresses them
-        /// by number — herdr uses a tab id like `w1:t2`, and the same value
-        /// rides in `window` whether the link spelled it `window` or `tab`.
+        /// by number — herdr uses a tab id like `w1:t2` and an opaque
+        /// `pane_id`, while the same value rides in `window` whether the link
+        /// spelled it `window` or `tab`.
         case session(mux: String, name: String, window: String?, pane: String?)
         case host(String)
         /// Open the theme import screen. Moshi's `moshi://theme` exists so a
@@ -104,13 +105,16 @@ struct DeepLink: Equatable {
             if route != "herdr", let window, Int(window) == nil {
                 return .failure(.badWindow(window))
             }
-            // `pane` is tmux-only and, like `window` there, a number: tmux
-            // addresses a pane by its index, so a typo is caught at the parse
-            // rather than typed at the shell. zellij addresses neither a window
-            // nor a pane, so it takes no `pane` — the asymmetry is the muxes'
-            // own, not ours to paper over.
-            let pane = route == "tmux" ? value("pane") : nil
-            if let pane, Int(pane) == nil {
+            // `pane` is read wherever the mux can address one, and its shape is
+            // the mux's own: tmux addresses a pane by its index, so a typo is
+            // caught at the parse rather than typed at the shell; herdr
+            // addresses a pane by an opaque `pane_id` from its snapshot, the
+            // same kind of value as its tab, so a number check there would
+            // reject every valid link. zellij addresses neither a window nor a
+            // pane, so it takes no `pane` — the asymmetry is the muxes' own,
+            // not ours to paper over.
+            let pane = (route == "tmux" || route == "herdr") ? value("pane") : nil
+            if route == "tmux", let pane, Int(pane) == nil {
                 return .failure(.badPane(pane))
             }
             return .success(DeepLink(target: .session(mux: route, name: name, window: window, pane: pane)))
