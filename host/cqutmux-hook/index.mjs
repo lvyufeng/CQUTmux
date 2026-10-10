@@ -1396,6 +1396,7 @@ const SETTABLE = [
 const COMMANDS = new Set([
   'pair', 'install', 'uninstall', 'serve', 'status', 'doctor', 'logs', 'diff',
   'set', 'usage', 'version', 'update', 'help', 'context', 'locale', 'service',
+  'unpair',
 ])
 
 function usage() {
@@ -1421,6 +1422,8 @@ function usage() {
   cqutmux update         re-wire the hooks and report the version
   cqutmux usage          agent rate-limit windows, as the app shows them
   cqutmux pair           set up a phone: print a link and its QR code
+  cqutmux unpair         revoke that phone's key from authorized_keys
+  cqutmux unpair --delete-key  also delete the key pair itself
   cqutmux version        print the version
   cqutmux help           this text
 
@@ -1500,6 +1503,8 @@ async function runCommand(name, argv) {
       return
     case 'pair':
       return pair()
+    case 'unpair':
+      return unpair({ deleteKey: argv.includes('--delete-key') })
     case 'status':
       return status(argv.includes('--json'))
     case 'doctor':
@@ -2141,6 +2146,77 @@ if (existsSync(keyPath)) {
   process.stdout.write('it is not encrypted, and anyone who reads it can log in as you.\n')
   if (!args.token) {
     process.stdout.write('No gateway token is set, so this link carries none.\n')
+  }
+}
+
+/// `cqutmux unpair` — revoke the phone's access to this host.
+///
+/// The pairing is one line in `authorized_keys`; unpairing removes exactly that
+/// line and nothing else. Everything else in the file is left byte for byte,
+/// because `authorized_keys` is the user's, shared with every other tool on the
+/// machine, and a rewrite that normalises whitespace or drops a trailing blank
+/// line is an edit to someone else's file that they did not ask for.
+///
+/// The key pair is deliberately kept. Removing the `authorized_keys` line is
+/// what revokes access — a private key with no matching entry authenticates
+/// nothing — and deleting a user's key file as a side effect of "unpair" would
+/// be destroying the one thing here that cannot be regenerated into the same
+/// value. `--delete-key` does it, but only when asked.
+async function unpair({ deleteKey = false } = {}) {
+  const keyPath = pairKeyPath()
+  const pubPath = `${keyPath}.pub`
+  const authorized = join(homedir(), '.ssh', 'authorized_keys')
+
+  // Match on the key blob rather than the whole line: the comment is ours
+  // (`cqutmux@<host>`) but a renamed host would change it, and the blob is the
+  // part that actually grants access. The comment is the fallback for when the
+  // `.pub` is gone but a line from an earlier pairing is not.
+  const blobs = new Set()
+  try {
+    for (const line of (await readFile(pubPath, 'utf8')).split('\n')) {
+      const blob = line.trim().split(/\s+/)[1]
+      if (blob) blobs.add(blob)
+    }
+  } catch { /* no .pub: fall back to the comment match below */ }
+  const isOurs = line => {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) return false
+    const parts = trimmed.split(/\s+/)
+    if (parts[1] && blobs.has(parts[1])) return true
+    return (parts[2] || '').startsWith('cqutmux@')
+  }
+
+  let existing
+  try {
+    existing = await readFile(authorized, 'utf8')
+  } catch {
+    process.stdout.write(`No ${authorized}, so this host was never paired.\n`)
+    return
+  }
+
+  const lines = existing.split('\n')
+  const kept = lines.filter(line => !isOurs(line))
+  const removed = lines.length - kept.length
+
+  if (removed === 0) {
+    process.stdout.write(`Nothing to revoke: no cqutmux key in ${authorized}.\n`)
+  } else {
+    // Written only when something changed, so an `unpair` on an already
+    // unpaired host does not touch the file's mtime and its backup.
+    await writeFile(`${authorized}.cqutmux-backup`, existing, 'utf8').catch(() => {})
+    await writeFile(authorized, kept.join('\n'), 'utf8')
+    await chmod(authorized, 0o600)
+    process.stdout.write(`Revoked ${removed} key line(s) from ${authorized}.\n`)
+  }
+
+  if (deleteKey) {
+    await rm(keyPath, { force: true })
+    await rm(pubPath, { force: true })
+    process.stdout.write(`Deleted ${keyPath} and its .pub.\n`)
+  } else if (existsSync(keyPath)) {
+    process.stdout.write(
+      `The key pair ${keyPath} is kept: with its line gone it authenticates\n` +
+      'nothing, and re-pairing reuses it. Remove it with `--delete-key`.\n')
   }
 }
 
