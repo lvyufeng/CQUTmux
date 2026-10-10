@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import OSLog
 import CQUTTransport
 
 /// Settings → Support: what to send with a bug report, and where to send it.
@@ -18,9 +19,18 @@ import CQUTTransport
 /// The report carries the two things a bug report actually needs that a fact
 /// list cannot supply: the headings a report has to fill in (Subject, Steps,
 /// Expected, Actual) and the tail of the current agent session. Both are shown
-/// in full before anything is copied, and the section that has no source says
-/// so rather than going quietly missing — this build keeps no app log, so the
-/// diagnostics section states that instead of inventing a log to attach.
+/// in full before anything is copied, and a section with no source says so
+/// rather than going quietly missing.
+///
+/// The diagnostics section attaches the process's recent unified-log entries.
+/// There is still no `Logger` and no in-memory buffer in this build, but it
+/// does not need either to carry a real log: `OSLogStore.local()` reads back
+/// what the system already recorded for this process — `print`, `NSLog` and
+/// `os_log` output alike — so the report can show the last few minutes of it
+/// without inventing a logging subsystem. The read is bounded (a fixed entry
+/// count and time window) and wrapped so a failure to read leaves the report
+/// intact rather than empty: when the store returns nothing or throws, the
+/// section says that, and why.
 struct SupportView: View {
     /// Where a report goes. A URL we can actually be held to: an address we
     /// invented would look more finished and be worse, because a bug report
@@ -188,13 +198,7 @@ struct SupportView: View {
 
         lines.append("")
         lines.append("## Diagnostics")
-        // There is no `Logger` and no in-memory buffer anywhere in this build,
-        // and this screen is not going to grow one just to have something to
-        // attach. Saying so is the honest alternative to a blank heading, which
-        // would read as a log that came out empty, and to naming a file this
-        // screen never writes.
-        lines.append("No app log: this build writes no per-session log file and keeps "
-                     + "no in-memory log buffer, so there is nothing to attach here.")
+        lines.append(systemLog)
 
         lines.append("")
         lines.append("## Agent session")
@@ -213,6 +217,79 @@ struct SupportView: View {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    /// The last minute's unified-log entries for this process, as report lines.
+    ///
+    /// The app has no `Logger` and no in-memory buffer, but iOS's unified log
+    /// already holds this process's own `print`, `NSLog` and `os_log` output,
+    /// and `OSLogStore` can read it back. That is what makes a real log
+    /// attachable without growing a logging subsystem: the entries below are
+    /// what the system recorded, not something this screen made up. `print`
+    /// goes to stdout and is not itself collected, so in practice these are the
+    /// framework and `NSLog`/`os_log` lines around a failure.
+    ///
+    /// `OSLogStore.local()` is macOS-only — on iOS the store is asked for the
+    /// current process's scope, which is the process's own entries without
+    /// system-wide access the sandbox would refuse. The read is deliberately
+    /// cheap and cannot break the report. It is capped at `logEntryLimit`
+    /// entries over the last `logWindow` seconds. Any throw — building the
+    /// store throws when there is no store to read — or an empty result returns
+    /// the honest line instead, so the report never implies a log it does not
+    /// have.
+    @MainActor private var systemLog: String {
+        do {
+            let store = try OSLogStore(scope: .currentProcessIdentifier)
+            let cutoff = Date().addingTimeInterval(-Self.logWindow)
+            // Reverse from the newest entry, stopping at the cutoff or the
+            // entry cap — so a busy window keeps the newest lines, and both
+            // bounds hold without reading the whole store.
+            var lines: [String] = []
+            for case let entry as OSLogEntryLog in try store.getEntries(with: .reverse, at: nil, matching: nil) {
+                if entry.date < cutoff { break }
+                let stamp = Self.logStamp.string(from: entry.date)
+                lines.append("\(stamp) \(Self.levelName(entry.level)) \(entry.composedMessage)")
+                if lines.count >= Self.logEntryLimit { break }
+            }
+            guard !lines.isEmpty else {
+                return "No unified-log entries for this process in the last "
+                     + "\((Int(Self.logWindow) / 60)) minute(s)."
+            }
+            // Newest first from the store, oldest first for a reader.
+            lines.reverse()
+            return "Last \(lines.count) unified-log entr\(lines.count == 1 ? "y" : "ies") "
+                 + "(process \(ProcessInfo.processInfo.processName)):\n"
+                 + lines.joined(separator: "\n")
+        } catch {
+            return "No app log read: \(error.localizedDescription) "
+                 + "The unified log was not accessible from this process."
+        }
+    }
+
+    /// How many unified-log entries the report may carry.
+    private static let logEntryLimit = 40
+
+    /// How far back to look. Bounded so the Support screen does not stall, and
+    /// short enough that the lines are about the failure at hand rather than
+    /// the whole run.
+    private static let logWindow: TimeInterval = 60
+
+    private static let logStamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
+    /// A short name for an `OSLogEntryLog.Level`.
+    private static func levelName(_ level: OSLogEntryLog.Level) -> String {
+        switch level {
+        case .debug: "debug"
+        case .info: "info"
+        case .notice: "notice"
+        case .error: "error"
+        case .fault: "fault"
+        default: "log"
+        }
     }
 
     /// Reads the newest readable session for the host, if there is one.
