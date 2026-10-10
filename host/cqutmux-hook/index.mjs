@@ -47,6 +47,16 @@ import {
 } from './locale.mjs'
 import { terminal as qrTerminal } from './qr.mjs'
 import { sendGesture, stopAllSessions, touchHelperAvailable } from './simtouch.mjs'
+import {
+  MUX_NAMES,
+  probeScript,
+  parseProbe,
+  versionToken,
+  diagnose,
+  formatReport,
+  isProblem,
+} from './doctor-mux.mjs'
+import { resolveCommand } from './platform.mjs'
 
 const run = promisify(execFile)
 
@@ -567,9 +577,65 @@ async function bootedSimulators() {
   return { available: true, simulators }
 }
 
-// Enumerates tmux sessions, their windows, and whether a pane is attached, so
-// the app can offer a session picker and jump-to-window without a shell round
-// trip. Uses a stable tab-separated format rather than tmux's default grid.
+// What the *picker* would resolve, versus what the daemon resolves, per
+// multiplexer. This is the diagnosis `doctor` prints.
+//
+// The preflight is one `sh -lc` script because that is what Moshi's picker
+// sends over SSH, and reproducing the invocation — not just the question — is
+// the point: an `sh -lc` with the probe PATH prepended answers differently from
+// a bare `command -v` under the daemon's environment, and that gap is the bug.
+async function muxDiagnoses() {
+  let probe = { copies: {}, versions: {} }
+  try {
+    const { stdout } = await run('sh', ['-lc', probeScript()], { timeout: 8000, env: process.env })
+    probe = parseProbe(stdout)
+  } catch {
+    // A preflight that will not run is itself the finding, but it is not one we
+    // can name a binary from — fall through with nothing resolved so each
+    // multiplexer reports `absent` rather than the command aborting.
+  }
+
+  const diagnoses = []
+  for (const name of MUX_NAMES) {
+    const copies = probe.copies[name] ?? []
+    const version = versionToken(probe.versions[name])
+    let daemonPath = null
+    let serverVersion = null
+    let serverUnknown = false
+
+    if (copies.length > 0) {
+      try {
+        const probeFor = resolveCommand(name)
+        const { stdout } = await run(probeFor.shell, probeFor.argv, { timeout: 5000, env: process.env })
+        daemonPath = stdout.trim().split('\n')[0].trim() || null
+      } catch {
+        daemonPath = null
+      }
+    }
+
+    // Herdr talks over a socket rather than a local server, so there is no
+    // client/server version split to detect — only the resolution gap above.
+    if (name === 'tmux' && daemonPath) {
+      try {
+        const { stdout } = await run('tmux', ['list-sessions', '-F', '#{version}'], { timeout: 5000 })
+        serverVersion = versionToken(stdout.split('\n').find(Boolean))
+      } catch (error) {
+        // A non-zero exit means no server is listening, which is normal and
+        // leaves nothing to compare. Any *other* failure — the probe itself
+        // being unreachable — is a server we know exists and could not read.
+        const message = String(error.stderr || error.message || '')
+        if (!/no server running|no sessions|error connecting/i.test(message)) serverUnknown = true
+      }
+    }
+
+    diagnoses.push(diagnose({ name, copies, version, daemonPath, serverVersion, serverUnknown }))
+  }
+  return diagnoses
+}
+
+/// Enumerates tmux sessions, their windows, and whether a pane is attached, so
+/// the app can offer a session picker and jump-to-window without a shell round
+/// trip. Uses a stable tab-separated format rather than tmux's default grid.
 async function tmuxSessions() {
   const fmt = [
     '#{session_name}',
@@ -2122,6 +2188,25 @@ async function doctor(repair = false) {
     check(false, 'config', `${config.path} has no [gateway] settings this build understands`)
   } else {
     check(true, 'config', 'defaults (no config file)')
+  }
+
+  // The multiplexers get their own section rather than a `check()` line each,
+  // because what matters is not "is tmux installed" — the app works fine
+  // without one — but whether the *picker* and the *daemon* resolve the same
+  // binary. That disagreement is silent in the app (the session tab just never
+  // appears) and cannot be seen from either side alone, so it is the one thing
+  // here that is worth the extra output.
+  let muxProblems = 0
+  try {
+    const diagnoses = await muxDiagnoses()
+    for (const line of formatReport(diagnoses)) process.stdout.write(line + '\n')
+    muxProblems = diagnoses.filter(isProblem).length
+    failures += muxProblems
+  } catch (error) {
+    // A failed probe is reported as its own line rather than allowed to abort
+    // the whole of doctor: the checks above already passed and are the ones a
+    // user came for.
+    process.stdout.write(`\nMultiplexers\n  warn   could not probe: ${String(error.message || error)}\n`)
   }
 
   // `--yes` repairs what a repair can honestly fix. It is deliberately narrow:
