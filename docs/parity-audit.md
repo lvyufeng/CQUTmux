@@ -23,6 +23,8 @@ read, the Chat View composer, six `cqutmux-hook` subcommands, the
 `missing` entry as genuinely absent, and rewrote the evidence on every entry
 that is still open.
 
+**Later still** — browsing a commit's own tree from the History tab, and real syntax highlighting in the file viewer, which together close the "Browse tab walks the repo file tree at any past commit; files open as syntax-highlighted source" entry.
+
 **Since then, more closed** — "Read first" on a pending approval; the Watch
 inbox's project grouping plus its toolbar fill; the host-locale claim, both
 halves (LANG and LC_ALL cross, and `cqutmux locale` now writes the guarded
@@ -46,8 +48,8 @@ first shipped with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 71 |
-| partial | 3 |
+| closed | 72 |
+| partial | 2 |
 | deliberate-divergence | 1 |
 | missing | 1 |
 

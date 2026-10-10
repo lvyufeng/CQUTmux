@@ -567,14 +567,56 @@ struct FileView: View {
 
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
-            Text(file.content)
-                .font(Font(font))
+            Text(SyntaxPalette.attributed(file.content, path: file.path, font: font))
                 .lineSpacing(spacing)
                 .padding()
                 .textSelection(.enabled)
         }
         .navigationTitle((file.path as NSString).lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Source with its colours applied.
+///
+/// The bridge from the lexer's `Kind` to a SwiftUI colour, kept here rather than
+/// in `SyntaxHighlighter` so that file stays Foundation-only and its rules can be
+/// checked without a simulator.
+///
+/// The colours are fixed rather than taken from the terminal theme. A syntax
+/// palette has to hold six kinds apart from each other *and* from the
+/// background; the theme's ANSI colours are chosen for text on a terminal
+/// background, where a keyword and a comment that differ only in hue are still
+/// both readable — here they are the distinction that carries the meaning. These
+/// stay legible on both a light and a dark background, which the viewer does not
+/// choose.
+enum SyntaxPalette {
+    static func color(_ kind: SyntaxHighlighter.Kind) -> Color {
+        switch kind {
+        case .plain: return .primary
+        case .keyword: return Color(red: 0.61, green: 0.20, blue: 0.55)
+        case .type: return Color(red: 0.16, green: 0.40, blue: 0.62)
+        case .string: return Color(red: 0.72, green: 0.20, blue: 0.16)
+        case .comment: return Color(red: 0.36, green: 0.44, blue: 0.36)
+        case .number: return Color(red: 0.16, green: 0.44, blue: 0.44)
+        case .directive: return Color(red: 0.55, green: 0.35, blue: 0.10)
+        }
+    }
+
+    /// One run per token, each with its colour and the viewer's font.
+    ///
+    /// Line spacing is *not* set here: it is a `Text` modifier the view applies,
+    /// because a paragraph style carried in the attributed string does not
+    /// survive the view's layout the way a modifier does.
+    static func attributed(_ source: String, path: String, font: UIFont) -> AttributedString {
+        var result = AttributedString()
+        for token in SyntaxHighlighter.tokens(source, path: path) {
+            var piece = AttributedString(token.text)
+            piece.foregroundColor = color(token.kind)
+            piece.font = Font(font)
+            result.append(piece)
+        }
+        return result
     }
 }
 
