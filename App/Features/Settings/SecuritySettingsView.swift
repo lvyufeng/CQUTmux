@@ -292,10 +292,19 @@ struct NotificationSettingsView: View {
             }
 
             Section {
-                Button("Send a test notification") { sendTest() }
+                Button("Send a test notification") { sendTest(withImage: false) }
+                Button("Send a test image notification") { sendTest(withImage: true) }
             } footer: {
                 if let testResult {
                     Text(testResult)
+                } else if isSimulator {
+                    // Not a disabled button — a disabled button with no reason
+                    // is worse than one that can be tried and reports what it
+                    // saw. The Simulator has no push service to observe, so the
+                    // note says that up front and the tap still reports success.
+                    Text("The Simulator cannot show notifications, so a banner will not "
+                         + "appear here — this test is meant for a device. The tap still "
+                         + "posts one through the real handler.")
                 } else {
                     Text("Arrives as a local notification through the same handler a "
                          + "remote one takes, so a banner appearing means the app's side "
@@ -304,9 +313,13 @@ struct NotificationSettingsView: View {
             }
 
             Section {
-                LabeledContent("Remote push", value: push.deviceToken == nil
-                               ? "Not registered"
-                               : "Registered")
+                if let token = push.deviceToken {
+                    Text(token)
+                        .font(.system(.caption2, design: .monospaced))
+                        .textSelection(.enabled)
+                } else {
+                    LabeledContent("Remote push", value: "Not registered")
+                }
             } footer: {
                 Text("Remote delivery needs a hosted push service — APNs will not accept a "
                      + "provider JWT without a paid developer account. The gateway holds the "
@@ -330,10 +343,21 @@ struct NotificationSettingsView: View {
         }
     }
 
-    private func sendTest() {
+    /// The Simulator has no push service, so a posted notification is accepted
+    /// and then never shown. The test stays enabled — a disabled button would
+    /// hide the fact — and this drives the note that explains the silence.
+    private var isSimulator: Bool {
+        #if targetEnvironment(simulator)
+        true
+        #else
+        false
+        #endif
+    }
+
+    private func sendTest(withImage: Bool) {
         Task {
             do {
-                try await ApprovalNotifier.sendTest()
+                try await ApprovalNotifier.sendTest(withImage: withImage)
                 testResult = "Sent. If no banner appears, notifications are off for the app."
             } catch {
                 testResult = "Could not send: \(error.localizedDescription)"
