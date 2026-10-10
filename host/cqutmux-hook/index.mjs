@@ -36,6 +36,7 @@ import { commandHistory } from './history.mjs'
 import { windowsForSource } from './usage.mjs'
 import { parseLsof, parseSs, describe } from './listeners.mjs'
 import { renderDiffHtml } from './diffpage.mjs'
+import { listAtRevision, readAtRevision } from './revision.mjs'
 import { detectContext, sessionIndexFromTmux, contextPayload } from './context.mjs'
 import {
   apply as applyLocale,
@@ -784,6 +785,50 @@ const server = createServer(async (req, res) => {
       return json(res, 200, await gitDiff(dir, ['--', file]))
     }
     return json(res, 200, await gitDiff(dir))
+  }
+
+  // The repository at a past commit: the Changes tab reads the working tree,
+  // and these two let the History tab open the same repository as it was.
+  //
+  // `path` locates the repository (resolved like every other route); `rev` is a
+  // commit id and `dir`/`file` are paths *inside* that commit, which is why they
+  // do not go through `safePath` — there is no directory on disk to resolve
+  // them against, and `git` is given `rev:path` as a single argument. The
+  // module refuses a path that could be read as an option or a revision
+  // separator instead of letting git answer a question about another tree.
+  //
+  // Kept as its own pair rather than a `rev` on `/files` and `/file`: those two
+  // take a path that *is* the answer, and overloading them would make a
+  // revision-less call and a revision call differ only by a parameter whose
+  // absence is indistinguishable from an empty string.
+  if (req.method === 'GET' && url.pathname === '/tree') {
+    const dir = safePath(url.searchParams.get('path') || '')
+    if (!dir) return json(res, 403, { error: 'path outside root' })
+    const rev = url.searchParams.get('rev') || ''
+    const sub = url.searchParams.get('dir') || ''
+    const result = await listAtRevision(dir, rev, sub)
+    // 404 rather than 400: an unknown revision is the same shape of answer as
+    // an unknown file, and the app shows one "not found" for the pair.
+    return result.ok
+      ? json(res, 200, { path: relative(args.root, dir), rev, dir: sub, entries: result.entries })
+      : json(res, 404, { error: result.error })
+  }
+
+  if (req.method === 'GET' && url.pathname === '/blob') {
+    const dir = safePath(url.searchParams.get('path') || '')
+    if (!dir) return json(res, 403, { error: 'path outside root' })
+    const rev = url.searchParams.get('rev') || ''
+    const file = url.searchParams.get('file') || ''
+    const result = await readAtRevision(dir, rev, file, MAX_FILE_BYTES)
+    return result.ok
+      ? json(res, 200, {
+          path: relative(args.root, dir),
+          rev,
+          file,
+          size: Buffer.byteLength(result.content),
+          content: result.content,
+        })
+      : json(res, 404, { error: result.error })
   }
 
   if (req.method === 'GET' && url.pathname === '/log') {

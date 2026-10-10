@@ -315,6 +315,41 @@ final class HookClient {
         return try JSONDecoder().decode(DiffResult.self, from: payload.body)
     }
 
+    /// The repository at a past commit: one directory of that commit's tree.
+    ///
+    /// A separate route from `listFiles` because `dir` is a path *inside* the
+    /// commit, not a directory on disk, and the two would otherwise be the same
+    /// call with a parameter whose absence means "the working tree" — a
+    /// distinction the URL cannot express.
+    func tree(path: String, rev: String, dir: String = "") async throws -> RevisionListing {
+        let query = query(["path": path, "rev": rev, "dir": dir])
+        let payload = try await request("GET", "/tree?\(query)")
+        return try JSONDecoder().decode(RevisionListing.self, from: payload.body)
+    }
+
+    /// One file's content at a past commit.
+    func blob(path: String, rev: String, file: String) async throws -> RevisionFile {
+        let query = query(["path": path, "rev": rev, "file": file])
+        let payload = try await request("GET", "/blob?\(query)")
+        return try JSONDecoder().decode(RevisionFile.self, from: payload.body)
+    }
+
+    /// Percent-encodes a set of query values, skipping empty ones.
+    ///
+    /// The empty case matters for `dir`: at the root it is the empty string,
+    /// and sending `dir=` is the same request as omitting it, but sending
+    /// `dir=%2F` — the naive encoding of a slash — is a path the host refuses.
+    private func query(_ values: [String: String]) -> String {
+        values
+            .filter { !$0.value.isEmpty }
+            .sorted { $0.key < $1.key }
+            .map { key, value in
+                let encoded = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+                return "\(key)=\(encoded)"
+            }
+            .joined(separator: "&")
+    }
+
     func gitLog(path: String, limit: Int = 40) async throws -> LogResult {
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
         let payload = try await request("GET", "/log?path=\(encoded)&limit=\(limit)")

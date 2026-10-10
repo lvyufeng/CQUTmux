@@ -18,6 +18,9 @@ struct CodePanelView: View {
     @State private var openFile: FileContents?
     /// The changed file whose diff is open, if any.
     @State private var openDiff: DiffResult.File?
+    /// The commit whose tree is open, if any. The History tab's rows were inert
+    /// before this: it listed commits you could read about and not open.
+    @State private var browse: BrowseTarget?
     /// Where the user was last looking in the diff viewer, restored when they
     /// come back. Persisted because a review is not one sitting — you read a
     /// hunk, go look at the source, come back — and being dropped at the top of
@@ -215,6 +218,13 @@ struct CodePanelView: View {
                 FileView(file: file, font: fonts.codeFont(), spacing: fonts.lineSpacing)
             }
         }
+        .sheet(item: $browse) { target in
+            if let client = connection.client {
+                NavigationStack {
+                    CommitBrowserView(root: path, target: target, client: client)
+                }
+            }
+        }
         .sheet(item: $openDiff) { file in
             if let client = connection.client {
                 NavigationStack {
@@ -342,25 +352,31 @@ struct CodePanelView: View {
                 }
             } else {
                 List(log.commits) { commit in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(commit.subject)
-                            .font(.subheadline)
-                            .lineLimit(2)
-                        HStack(spacing: 6) {
-                            Text(commit.short)
-                                .font(.system(.caption2, design: .monospaced))
-                                .foregroundStyle(themes.current.accentColor)
-                            Text(commit.author).font(.caption2).foregroundStyle(.secondary)
-                            Text(relative(commit.dateValue)).font(.caption2).foregroundStyle(.secondary)
+                    Button {
+                        browse = BrowseTarget(rev: commit.hash, short: commit.short, subject: commit.subject)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(commit.subject)
+                                .font(.subheadline)
+                                .lineLimit(2)
+                            HStack(spacing: 6) {
+                                Text(commit.short)
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .foregroundStyle(themes.current.accentColor)
+                                Text(commit.author).font(.caption2).foregroundStyle(.secondary)
+                                Text(relative(commit.dateValue)).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            if !commit.refs.isEmpty {
+                                Text(commit.refs.replacingOccurrences(of: "HEAD -> ", with: ""))
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                                    .lineLimit(1)
+                            }
                         }
-                        if !commit.refs.isEmpty {
-                            Text(commit.refs.replacingOccurrences(of: "HEAD -> ", with: ""))
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                                .lineLimit(1)
-                        }
+                        .padding(.vertical, 2)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.vertical, 2)
+                    .buttonStyle(.plain)
                 }
             }
         } else {
@@ -542,7 +558,9 @@ private struct DiffText: View {
     }
 }
 
-private struct FileView: View {
+/// Shared with the commit browser, which opens a file from a past
+/// revision in the same viewer as one from the working tree.
+struct FileView: View {
     let file: FileContents
     var font: UIFont = .monospacedSystemFont(ofSize: 11, weight: .regular)
     var spacing: Double = 1
