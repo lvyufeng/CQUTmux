@@ -2706,6 +2706,58 @@ async function writeFileWithBackup(path, text, existing) {
   await writeFile(path, text)
 }
 
+/// Puts a `cqutmux` command on the user's PATH.
+///
+/// Moshi's installer drops a `moshi` symlink next to `moshi-hook`. Without one
+/// this tool only answers to its full path — `node ~/…/host/cqutmux-hook/index.mjs
+/// doctor` — and every documented `cqutmux <dir>` is a command the user cannot
+/// type. A launcher is the difference between a tool and a file.
+///
+/// It is a *shim*, not a symlink, and it pins the interpreter:
+///
+/// - The script is not marked executable, so a symlink to it would not run.
+/// - `#!/usr/bin/env node` resolves node through PATH, and the shells a service
+///   or a login session starts do not necessarily have the one that is on PATH
+///   here. `process.execPath` is the node actually running, which is the one
+///   this was tested against.
+///
+/// It writes only when the content differs, so a re-run is not an edit; and it
+/// says whether its directory is on PATH, because a launcher in a directory the
+/// shell does not search is the same symptom — "command not found" — as no
+/// launcher at all, and that is the one thing the user cannot see from here.
+async function installLauncher({ dryRun = false } = {}) {
+  const dir = join(homedir(), '.local', 'bin')
+  const target = join(dir, 'cqutmux')
+  const content = `#!/bin/sh
+# Installed by \`cqutmux install\`. Runs this checkout's gateway.
+exec ${JSON.stringify(process.execPath)} ${JSON.stringify(process.argv[1])} "$@"
+`
+
+  let existing = null
+  try { existing = await readFile(target, 'utf8') } catch { /* not installed yet */ }
+
+  if (existing === content) {
+    process.stdout.write(`launcher already at ${target}\n`)
+  } else if (dryRun) {
+    process.stdout.write(`would write ${target}\n`)
+  } else {
+    await mkdir(dir, { recursive: true })
+    await writeFile(target, content, 'utf8')
+    await chmod(target, 0o755)
+    process.stdout.write(`installed the launcher at ${target}\n`)
+  }
+
+  // The user's PATH is the login shell's, which this process did not inherit —
+  // read from the shell rather than from `process.env`, which has whatever the
+  // caller passed. A missing entry here is the whole reason `cqutmux` would
+  // still not answer, so it is said out loud rather than assumed.
+  if (!(process.env.PATH || '').split(':').includes(dir)) {
+    process.stdout.write(
+      `\n${dir} is not on this PATH. Add it to your shell's rc file:\n` +
+      `  export PATH="$HOME/.local/bin:$PATH"\n`)
+  }
+}
+
 async function install(argv) {
   const dryRun = argv.includes('--dry-run') || argv.includes('--print')
 
@@ -2727,15 +2779,18 @@ async function install(argv) {
     }
   }
 
-  // 2. Supervision.
+  // 2. A command the user can type.
+  await installLauncher({ dryRun })
+
+  // 3. Supervision. `cqutmux service install` does this properly; what follows
+  // is for the user who would rather write their own unit.
   process.stdout.write(`
 Keep the gateway running at login.
 
-  macOS (launchd):
-    cqutmux serve >> ~/.cqutmux/hook.log 2>&1 &
+  cqutmux service install   registers a launchd agent / systemd user unit
 
-  Or with a supervisor you already run, e.g.:
-    systemd:  ExecStart=${process.execPath} ${process.argv[1]} serve --token <secret>
+Or, with a supervisor you already run:
+  ${process.execPath} ${process.argv[1]} serve --token <secret>
 
 The app reaches this port over the SSH session it already has, so there is no
 need to open a firewall port or expose it to the network. Bind stays loopback.
