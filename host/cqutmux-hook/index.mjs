@@ -58,6 +58,13 @@ import {
 } from './doctor-mux.mjs'
 import { resolveCommand } from './platform.mjs'
 import { servicePlan, SERVICE_ID } from './service.mjs'
+import {
+  DEFAULTS as TMUX_DEFAULTS,
+  inspect as inspectTmuxDefaults,
+  installed as tmuxDefaultsInstalled,
+  apply as applyTmuxDefaults,
+  strip as stripTmuxDefaults,
+} from './tmux-defaults.mjs'
 
 const run = promisify(execFile)
 
@@ -1396,7 +1403,7 @@ const SETTABLE = [
 const COMMANDS = new Set([
   'pair', 'install', 'uninstall', 'serve', 'status', 'doctor', 'logs', 'diff',
   'set', 'usage', 'version', 'update', 'help', 'context', 'locale', 'service',
-  'unpair',
+  'unpair', 'tmux-defaults',
 ])
 
 function usage() {
@@ -1408,6 +1415,9 @@ function usage() {
   cqutmux locale <name>  write LANG/LC_ALL into ~/.zshenv and ~/.bashrc
   cqutmux locale unset   remove those lines again
   cqutmux locale         show what is written now
+  cqutmux tmux-defaults  show the recommended tmux settings in ~/.tmux.conf
+  cqutmux tmux-defaults --write   append the ones that are missing
+  cqutmux tmux-defaults --unset   remove the block it wrote
   cqutmux status         gateway health, if one is running here
   cqutmux doctor         check that this host is ready for the app
   cqutmux logs [-f]      tail the gateway log
@@ -1531,6 +1541,12 @@ async function runCommand(name, argv) {
       return localeCommand(positionals.slice(1))
     case 'service':
       return serviceCommand(positionals.slice(1))
+    case 'tmux-defaults':
+      // argv, not positionals: this command's verbs are flags (`--write`,
+      // `--unset`), and `positionals` excludes anything starting with `-` by
+      // construction. Passing it would make every invocation fall through to
+      // the report — a `--write` that silently only reads.
+      return tmuxDefaultsCommand(argv)
   }
 }
 
@@ -1600,6 +1616,120 @@ async function localeCommand(rest) {
     }
     await writeFile(path, next, 'utf8')
     process.stdout.write(`${path}: ${target === 'unset' ? 'cleared' : `LANG/LC_ALL -> ${target}`}\n`)
+  }
+}
+
+/// `cqutmux tmux-defaults [--write|--unset]`.
+///
+/// Moshi's `moshi-skill` recommends four tmux settings; this is the CQUTMux
+/// counterpart. Unlike `install`, it does the host-side work directly rather
+/// than printing lines to copy — a copy-paste step is the step that does not
+/// happen, which is the same reasoning `service install` and `locale` follow.
+///
+/// It is deliberately a *separate* writer from the `update-environment` line
+/// (documented in README "The client marker" and in the app's Integrations
+/// screen, which is typed by hand): that line is for a different feature, is not
+/// one of these four settings, and is never touched here.
+///
+/// The file is read whole, edited and written back whole, and the block is
+/// delimited so a re-run is an update rather than a second copy. What must never
+/// happen: rewriting or reordering the user's own lines, or overriding a setting
+/// they chose themselves.
+async function tmuxDefaultsCommand(rest) {
+  const write = rest.includes('--write')
+  const unset = rest.includes('--unset')
+
+  if (write && unset) {
+    process.stderr.write('cqutmux: --write and --unset are different intentions; pass one.\n')
+    process.exitCode = 2
+    return
+  }
+
+  // `CQUTMUX_TMUX_CONF` so the check can run against a throwaway file. This
+  // command edits a file the user may have spent years curating, so the one
+  // thing it must never do is be wrong about which file that is; an override
+  // that a script sets explicitly is the testable form.
+  const path = process.env.CQUTMUX_TMUX_CONF || join(homedir(), '.tmux.conf')
+
+  let text = ''
+  let existed = true
+  try {
+    text = await readFile(path, 'utf8')
+  } catch {
+    // Absent is the normal first-run state. It only matters on `--write`, which
+    // creates the file; `--unset` on a file we never wrote leaves things alone.
+    existed = false
+  }
+
+  // The pure module trims trailing blank lines so re-applying does not grow the
+  // file; a user's own trailing newline is not a blank line we added, though,
+  // and dropping it would be an edit they did not ask for. Put it back.
+  const keepFinalNewline = next => (
+    text.endsWith('\n') && next !== '' && !next.endsWith('\n') ? next + '\n' : next
+  )
+
+  if (unset) {
+    if (!existed) {
+      process.stdout.write(`${path}: no file, nothing to remove\n`)
+      return
+    }
+    const { text: next, removed } = stripTmuxDefaults(text)
+    if (!removed) {
+      process.stdout.write(`${path}: no cqutmux block to remove\n`)
+      return
+    }
+    await writeFile(path, keepFinalNewline(next), 'utf8')
+    process.stdout.write(`${path}: removed the cqutmux block\n`)
+    return
+  }
+
+  if (write) {
+    // Inspect before deciding, so the report can say which settings were
+    // already present (their value kept, not ours). Presence is the whole test,
+    // so this is the same judgement `apply` makes — computed once here rather
+    // than re-derived from the result and guessed at.
+    const before = inspectTmuxDefaults(stripTmuxDefaults(text).text)
+    const next = applyTmuxDefaults(text)
+    if (next === text) {
+      process.stdout.write(`${path}: already up to date\n`)
+      return
+    }
+    if (existed) {
+      // Backed up once, and only when there was something to lose — the same
+      // discipline `locale` uses. A tmux config overwritten in a way the user
+      // did not expect is not reconstructable from memory.
+      await writeFile(`${path}.cqutmux-backup`, text, 'utf8').catch(() => {})
+    }
+    await writeFile(path, keepFinalNewline(next), 'utf8')
+    process.stdout.write(`${path}: wrote the cqutmux block\n`)
+    for (const r of before) {
+      if (r.present) process.stdout.write(`  ${r.option}: kept your line — ${r.line}\n`)
+      else process.stdout.write(`  ${r.option}: added (${r.recommended})\n`)
+    }
+    return
+  }
+
+  // No verb: report. Presence is judged on the option name, so a setting the
+  // user has already made — even with another value — counts as present and is
+  // reported with their own line, not ours.
+  if (!existed) {
+    process.stdout.write(`${path}: does not exist\n`)
+  } else {
+    process.stdout.write(`${path}\n`)
+  }
+  const reports = inspectTmuxDefaults(text)
+  for (const r of reports) {
+    if (!r.present) {
+      process.stdout.write(`  ${r.option}: missing (would write: ${r.recommended})\n`)
+    } else if (r.matchesRecommended) {
+      process.stdout.write(`  ${r.option}: present — ${r.line}\n`)
+    } else {
+      process.stdout.write(`  ${r.option}: present, your value — ${r.line}\n`)
+    }
+  }
+  if (tmuxDefaultsInstalled(text)) process.stdout.write('  (a cqutmux block is installed)\n')
+  if (!reports.every(r => r.present)) {
+    process.stdout.write('run `cqutmux tmux-defaults --write` to add the missing ones\n')
   }
 }
 

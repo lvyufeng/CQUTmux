@@ -29,6 +29,13 @@ implementation under another name.
   registers a service; ours only printed a snippet to paste. Now writes a
   per-user LaunchAgent / systemd unit and loads it. `host/cqutmux-hook/service.mjs`,
   `scripts/service-check.sh` (50 checks).
+- **`tmux-defaults`** — Moshi's `moshi-skill` recommends four `~/.tmux.conf`
+  settings; ours had no writer (the only line written was the unrelated
+  `update-environment CQUTMUX_CLIENT`). Now shows, writes and removes them in a
+  delimited block that never rewrites or reorders the user's own lines, and
+  treats a setting already present — even at another value — as their choice to
+  keep. `host/cqutmux-hook/tmux-defaults.mjs`, pinned by
+  `scripts/tmux-defaults-check.sh` (50 + 12 checks).
 - **`unpair`** — pairing had no way back. Now removes exactly the cqutmux line
   from `authorized_keys`, keeping the key pair unless `--delete-key`.
 - **A `cqutmux` launcher on PATH** — `install` now writes a shim to
@@ -50,7 +57,6 @@ counterpart under another name and found none.
 | Scroll-past-bottom keyboard dismissal is not configurable | `keyboardDismissMode = .interactive` set once at `CQUTTerminalView.swift:147`; the scrolling doc calls it configurable. |
 | Notifications: no push-token display, no image test, no simulator guard | `deviceToken` is `private(set)` and the UI shows only "Registered"; `sendTest()` posts text-only; no `targetEnvironment(simulator)` guard. |
 | Support: no log export, no transcript collection, report is a fixed fact list | `SupportView.swift` builds a fixed version/device/system/host block; no Subject/Setup/Expected/Actual template; no log surfaces. |
-| tmux defaults writers (history-limit / mouse / base-index) | No `~/.tmux.conf` writer; the only line written is the unrelated `update-environment CQUTMUX_CLIENT`. |
 | Deep links have no `pane` / `tab` parameter | `DeepLink.Target.session` carries only `mux/name/window`. |
 | `moshi-hook service` on Windows | Moshi registers a per-user logon entry; we report the platform unsupported rather than fake it. |
 
