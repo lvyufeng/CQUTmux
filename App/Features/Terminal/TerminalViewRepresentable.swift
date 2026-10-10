@@ -26,6 +26,9 @@ struct TerminalScreen: View {
     @State private var showChat = false
     /// Directories the user has been in, for the chat's transcript path.
     @State private var recents = RecentDirectoryStore()
+    /// The session the user was last in on this host, so reopening the app
+    /// lands back where they left off.
+    @State private var lastSessions = LastSessionStore()
 
     /// The directory whose transcript the chat icon opens.
     ///
@@ -78,6 +81,10 @@ struct TerminalScreen: View {
     /// Set once the link's attach command has been sent, so a reconnect — which
     /// also reaches `.connected` — does not attach a second time.
     @State private var didFollowLink = false
+    /// One resume per terminal. The status changes more than once as the
+    /// connection settles, and resuming on each would re-attach repeatedly into
+    /// a session the user is by then using.
+    @State private var didResume = false
     @Environment(\.dismiss) private var dismiss
     @Environment(ThemeStore.self) private var themes
     @Environment(ToolbarSettings.self) private var toolbar
@@ -302,6 +309,35 @@ struct TerminalScreen: View {
                             mux: session.mux, session: session.name, selector: window
                         )
                     }
+                }
+            }
+            // Resume the last session when the shell comes up, on the same
+            // signal the link handler uses — "the shell is up" — because an
+            // attach typed into a session that is not ready yet goes nowhere.
+            // The decision lives in `SessionResume` so the checks can drive it;
+            // here it only has to be acted on.
+            .onChange(of: coordinator.status) { _, status in
+                guard status.isLive, !didResume else { return }
+                didResume = true
+                switch SessionResume.action(
+                    hasLink: link?.session != nil,
+                    last: lastSessions.last(for: host),
+                    current: nil
+                ) {
+                case .restore(let session, let window):
+                    coordinator.terminal?.attachSession(mux: session.mux, name: session.name)
+                    if let window, !window.isEmpty {
+                        // A beat, for the same reason the link path waits: the
+                        // client has to have attached before the jump means
+                        // "this client, this window".
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                            coordinator.terminal?.selectWindow(
+                                mux: session.mux, session: session.name, selector: window
+                            )
+                        }
+                    }
+                case .none:
+                    break
                 }
             }
             // The session picker and the paste-image button both ride the gateway
@@ -766,9 +802,20 @@ struct TerminalScreen: View {
                 switch action {
                 case .attach(let mux, let name):
                     coordinator.terminal?.attachSession(mux: mux, name: name)
+                    // Recorded only on attach: attaching is the user saying
+                    // "this is where I am", and that is the thing worth coming
+                    // back to. Recording on the connect flow's first shell
+                    // would remember a session nobody chose.
+                    lastSessions.record(LastSession(mux: mux, name: name, window: nil), for: host)
                 case .window(let mux, let session, let selector):
                     coordinator.terminal?.selectWindow(
                         mux: mux, session: session, selector: selector
+                    )
+                    // A window jump is the same session with a window; keeping
+                    // the window means reopening lands on the pane in use, not
+                    // the session's default one.
+                    lastSessions.record(
+                        LastSession(mux: mux, name: session, window: selector), for: host
                     )
                 }
             }

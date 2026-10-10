@@ -33,16 +33,16 @@ Most recently the Inbox's five categories, which also turned up a gateway that
 was dropping the field the bridges were already sending; the Live Activity's
 latest-event and session-lifecycle phases; the Chat View's Markdown/code/image
 separation; the tool cards' shape recognition; the Chat View's terminal entry
-and its derived header; and the host-locale rc injection that finishes the
-locale claim.
+and its derived header; the host-locale rc injection that finishes the
+locale claim; and resuming the last session on relaunch.
 See the progress list below.
 The "Read first" change also had an adversarial pass that refuted two claims it
 first shipped with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 66 |
-| partial | 8 |
+| closed | 67 |
+| partial | 7 |
 | deliberate-divergence | 1 |
 | missing | 1 |
 
