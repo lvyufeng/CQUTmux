@@ -70,7 +70,7 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Scan a QR code to import a theme or pair a host. The camera is used only while that screen is open, and nothing is recorded.</string>
+	<string>Take a photo to send to the terminal, or scan a QR code to import a theme or pair a host. The camera is used only while one of those screens is open, and nothing is recorded.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIAppFonts</key>

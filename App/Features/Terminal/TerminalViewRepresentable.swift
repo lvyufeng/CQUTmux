@@ -23,6 +23,13 @@ struct TerminalScreen: View {
     @State private var dictation: Dictation?
     @State private var showSessions = false
     @State private var annotating: PendingImage?
+    /// The four ways an image can arrive, presented as one chooser. The
+    /// clipboard case is handled inline (there is nothing to present); the
+    /// other three each have their own presentation.
+    @State private var showAttachSources = false
+    @State private var showCamera = false
+    @State private var showPhotoLibrary = false
+    @State private var showFiles = false
     @State private var pastedNotice: String?
     @State private var shortcuts = ShortcutStore()
     @State private var gestures = GestureStore()
@@ -197,6 +204,17 @@ struct TerminalScreen: View {
                 }
             }
             .sheet(item: $annotating) { pending in annotator(pending.image) }
+            .sheet(isPresented: $showCamera) { CameraPicker(onPick: attachAfterDismissal) }
+            .sheet(isPresented: $showPhotoLibrary) { PhotoLibraryPicker(onPick: attachAfterDismissal) }
+            // Files is `fileImporter` rather than a picker: it is the
+            // system document flow, and the URL it hands back is only valid
+            // for the callback — so the bytes are read here, not referenced.
+            .fileImporter(
+                isPresented: $showFiles,
+                allowedContentTypes: [.image]
+            ) { result in
+                if case .success(let url) = result { attachFile(at: url) }
+            }
             .overlay(alignment: .top) { pasteNotice }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if input.chatMode {
@@ -541,24 +559,85 @@ struct TerminalScreen: View {
     @ViewBuilder
     private var pasteImageButton: some View {
         if connection.client != nil {
-            Button(action: pasteImage) {
+            Button { showAttachSources = true } label: {
                 Image(systemName: "photo.badge.plus").frame(width: 40, height: 32)
             }
             .buttonStyle(.bordered)
             .buttonBorderShape(.roundedRectangle(radius: 6))
+            .confirmationDialog(
+                "Add attachment",
+                isPresented: $showAttachSources,
+                titleVisibility: .visible
+            ) {
+                ForEach(attachmentSources) { source in
+                    Button(source.label) { choose(source) }
+                }
+            }
         }
     }
 
-    private func pasteImage() {
-        guard let image = UIPasteboard.general.image else {
-            pastedNotice = "No image on the clipboard"
-            Task {
-                try? await Task.sleep(for: .seconds(2))
-                pastedNotice = nil
-            }
+    /// Which sources to offer right now.
+    ///
+    /// The decision is `AttachmentSource.available` — a pure function, checked
+    /// in `scripts/attachment-check.sh`. The two inputs come from the device:
+    /// a camera that may not exist, and a clipboard that may be empty. Offering
+    /// a Clipboard row with nothing on the clipboard is a row that opens onto
+    /// "No image on the clipboard", which reads as a broken button.
+    private var attachmentSources: [AttachmentSource] {
+        AttachmentSource.available(
+            hasCamera: UIImagePickerController.isSourceTypeAvailable(.camera),
+            hasClipboardImage: UIPasteboard.general.hasImages
+        )
+    }
+
+    private func choose(_ source: AttachmentSource) {
+        switch source {
+        case .camera: showCamera = true
+        case .photoLibrary: showPhotoLibrary = true
+        case .files: showFiles = true
+        // The clipboard image is already in hand — there is nothing to present,
+        // which is why it goes straight to the annotator.
+        case .clipboard: attach(UIPasteboard.general.image ?? UIImage())
+        }
+    }
+
+    /// Accepts an image from any source and opens the annotator on it.
+    ///
+    /// The dismiss-then-present is the one part of this that can fail silently:
+    /// a picker dismissing and a sheet being asked to present in the same turn
+    /// of the run loop sometimes drops the second presentation, leaving the tap
+    /// apparently ignored. The short beat is the standard workaround, and it is
+    /// recorded here rather than left for someone to rediscover — a ready-made
+    /// image (the clipboard) skips it, since nothing is dismissing.
+    private func attach(_ image: UIImage) {
+        guard image.size != .zero else { return }
+        annotating = PendingImage(image: image)
+    }
+
+    private func attachAfterDismissal(_ image: UIImage) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            attach(image)
+        }
+    }
+
+    private func attachFile(at url: URL) {
+        // The picker's URL is security-scoped and valid only inside this call.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else {
+            notice("That file is not an image")
             return
         }
-        annotating = PendingImage(image: image)
+        attach(image)
+    }
+
+    private func notice(_ text: String) {
+        pastedNotice = text
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            pastedNotice = nil
+        }
     }
 
     @ViewBuilder

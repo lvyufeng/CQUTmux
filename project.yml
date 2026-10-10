@@ -207,8 +207,9 @@ targets:
         # naming only themes would misdescribe what someone pairing a host is
         # being asked to allow.
         NSCameraUsageDescription: >-
-          Scan a QR code to import a theme or pair a host. The camera is used
-          only while that screen is open, and nothing is recorded.
+          Take a photo to send to the terminal, or scan a QR code to import a
+          theme or pair a host. The camera is used only while one of those
+          screens is open, and nothing is recorded.
         # Alternate app icons are declared as loose files rather than in an
         # asset catalog, because XcodeGen's asset support does not surface the
         # alternate-icon set. The PrimaryIcon entry is not optional: without it

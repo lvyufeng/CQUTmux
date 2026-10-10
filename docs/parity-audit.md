@@ -30,8 +30,8 @@ with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 53 |
-| partial | 20 |
+| closed | 54 |
+| partial | 19 |
 | deliberate-divergence | 2 |
 | missing | 1 |
 
@@ -133,6 +133,16 @@ has since been closed, with the check that pins it.
   the hook puts on the wire. The two sibling surfaces that announce a pending
   approval — the Live Activity and the push notification text — still show the
   title alone and are tracked separately.
+
+- **The Add-attachment sheet** — clipboard-only before; now offers Camera, Photo Library, Files and
+  Clipboard, all feeding the existing annotate/upload path. The photo library uses `PHPickerViewController`
+  on purpose: it runs out of process and needs no photo-library permission, so picking a single image does
+  not add a permission prompt. The camera is the one path that needs `NSCameraUsageDescription`, whose
+  string was widened from the QR scanner to cover it.
+  The rule that fails silently is *which rows appear* — a Clipboard row with nothing on the clipboard
+  opens onto "No image on the clipboard" and reads as a broken button — so it is a Foundation-only
+  function, `AttachmentSource.available`, pinned by `scripts/attachment-check.sh` (14 checks). A screenshot
+  shows the rows that were drawn, never the one that should have been.
 
 - **Multi-step shortcut timing** — `ShortcutGrammar.Parsed.schedule` gives each step the delay before
   it (the first at zero), `interStepDelay` is the gap, and `CQUTTerminalView.send(_:)` writes them as
@@ -776,7 +786,7 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   sync carries both, and every chord and the tab row resolve through
   `prefix(for:)`.
 
-### The 20 that are still open, grouped by what is actually missing
+### The 19 that are still open, grouped by what is actually missing
 
 A second independent pass on 2026-10-10 rewrote each of these with file:line
 evidence. What is missing, in one line each:
@@ -814,8 +824,6 @@ evidence. What is missing, in one line each:
   not reach it, and there is no session lifecycle.
 - Usages renders per-source rows, but every source gets the same hard-coded
   Claude 5h/7d windows.
-- The attachment sheet is clipboard-only; Camera, Photo library and Files are not
-  offered.
 - The Watch inbox is a flat list — the phone's project grouping is flattened
   before the push, so it cannot survive.
 
