@@ -309,14 +309,15 @@ struct TerminalScreen: View {
                 guard status.isLive, let session = link?.session, !didFollowLink else { return }
                 didFollowLink = true
                 coordinator.terminal?.attachSession(mux: session.mux, name: session.name)
-                if let window = session.window, !window.isEmpty {
+                if session.window != nil || session.pane != nil {
                     // A beat, because the client has to have attached before
                     // the jump means "this client, this window"; sending it in
                     // the same write as the attach would be read as text by the
                     // shell the attach is still replacing.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                         coordinator.terminal?.selectWindow(
-                            mux: session.mux, session: session.name, selector: window
+                            mux: session.mux, session: session.name,
+                            selector: session.window, pane: session.pane
                         )
                     }
                 }

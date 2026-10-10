@@ -811,7 +811,8 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         }
     }
 
-    /// Jumps to a window/tab in the attached client.
+    /// Jumps to a window/tab in the attached client, and for tmux to a pane
+    /// inside it.
     ///
     /// `selector` is how the owning mux addresses the window, and it is not a
     /// number for every mux: tmux and zellij use an index, herdr addresses a
@@ -822,6 +823,13 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// tmux rather than typed into a pane that may be busy running an agent —
     /// falling back to the command prompt past index 9. zellij has no prefix
     /// port; it gets a `go-to-tab` action instead.
+    ///
+    /// `pane` is tmux-only: a deep link can address a pane, and tmux's window
+    /// jump does not land on one. It goes through the same prefix + command
+    /// prompt route rather than a second "jump" mechanism — the pane is
+    /// selected with `select-pane -t`, which the user's prefix leads into. The
+    /// window jump, if any, is sent first, because a pane index is only
+    /// meaningful once its window is current.
     /// The prefix comes from the view's own `muxPrefix`, set from the setting,
     /// rather than from a parameter: a caller that could pass a prefix could
     /// pass the wrong one, and this is exactly the code path where that failure
@@ -841,23 +849,42 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         write(Data(bytes))
     }
 
-    func selectWindow(mux: String, session: String, selector: String) {
+    func selectWindow(mux: String, session: String, selector: String?, pane: String? = nil) {
         switch mux {
         case "zellij":
-            guard let index = Int(selector) else { return }
+            // zellij addresses neither windows nor panes by index on the wire
+            // here, so a selector or pane it was handed is not something this
+            // client can act on — and a link that named one never gets here
+            // anyway (the parser keeps `pane` to tmux). Guarded rather than
+            // assumed so a future caller cannot trap into a nil force-unwrap.
+            guard let selector, let index = Int(selector) else { return }
             write(Data("zellij -s \(session) action go-to-tab \(index + 1)\n".utf8))
         case "herdr":
-            guard !selector.isEmpty else { return }
+            guard let selector, !selector.isEmpty else { return }
             write(Data("herdr tab focus \(selector)\n".utf8))
         default:
-            guard let index = Int(selector) else { return }
-            // The user's prefix, not ours: this keystroke is tmux's to read.
-            write(Data(muxPrefix.bytes))
-            if (0...9).contains(index) {
-                write(Data(String(index).utf8))
-            } else {
-                write(Data(":select-window -t \(index)\n".utf8))
+            // The user's prefix, not ours: this keystroke is tmux's to read —
+            // and one prefix leads into every command prompt below, so the
+            // window and the pane are selected with the one mechanism rather
+            // than two commands racing in the same write.
+            var command = ""
+            if let selector, let index = Int(selector) {
+                // tmux binds the bare digits to its first nine windows. A tenth
+                // has no bare binding, so it goes through the command prompt,
+                // exactly as the quick-access row does.
+                command += (0...9).contains(index)
+                    ? String(index)
+                    : ":select-window -t \(index)\n"
             }
+            if let pane, let index = Int(pane) {
+                // `select-pane -t` is a tmux command, not a bare binding, so it
+                // always goes to the prompt. The window jump above, if any, ran
+                // first: a pane index counts inside the current window.
+                command += ":select-pane -t \(index)\n"
+            }
+            guard !command.isEmpty else { return }
+            write(Data(muxPrefix.bytes))
+            write(Data(command.utf8))
         }
     }
 

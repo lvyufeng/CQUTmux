@@ -6,9 +6,9 @@ import Foundation
 /// because these URLs get pasted into terminals, webhooks and chat — a link
 /// that works in one app and not the other is a link people stop trusting:
 ///
-///   cqutmux://tmux?session=<name>[&window=<n>]
+///   cqutmux://tmux?session=<name>[&window=<n>][&pane=<n>]
 ///   cqutmux://zellij?session=<name>
-///   cqutmux://herdr?workspace=<id>[&session=<name>]
+///   cqutmux://herdr?workspace=<id>[&session=<name>][&tab=<w1:t2>]
 ///   cqutmux://host?host=<name-or-hostname>
 ///   cqutmux://theme
 ///   cqutmux://inbox
@@ -19,10 +19,13 @@ import Foundation
 /// common case here is one host.
 struct DeepLink: Equatable {
     enum Target: Equatable {
-        /// Attach to a multiplexer session, optionally landing on a window.
-        /// `window` is a string because not every mux addresses windows by
-        /// number — herdr uses a tab id like `w1:t2`.
-        case session(mux: String, name: String, window: String?)
+        /// Attach to a multiplexer session, optionally landing on a window and,
+        /// for tmux, a pane inside it.
+        ///
+        /// `window` and `pane` are strings because not every mux addresses them
+        /// by number — herdr uses a tab id like `w1:t2`, and the same value
+        /// rides in `window` whether the link spelled it `window` or `tab`.
+        case session(mux: String, name: String, window: String?, pane: String?)
         case host(String)
         /// Open the theme import screen. Moshi's `moshi://theme` exists so a
         /// gallery page can hand a theme straight to the app rather than
@@ -50,6 +53,7 @@ struct DeepLink: Equatable {
         case unknownRoute(String)
         case missingParameter(String)
         case badWindow(String)
+        case badPane(String)
 
         var errorDescription: String? {
             switch self {
@@ -59,6 +63,8 @@ struct DeepLink: Equatable {
                 return "The link is missing its \(name)."
             case .badWindow(let value):
                 return "“\(value)” is not a window number."
+            case .badPane(let value):
+                return "“\(value)” is not a pane number."
             }
         }
     }
@@ -88,11 +94,26 @@ struct DeepLink: Equatable {
             // tmux and zellij take a number here, and a typo should be caught
             // rather than typed at the shell; herdr takes an opaque tab id, so
             // the value is only checked when the mux expects a number.
-            let window = value("window")
+            //
+            // `tab` is herdr's spelling and `window` is the shared one, and
+            // both mean the same thing: the tab/window to land on. herdr is the
+            // only mux whose links say `tab`, so the alias is read there and a
+            // stray `tab=` on a tmux link is simply ignored rather than landing
+            // the user somewhere the picker never offered.
+            let window = value("window") ?? (route == "herdr" ? value("tab") : nil)
             if route != "herdr", let window, Int(window) == nil {
                 return .failure(.badWindow(window))
             }
-            return .success(DeepLink(target: .session(mux: route, name: name, window: window)))
+            // `pane` is tmux-only and, like `window` there, a number: tmux
+            // addresses a pane by its index, so a typo is caught at the parse
+            // rather than typed at the shell. zellij addresses neither a window
+            // nor a pane, so it takes no `pane` — the asymmetry is the muxes'
+            // own, not ours to paper over.
+            let pane = route == "tmux" ? value("pane") : nil
+            if let pane, Int(pane) == nil {
+                return .failure(.badPane(pane))
+            }
+            return .success(DeepLink(target: .session(mux: route, name: name, window: window, pane: pane)))
 
         case "host":
             guard let name = value("host") ?? value("name") else {
@@ -121,8 +142,8 @@ struct DeepLink: Equatable {
     /// here would be a second thing to keep in step with the session picker.
     /// The caller hands these to the same `attachSession` / `selectWindow` the
     /// picker calls, so a link and a tap cannot drift apart.
-    var session: (mux: String, name: String, window: String?)? {
-        guard case .session(let mux, let name, let window) = target else { return nil }
-        return (mux, name, window)
+    var session: (mux: String, name: String, window: String?, pane: String?)? {
+        guard case .session(let mux, let name, let window, let pane) = target else { return nil }
+        return (mux, name, window, pane)
     }
 }
