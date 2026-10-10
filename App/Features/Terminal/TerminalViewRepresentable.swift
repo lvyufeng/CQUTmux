@@ -27,6 +27,17 @@ struct TerminalScreen: View {
     /// would be a second place a message is assembled, and the two would drift.
     @State private var composerDraft = ""
     @State private var showSessions = false
+    /// The picker's Skip, honoured for this connection only.
+    ///
+    /// Skip means "a plain login shell, not the host's session command", and
+    /// that is a decision made when the session is built rather than a command
+    /// typed into a shell that is already up — the multiplexer the startup
+    /// command started cannot be un-launched from inside it. So it is held
+    /// here, as the screen's own state, and read instead of `host.sessionCommand`
+    /// when the terminal is built. The saved host is never touched: the
+    /// preference is a property of *this* connection, not of the host, and a
+    /// fresh visit builds the terminal with the host's command again.
+    @State private var plainShell = false
     /// The agent conversation, opened from the toolbar icon.
     @State private var showChat = false
     /// Directories the user has been in, for the chat's transcript path.
@@ -46,6 +57,18 @@ struct TerminalScreen: View {
     private var chatPath: String {
         recents.recent(for: host).first ?? "."
     }
+
+    /// The multiplexer the built session actually runs — nil once Skip has
+    /// dropped to a plain login shell.
+    ///
+    /// `host.mux` reads the kind off the *saved* command, which is exactly the
+    /// command Skip does not run, so the mux-keyed parts of the UI — the tab
+    /// row, the two-finger sweeps, the pinch-zoom-pane action — have to ask
+    /// this instead. Nil is what they already treat as "no multiplexer": each
+    /// falls through to the terminal, which is the same handling a host with no
+    /// mux gets, and it is why sending mux bytes into a plain shell is not just
+    /// pointless but would type a control character into whatever is running.
+    private var effectiveMux: String? { plainShell ? nil : host.mux }
     @State private var annotating: PendingImage?
     /// The four ways an image can arrive, presented as one chooser. The
     /// clipboard case is handled inline (there is nothing to present); the
@@ -100,6 +123,10 @@ struct TerminalScreen: View {
         TerminalViewRepresentable(
                 host: host,
                 credential: credential,
+                // Empty, not nil, is how the representable is told to drop the
+                // host's session command: it cannot distinguish "no override"
+                // from "override to no command" otherwise. See `plainShell`.
+                startupCommandOverride: plainShell ? "" : nil,
                 coordinator: coordinator,
                 theme: themes.current,
                 fonts: fonts,
@@ -113,7 +140,7 @@ struct TerminalScreen: View {
                 // falls through to the mux prefix key, which is what tmux and
                 // zellij need.
                 pinchZoomsHerdrPane: toolbar.pinchAction == .zoomPane
-                    && host.mux == "herdr" && connection.client != nil,
+                    && effectiveMux == "herdr" && connection.client != nil,
                 onPinchZoom: { zoomed in
                     guard let client = connection.client else { return }
                     Task { try? await client.zoomHerdrPane(zoomed: zoomed) }
@@ -124,6 +151,14 @@ struct TerminalScreen: View {
                 onNewConnection: { newConnection = true },
                 onMinimize: { minimize() }
             )
+            // A change of `plainShell` has to rebuild the terminal, and that is
+            // the one thing `updateUIView` cannot do: the transport was chosen
+            // and the launcher was built when the session was made, so the only
+            // way to apply a different startup command — including through a
+            // mosh/ET launcher that baked it in — is a fresh view. Keying on the
+            // flag is what asks SwiftUI for one; it stays constant in ordinary
+            // use, so nothing is rebuilt until Skip is actually chosen.
+            .id(plainShell)
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationTitle(host.displayName)
             .navigationBarTitleDisplayMode(.inline)
@@ -482,7 +517,7 @@ struct TerminalScreen: View {
     /// a row of numbers that type digits into whatever program is running.
     private var tabRowApplies: Bool {
         MuxSettings.MuxCommand.selectTab(
-            1, mux: host.mux, prefix: mux.prefix(for: host.mux)
+            1, mux: effectiveMux, prefix: mux.prefix(for: effectiveMux)
         ) != nil
     }
 
@@ -503,7 +538,7 @@ struct TerminalScreen: View {
             HStack(spacing: 4) {
                 ForEach(MuxSettings.MuxCommand.selectableTabs, id: \.self) { index in
                     Button {
-                        coordinator.terminal?.selectTab(index, mux: host.mux)
+                        coordinator.terminal?.selectTab(index, mux: effectiveMux)
                     } label: {
                         Text("\(index)")
                             .font(.system(.footnote, design: .monospaced))
@@ -846,6 +881,18 @@ struct TerminalScreen: View {
                     // the folder, which would be a different command.
                     coordinator.terminal?.attachSessionDirectory(path)
                     recents.record(path, for: host)
+                case .skip:
+                    // Not a command into the live session: Skip is the one
+                    // action that has to rebuild the connection, because the
+                    // multiplexer the startup command started cannot be
+                    // un-launched from inside it. Flipping the flag keys the
+                    // representable on a new identity, so SwiftUI tears the
+                    // current terminal down and builds one whose startup command
+                    // is nil — dropping straight to a login shell. Scoped to
+                    // this screen's state, never written back to the host: the
+                    // saved host is exactly as the user left it, and the next
+                    // visit runs its session command again.
+                    plainShell = true
                 }
             }
         }
@@ -1134,6 +1181,22 @@ final class TerminalCoordinator {
 private struct TerminalViewRepresentable: UIViewRepresentable {
     let host: Host
     let credential: SSHCredential
+    /// Replaces `host.sessionCommand` when set, for the session this view
+    /// builds. Non-nil only for the picker's Skip, whose whole meaning is "do
+    /// not run the host's command" — so an empty value is a real instruction,
+    /// not an absent one, and `nil` is what every ordinary build passes.
+    ///
+    /// Kept as an override rather than by emptying the host's field: the saved
+    /// host has to survive the tap untouched, and the choice is scoped to this
+    /// connection anyway. Read at build time like the command it replaces,
+    /// because the transport and its launcher are built in `makeUIView` and a
+    /// change here is meant to arrive as a new view, not an in-place edit.
+    var startupCommandOverride: String? = nil
+    /// This session's multiplexer, seen the same way `TerminalScreen` sees it:
+    /// an override to no command means there is no mux, whatever the saved
+    /// host still says. `host.mux` here would arm the mux gestures and the tab
+    /// row against a plain shell.
+    private var effectiveMux: String? { startupCommandOverride != nil ? nil : host.mux }
     /// Read at connect time, so flipping the toggle and reconnecting takes
     /// effect without anything being rebuilt.
     let integrations = IntegrationSettings()
@@ -1205,7 +1268,15 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         // host that asks for something unavailable says why instead of quietly
         // behaving like SSH.
         let transport: TerminalTransport
-        switch TransportFactory.make(kind: host.transport, configuration: configuration, host: host) {
+        // The factory is handed the host it will read the session command from,
+        // so an override has to reach it through here too: mosh and ET bake the
+        // command into the launcher they build, and a Skip applied only to the
+        // SSH startup below would leave those two still starting the mux.
+        var transportHost = host
+        if let startupCommandOverride { transportHost.sessionCommand = startupCommandOverride }
+        switch TransportFactory.make(
+            kind: host.transport, configuration: configuration, host: transportHost
+        ) {
         case .success(let built):
             transport = built
         case .failure(let unavailable):
@@ -1215,7 +1286,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         let view = CQUTTerminalView(
             frame: .zero,
             configuration: configuration,
-            startupCommand: host.sessionCommand.isEmpty ? nil : host.sessionCommand,
+            startupCommand: transportHost.sessionCommand.isEmpty ? nil : transportHost.sessionCommand,
             startupPreamble: integrations.shellExportLines.joined(separator: "\n"),
             theme: theme,
             font: fonts.uiFont(),
@@ -1224,13 +1295,15 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         view.gestures = gestures
         view.optionIsMeta = input.optionIsMeta
         view.allowsClipboardRead = allowsClipboardRead
-        view.muxPrefix = mux.prefix(for: host.mux)
+        view.muxPrefix = mux.prefix(for: effectiveMux)
         // The host's own kind, which is what decides whether a multiplexer
-        // gesture has anywhere to go. Read from `Host.mux` rather than from the
-        // session command string here, because a user's command can change
-        // while the host is saved, and this is the same detector the window row
-        // and the session picker already trust.
-        view.muxKind = host.mux
+        // gesture has anywhere to go — `effectiveMux`, not `host.mux`, so a
+        // session that skipped to a plain shell gets no multiplexer at all.
+        // Read from `Host.mux` rather than from the session command string
+        // here, because a user's command can change while the host is saved,
+        // and this is the same detector the window row and the session picker
+        // already trust.
+        view.muxKind = effectiveMux
         view.muxGestures = input.muxGestures
         view.dismissKeyboardOnScrollPastEnd = input.dismissKeyboardOnScrollPastEnd
         view.pinchZoomsPane = pinchZoomsPane
@@ -1309,6 +1382,18 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         return view
     }
 
+    /// Closes the transport the moment the view is taken out of the hierarchy.
+    ///
+    /// Without this the old connection is only torn down when its view happens
+    /// to be deallocated, which for the Skip rebuild would leave the first
+    /// session's socket alive while the plain-shell one dials — two connections
+    /// to one host, with the old one only disappearing on a later allocation
+    /// pass. Disconnecting here also resigns the terminal cleanly rather than
+    /// letting a stray callback fire into a view that is being replaced.
+    static func dismantleUIView(_ uiView: CQUTTerminalView, coordinator: Coordinator) {
+        uiView.disconnect()
+    }
+
     func updateUIView(_ uiView: CQUTTerminalView, context: Context) {
         // The theme is a live setting: changing it while a session is open
         // should repaint the terminal, not wait for the next connection. The
@@ -1326,8 +1411,8 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         // on the next connection.
         uiView.optionIsMeta = input.optionIsMeta
         uiView.allowsClipboardRead = allowsClipboardRead
-        uiView.muxPrefix = mux.prefix(for: host.mux)
-        uiView.muxKind = host.mux
+        uiView.muxPrefix = mux.prefix(for: effectiveMux)
+        uiView.muxKind = effectiveMux
         uiView.muxGestures = input.muxGestures
         // A live setting like the one above: a flip should change how the next
         // drag behaves, not wait for the next connection.

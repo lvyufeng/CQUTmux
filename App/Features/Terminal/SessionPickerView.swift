@@ -95,6 +95,11 @@ struct SessionPickerView: View {
     enum PickerAction {
         case mux(MuxAction)
         case openDirectory(String)
+        /// Drop the host's session command for this connection and land in a
+        /// plain login shell instead. It is not a message typed into the live
+        /// session — it is a request to re-establish without one — so the
+        /// terminal treats it differently from the other two.
+        case skip
     }
 
     /// A multiplexer command, tagged with its mux so the terminal knows which
@@ -104,36 +109,26 @@ struct SessionPickerView: View {
         case window(mux: String, session: String, selector: String)
     }
 
-    // NOTE: Moshi also offers "Skip" at the bottom of this list — connect
-    // without attaching to any session, dropping into a plain login shell.
-    // CQUTmux cannot offer it without a change to connection logic that this
-    // UI change cannot verify, so it is deliberately left out.
+    // Moshi's "Skip" sits at the bottom of this list: connect without
+    // attaching to anything and drop into a plain login shell. It is offered
+    // as a footer on the Sessions tab rather than a row inside a session's
+    // section, because it is the one action here that does *not* belong to a
+    // session — it is the choice not to have one.
     //
-    // The picker has no way to ask for a plain shell: every action it can send
-    // is either a mux command (`MuxAction`) or a directory `cd`, and both are
-    // typed into a connection that is *already* running the host's session
-    // command. The session command is not a per-action parameter — it is read
-    // once when the view is built (`TerminalViewRepresentable.swift:1218`,
-    // `host.sessionCommand`) and, for mosh/ET, baked into the transport
-    // launcher before the connection exists (`TransportFactory.swift:70`).
-    // "Skip" means connecting with *no* session command, which is a decision
-    // made at build/connect time, not a message the picker can send over the
-    // wire.
+    // Skip is not a command typed into the live session the way attach and
+    // `cd` are. Those two ride the shell that is already up, so they are
+    // messages this view can send over the wire. Skip means starting the
+    // connection with *no* session command, which is a decision made when the
+    // session is built (`TerminalViewRepresentable`, `host.sessionCommand`),
+    // not something the running shell can be told to undo — you cannot
+    // un-launch the multiplexer the startup command already started.
     //
-    // A faithful Skip would have to re-run `connection.connect(to:)` (or
-    // rebuild `CQUTTerminalView`) with `startupCommand`/`sessionCommand` nil.
-    // Two things make that unsafe to wire blind: (1) the transport is
-    // constructed in `makeUIView` from the host, so emptying the command after
-    // connect does not affect an already-live mosh/ET launcher; (2) the same
-    // `startupCommand` is what a reconnect replays (`didRunStartup`), so a
-    // half-applied Skip would drop back into the mux on the next reconnect.
-    // Getting it right means a session-command override threaded through
-    // `TerminalViewRepresentable` and both transports — a change to connection
-    // behaviour, out of scope here.
-    //
-    // What already exists and is *not* Skip: the "Recent folders" and "Agent
-    // history" rows send a bare `cd`, but that lands inside the mux session's
-    // shell, not a fresh login shell. See `CQUTTerminalView.attachSessionDirectory`.
+    // So the case is still the view's own `PickerAction` — the terminal is
+    // told what the tap meant, exactly as it is for the other two — but the
+    // terminal answers it by rebuilding the session with a nil startup
+    // command, scoped to this connection only. The saved host is never
+    // touched: `TerminalScreen` holds the override in `@State` and reads it,
+    // not `host.sessionCommand`, when it builds the view.
 
     var body: some View {
         NavigationStack {
@@ -504,6 +499,27 @@ struct SessionPickerView: View {
                                 }
                             }
                         }
+            skipSection
+        }
+    }
+
+    /// Moshi's Skip, as the last thing in the list.
+    ///
+    /// A `Section` of its own rather than a footer or a toolbar button: it is
+    /// the choice not to use any of the sessions above, so it reads as the end
+    /// of the same list rather than as chrome around it — and in the grouped
+    /// list it is the one row that is about the connection instead of about a
+    /// session. Shared with the card presentation so the two cannot drift.
+    private var skipSection: some View {
+        Section {
+            Button {
+                act(.skip)
+                dismiss()
+            } label: {
+                Label("Skip — start a plain shell", systemImage: "terminal")
+            }
+        } footer: {
+            Text("Connect without running \(host?.displayName ?? "the host")'s session command. A login shell on its own, for this connection only.")
         }
     }
 
@@ -521,9 +537,24 @@ struct SessionPickerView: View {
                 ForEach(sessions) { session in
                     card(session)
                 }
+                skipButton
             }
             .padding()
         }
+    }
+
+    /// Skip in the card presentation, which has no `List` to hang a `Section`
+    /// on. Same label and same action as `skipSection`, worded as a button
+    /// because a card list has no footers.
+    private var skipButton: some View {
+        Button {
+            act(.skip)
+            dismiss()
+        } label: {
+            Label("Skip — start a plain shell", systemImage: "terminal")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
     }
 
     @ViewBuilder
