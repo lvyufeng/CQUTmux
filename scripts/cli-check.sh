@@ -213,12 +213,19 @@ ok "status reports a missing gateway and exits non-zero"
 run doctor --port "$DEAD_PORT" > "$OUT/doctor.txt" 2>&1 || true   # non-zero is expected without tmux
 grep -qE "^(ok|FAIL)  (tmux|git|ssh)" "$OUT/doctor.txt" || fail "doctor checked none of its tools"
 grep -qE "^(ok|FAIL)  gateway" "$OUT/doctor.txt" || fail "doctor did not check the gateway"
+# The multiplexer section is the one part of doctor that reports on a thing that
+# is *not* an error to be missing -- so it has to say so rather than print
+# nothing, and it has to appear at all. Both are silent failures: a section that
+# never renders and a section that renders an empty list look the same as a host
+# with no multiplexer, which is a normal host.
+grep -q "^Multiplexers$" "$OUT/doctor.txt" || fail "doctor has no Multiplexers section"
+grep -qE "^  (ok|warn) " "$OUT/doctor.txt" || fail "the Multiplexers section listed nothing at all"
 # A crashed doctor also produces no matching line, and "it died" and "it
 # disagreed" want different investigations -- so require the report to look
 # like a report.
 [ "$(wc -l < "$OUT/doctor.txt")" -ge 5 ] \
   || fail "doctor produced no report (see $OUT/doctor.txt)"
-ok "doctor checks the tools and the gateway"
+ok "doctor checks the tools, the gateway, and the multiplexers"
 
 run install > "$OUT/install.txt" 2>&1 || fail "install exited non-zero"
 grep -q "loopback" "$OUT/install.txt" || fail "install does not say the port stays off the network"
@@ -434,9 +441,42 @@ pkill -f "bind(('127.0.0.1', 8005))" 2>/dev/null || true
 
 # MARK: - diff, from a repo and outside one
 
-run diff "$ROOT" > "$OUT/diff.txt" 2>&1 || fail "diff failed inside a repository"
-grep -q "changed file(s)" "$OUT/diff.txt" || fail "diff did not summarise the repo"
-ok "diff summarises a repository"
+# `cqutmux diff` is a *viewer server*, not a report: it prints a URL and holds
+# the port until it is stopped. The check has to drive it as one — run it in the
+# background, read the URL it prints, and fetch the page.
+#
+# Running it in the foreground, as this did until 2026-10-11, waits forever on a
+# server that is working exactly as intended, and greps its stdout for a summary
+# it stopped printing when the viewer landed (the summary is in the HTML now).
+# This check passed when it was written because `diff` printed a summary and
+# returned; when it became a server the check did not fail, it *hung* — the same
+# "a client that opens a connection never exits" shape recorded against
+# `scripts/pushsend-check.sh`, and the reason that note says a socket-owning
+# check has to be run with a timeout the first time.
+DIFF_PORT=$((PORT + 5))
+node "$CLI" diff "$ROOT" --no-open --port "$DIFF_PORT" > "$OUT/diff.txt" 2>&1 &
+DIFF_PID=$!
+for _ in $(seq 1 20); do
+  grep -q "serving" "$OUT/diff.txt" 2>/dev/null && break
+  sleep 0.25
+done
+grep -q "serving" "$OUT/diff.txt" || fail "diff did not start its viewer (see $OUT/diff.txt)"
+ok "diff starts a viewer and prints where it is"
+
+DIFF_HTML="$(curl -s -m 5 "http://127.0.0.1:$DIFF_PORT/")"
+echo "$DIFF_HTML" | grep -q "changed file(s)" || fail "the diff page does not summarise the repo"
+ok "the diff page summarises the repository"
+
+# A server a check starts has to be *stoppable*, or the check leaks a process
+# and a port. Asserting the signal handler rather than merely killing it is the
+# point: a diff that ignores SIGTERM is a diff nobody can stop.
+kill "$DIFF_PID" 2>/dev/null || true
+for _ in $(seq 1 20); do
+  kill -0 "$DIFF_PID" 2>/dev/null || break
+  sleep 0.25
+done
+kill -0 "$DIFF_PID" 2>/dev/null && fail "diff did not stop on SIGTERM"
+ok "diff stops when signalled, rather than holding the port"
 
 if run diff /tmp > "$OUT/nodiff.txt" 2>&1; then
   fail "diff succeeded outside a repository"
