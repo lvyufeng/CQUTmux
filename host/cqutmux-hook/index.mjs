@@ -1423,7 +1423,7 @@ function usage() {
   cqutmux logs [-f]      tail the gateway log
   cqutmux serve          run the gateway (same as running with no arguments)
   cqutmux install        wire up the agent hooks
-  cqutmux service install   run the gateway at login (launchd / systemd)
+  cqutmux service install   run the gateway at login (launchd / systemd / a Windows Run entry)
   cqutmux service status    is that service loaded and running
   cqutmux service uninstall remove it again
   cqutmux uninstall      remove the hooks this tool installed
@@ -1773,6 +1773,55 @@ async function serviceCommand(rest) {
       'cqutmux: service install is not implemented on this platform.\n' +
       'Run `cqutmux serve` under your own supervisor instead.\n')
     process.exit(1)
+  }
+
+  // Windows is a registry value, not a file: there is nothing to write, and
+  // the `reg add` in `plan.load` *is* the install. It is also the one branch
+  // that has never run on this repo's machines (macOS and Linux), so the
+  // execution is guarded on the actual platform rather than on `plan.kind` —
+  // a plan built for `win32` by a test on macOS must not spawn `reg`.
+  if (plan.kind === 'win32') {
+    if (process.platform !== 'win32') {
+      // Reachable only via a plan built for another platform, which the CLI
+      // never does; refusing beats running `reg` where it does not exist.
+      process.stderr.write('cqutmux: the Windows service plan cannot run on ' + process.platform + '\n')
+      process.exit(1)
+    }
+
+    if (action === 'install') {
+      await mkdir(dirname(logPath), { recursive: true }).catch(() => {})
+      const added = await tryRun(plan.load[0], plan.load.slice(1))
+      if (!added.ok) {
+        process.stderr.write(
+          `cqutmux: could not write the logon entry (${added.message}).\n` +
+          `Write it yourself with: ${plan.load.join(' ')}\n`)
+        process.exit(1)
+      }
+      process.stdout.write(`wrote ${plan.path} (value ${plan.value})\n`)
+      process.stdout.write(`running at login: ${SERVICE_ID}\n`)
+      return
+    }
+
+    if (action === 'uninstall') {
+      // Deleting a value that is not there exits non-zero, which is the same
+      // answer as "already removed" — reported, not treated as a failure.
+      const removed = await tryRun(plan.unload[0], plan.unload.slice(1))
+      if (!removed.ok) process.stderr.write(`cqutmux: ${removed.message}\n`)
+      process.stdout.write(`removed ${plan.path} (value ${plan.value})\n`)
+      return
+    }
+
+    if (action !== 'status') {
+      process.stderr.write(`cqutmux: service ${action} is not a subcommand (install|status|uninstall)\n`)
+      process.exit(1)
+    }
+
+    // `reg query` exits non-zero when the value is absent, so there is no
+    // separate existence check as on a filesystem path.
+    const result = await tryRun(plan.status[0], plan.status.slice(1))
+    process.stdout.write(`${plan.path}\n${result.stdout.trim() || result.message || 'not running'}\n`)
+    if (!result.ok) process.exit(1)
+    return
   }
 
   if (action === 'install') {

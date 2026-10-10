@@ -7,6 +7,7 @@
 
 import {
   SERVICE_ID,
+  WINDOWS_RUN_KEY,
   unitPlan,
   serviceArgv,
   xmlEscape,
@@ -47,8 +48,21 @@ ok(mac.path.includes('/Users/alice/') && !mac.path.includes('/Library/LaunchDaem
 ok(lin.path.includes('/.config/systemd/user/') && !lin.path.includes('/etc/systemd/system/'),
    'the Linux unit is a user unit, not a system unit')
 
+// MARK: - Where the Windows entry goes
+
+// The same per-user rule as the other two, expressed the Windows way: a value
+// under HKCU (the current user's own hive) rather than HKLM (machine-wide, and
+// writable only by an administrator). Moshi's Windows install registers a
+// per-user logon entry with no elevation, and a machine-wide key would be a
+// different feature with a UAC prompt in front of it.
 const win = unitPlan({ platform: 'win32', home: 'C:\\Users\\c' })
-ok(win.kind === 'unsupported', 'Windows is reported unsupported rather than faked')
+ok(win.kind === 'win32', 'Windows uses a Run-key logon entry, not "unsupported"')
+ok(win.path.startsWith('HKCU\\'), 'the Windows entry is per-user (HKCU): ' + win.path)
+ok(!win.path.includes('HKLM'), 'it is not machine-wide (no HKLM)')
+ok(win.path.includes('CurrentVersion\\Run'), 'the entry lives under the Run key')
+ok(win.value === SERVICE_ID,
+   'the value name is the one id, so install/status/uninstall address it the same')
+ok(!('content' in win), 'there is no file to write on Windows — the entry is a registry value')
 
 // MARK: - The command the service runs
 
@@ -146,8 +160,48 @@ ok(linPlan.load.join(' ').includes('systemctl --user enable'),
    'the Linux plan enables the user unit')
 ok(linPlan.status.join(' ').includes('is-active'), 'the Linux plan asks is-active')
 
-const winPlan = servicePlan({ platform: 'win32', home: 'C:\\Users\\c', logPath: '/l', nodePath: '/n', scriptPath: '/s' })
-ok(winPlan.supported === false, 'the Windows plan is explicitly unsupported, not silently empty')
+const winPlan = servicePlan({
+  platform: 'win32',
+  home: 'C:\\Users\\c',
+  logPath: 'C:\\Users\\c\\.cqutmux\\hook.log',
+  // Windows paths, to check the quoting against the separators the entry will
+  // actually contain rather than POSIX ones.
+  nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+  scriptPath: 'C:\\Users\\c\\cqutmux\\index.mjs',
+  port: 24543,
+  token: 't',
+})
+ok(winPlan.supported === true, 'the Windows plan is supported, not refused')
+ok(winPlan.content === null, 'the Windows plan has no file content — the value is the config')
+ok(winPlan.load[0] === 'reg' && winPlan.load[1] === 'add', 'the Windows plan installs with reg add')
+ok(winPlan.load.includes(WINDOWS_RUN_KEY), 'the plan writes under the per-user Run key')
+ok(!winPlan.load.includes('HKLM'), 'the plan never touches the machine-wide hive')
+ok(winPlan.load.includes('/v') && winPlan.load.includes(SERVICE_ID),
+   'the value is named by the one id, matching status and uninstall')
+ok(winPlan.unload.slice(0, 2).join(' ') === 'reg delete', 'the Windows plan uninstalls with reg delete')
+ok(winPlan.status.slice(0, 2).join(' ') === 'reg query', 'the Windows plan asks about it with reg query')
+ok(winPlan.status.includes(SERVICE_ID), 'status asks about the same value name')
+
+// The command line carries absolute node and script paths, exactly as the
+// launchd and systemd forms do: a service has no shell and no PATH, so a bare
+// `cqutmux`/`node` would resolve to nothing at login. The program path here has
+// a space in it ("Program Files"), so it must arrive quoted — an unquoted one
+// is two arguments and Windows runs the first.
+const winCmd = winPlan.load[winPlan.load.indexOf('/d') + 1]
+ok(winCmd.includes('C:\\Program Files\\nodejs\\node.exe'),
+   'the Windows command carries the absolute node path')
+ok(winCmd.startsWith('"C:\\Program Files\\nodejs\\node.exe"'),
+   'a program path with a space is quoted, so Windows does not split it')
+ok(winCmd.includes('C:\\Users\\c\\cqutmux\\index.mjs'),
+   'the Windows command carries the absolute script path')
+ok(winCmd.includes('serve'), 'the Windows command runs the serve subcommand')
+ok(winCmd.includes('--port 24543') && winCmd.includes('--token t'),
+   'the port and token are passed through as the other platforms pass them')
+
+// Nothing is written where the other platforms write files, so there is no
+// `.plist` or `.service` path to confuse with a registry key.
+ok(!winPlan.path.includes('.plist') && !winPlan.path.endsWith('.service'),
+   'the Windows plan writes no unit file at all')
 
 console.log('')
 console.log('SERVICE_PASS  (' + pass + ' checks)')

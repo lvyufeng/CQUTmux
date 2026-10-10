@@ -27,8 +27,10 @@ implementation under another name.
   (44 checks).
 - **`service install|status|uninstall`** — Moshi's `moshi-hook service install`
   registers a service; ours only printed a snippet to paste. Now writes a
-  per-user LaunchAgent / systemd unit and loads it. `host/cqutmux-hook/service.mjs`,
-  `scripts/service-check.sh` (50 checks).
+  per-user LaunchAgent / systemd unit and loads it, and on Windows a per-user
+  `HKCU\...\Run` logon entry (no elevation, matching Moshi). `host/cqutmux-hook/service.mjs`,
+  `scripts/service-check.sh` (69 checks). The Windows branch has never been
+  executed on Windows — only its rule-level decisions are asserted here.
 - **`tmux-defaults`** — Moshi's `moshi-skill` recommends four `~/.tmux.conf`
   settings; ours had no writer (the only line written was the unrelated
   `update-environment CQUTMUX_CLIENT`). Now shows, writes and removes them in a
@@ -58,7 +60,10 @@ counterpart under another name and found none.
 | Notifications: no push-token display, no image test, no simulator guard | `deviceToken` is `private(set)` and the UI shows only "Registered"; `sendTest()` posts text-only; no `targetEnvironment(simulator)` guard. |
 | Support: no log export, no transcript collection, report is a fixed fact list | `SupportView.swift` builds a fixed version/device/system/host block; no Subject/Setup/Expected/Actual template; no log surfaces. |
 | Deep links have no `pane` / `tab` parameter | `DeepLink.Target.session` carries only `mux/name/window`. |
-| `moshi-hook service` on Windows | Moshi registers a per-user logon entry; we report the platform unsupported rather than fake it. |
+
+(`moshi-hook service` on Windows was in this table and is now closed — see above.
+It is recorded there, not here, because the entry is built and rule-checked; the
+only thing still unverified is running it on a real Windows machine.)
 
 ## Claims that were FALSE (refuted, do not record as gaps)
 

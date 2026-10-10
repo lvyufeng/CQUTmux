@@ -17,6 +17,14 @@
 # can be asserted on a machine that runs neither supervisor. On a macOS box the
 # systemd branch never executes; here it does.
 #
+# Windows is registered as a per-user `HKCU\...\Run` logon entry, which is not a
+# file but a registry value. That branch has never been *executed* on Windows —
+# this repo is developed and checked on macOS and Linux — so what is asserted
+# here is the decision only: the hive (HKCU, not HKLM), the key, the value name,
+# and the `reg` verbs with the absolute command line they carry. That is the
+# same rule-level approach `platform.mjs` takes, and for the same reason: it is
+# the part that breaks on the machine nobody is looking at.
+#
 # The assertions live in `scripts/service/main.mjs` rather than inline: the
 # values under test are XML and unit text, and getting those through bash's
 # escaping without a mismatch is more error-prone than reading them from a file.
@@ -29,7 +37,8 @@
 #   - stop quoting systemd args            -> the path-with-space assertion fails
 #   - escape `&` after `<`/`>`             -> the double-escape assertion fails
 #   - make the unit system-wide            -> the user-scope assertions fail
-#   - return an empty Windows plan         -> the "unsupported" assertion fails
+#   - put the Windows entry under HKLM      -> the per-user (HKCU) assertions fail
+#   - drop the quoting of a spaced program  -> the Windows path-with-space assertion fails
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
