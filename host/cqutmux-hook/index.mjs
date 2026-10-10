@@ -37,6 +37,13 @@ import { windowsForSource } from './usage.mjs'
 import { parseLsof, parseSs, describe } from './listeners.mjs'
 import { renderDiffHtml } from './diffpage.mjs'
 import { detectContext, sessionIndexFromTmux, contextPayload } from './context.mjs'
+import {
+  apply as applyLocale,
+  strip as stripLocale,
+  installed as localeInstalled,
+  isSafeLocale,
+  FILES as LOCALE_FILES,
+} from './locale.mjs'
 import { terminal as qrTerminal } from './qr.mjs'
 import { sendGesture, stopAllSessions, touchHelperAvailable } from './simtouch.mjs'
 
@@ -1236,7 +1243,7 @@ const SETTABLE = [
 
 const COMMANDS = new Set([
   'pair', 'install', 'uninstall', 'serve', 'status', 'doctor', 'logs', 'diff',
-  'set', 'usage', 'version', 'update', 'help', 'context',
+  'set', 'usage', 'version', 'update', 'help', 'context', 'locale',
 ])
 
 function usage() {
@@ -1245,6 +1252,9 @@ function usage() {
   cqutmux <dir>          open (or attach to) a tmux session for a project
   cqutmux diff           diff viewer for the current repo, in the browser
   cqutmux context        this shell's terminal context (multiplexer/pane/cwd) as JSON
+  cqutmux locale <name>  write LANG/LC_ALL into ~/.zshenv and ~/.bashrc
+  cqutmux locale unset   remove those lines again
+  cqutmux locale         show what is written now
   cqutmux status         gateway health, if one is running here
   cqutmux doctor         check that this host is ready for the app
   cqutmux logs [-f]      tail the gateway log
@@ -1357,6 +1367,77 @@ async function runCommand(name, argv) {
       return contextCommand()
     case 'update':
       return update(argv)
+    case 'locale':
+      return localeCommand(positionals.slice(1))
+  }
+}
+
+/// `cqutmux locale [<name>|unset]`.
+///
+/// Writes (or removes) an `export LANG`/`export LC_ALL` block in the shell
+/// startup files, which is what reaches the non-interactive shells an agent
+/// spawns. The interactive session is fixed by the app typing the same exports
+/// into the preamble; this is the other half, for the shells that never see it.
+///
+/// Every file is read, edited and written whole rather than appended to, so a
+/// re-run is an update rather than a second copy — the failure mode of an
+/// append-only installer being a startup file that sets the variable N times,
+/// which nobody notices until one of them is wrong.
+async function localeCommand(rest) {
+  const home = homedir()
+  const target = rest[0]
+
+  if (!target) {
+    for (const file of LOCALE_FILES) {
+      const path = join(home, file.name)
+      let text = ''
+      try {
+        text = await readFile(path, 'utf8')
+      } catch {
+        // Absent is a normal state; a file that does not exist is not ours to
+        // create just to report on.
+      }
+      const state = localeInstalled(text) ? 'set' : 'not set'
+      process.stdout.write(`${path}: ${state}\n`)
+    }
+    return
+  }
+
+  if (target !== 'unset' && !isSafeLocale(target)) {
+    process.stderr.write(
+      `cqutmux: refusing \`${target}\` — a locale name uses letters, digits, ` +
+        `_ . - @ and must be a UTF-8 one (en_US.UTF-8, de_DE.UTF-8@euro).\n`
+    )
+    process.exitCode = 2
+    return
+  }
+
+  for (const file of LOCALE_FILES) {
+    const path = join(home, file.name)
+    let text = ''
+    let existed = true
+    try {
+      text = await readFile(path, 'utf8')
+    } catch {
+      existed = false
+    }
+    // `unset` on a file we never wrote leaves it alone rather than creating an
+    // empty one: an installer that invents a startup file has changed the
+    // user's shell in a way they did not ask for.
+    if (target === 'unset' && !existed) continue
+    const next = target === 'unset' ? stripLocale(text) : applyLocale(text, target)
+    if (next === text) {
+      process.stdout.write(`${path}: already ${target === 'unset' ? 'clear' : 'set'}\n`)
+      continue
+    }
+    if (existed) {
+      // Backed up once, and only when there was something to lose. An
+      // overwritten shell startup file is not something the user can be asked
+      // to reconstruct from memory.
+      await writeFile(`${path}.cqutmux-backup`, text, 'utf8').catch(() => {})
+    }
+    await writeFile(path, next, 'utf8')
+    process.stdout.write(`${path}: ${target === 'unset' ? 'cleared' : `LANG/LC_ALL -> ${target}`}\n`)
   }
 }
 

@@ -24,22 +24,25 @@ read, the Chat View composer, six `cqutmux-hook` subcommands, the
 that is still open.
 
 **Since then, more closed** — "Read first" on a pending approval; the Watch
-inbox's project grouping plus its toolbar fill; half of the host-locale claim
-(LANG and LC_ALL now cross, the rc injection does not); the per-agent Usages
+inbox's project grouping plus its toolbar fill; the host-locale claim, both
+halves (LANG and LC_ALL cross, and `cqutmux locale` now writes the guarded
+block into ~/.zshenv and ~/.bashrc so a spawned shell inherits it); the per-agent Usages
 windows; the browser-preview listener metadata; and `cqutmux diff`'s browser
 viewer, which closes a deliberate divergence, and the `cqutmux context` probe.
 Most recently the Inbox's five categories, which also turned up a gateway that
-was dropping the field the bridges were already sending, the Live Activity's
-latest-event and session-lifecycle phases, and the Chat View's Markdown/code/
-image separation.
+was dropping the field the bridges were already sending; the Live Activity's
+latest-event and session-lifecycle phases; the Chat View's Markdown/code/image
+separation; the tool cards' shape recognition; the Chat View's terminal entry
+and its derived header; and the host-locale rc injection that finishes the
+locale claim.
 See the progress list below.
 The "Read first" change also had an adversarial pass that refuted two claims it
 first shipped with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 65 |
-| partial | 9 |
+| closed | 66 |
+| partial | 8 |
 | deliberate-divergence | 1 |
 | missing | 1 |
 
