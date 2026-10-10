@@ -752,6 +752,29 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         write(Data(text.utf8))
     }
 
+    /// Walks the session to a directory.
+    ///
+    /// Not routed through `attachSession`: a folder is not a multiplexer
+    /// session, so this types a `cd` at the shell rather than an attach
+    /// command. Quoted single-quoted with the standard `'\''` escape, because
+    /// a path is arbitrary text and one containing a space or a quote would
+    /// otherwise split into arguments — or run a second command — in the pane.
+    func attachSessionDirectory(_ path: String) {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        write(Data("cd \(Self.shellQuoted(trimmed))\n".utf8))
+    }
+
+    /// A path as one safely-quoted shell word.
+    ///
+    /// The single-quote escape is the shape every POSIX shell understands: end
+    /// the quote, emit an escaped quote, reopen. Double quotes would leave
+    /// `$`, backticks and backslashes live, so this is the one to use for text
+    /// that came from a log file rather than from a person.
+    static func shellQuoted(_ text: String) -> String {
+        "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     /// Switches to a session on whichever multiplexer owns it. tmux prefers
     /// `switch-client` when we are already inside a client and `attach`
     /// otherwise; zellij and herdr both re-attach by name.

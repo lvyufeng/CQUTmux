@@ -798,16 +798,16 @@ struct TerminalScreen: View {
     @ViewBuilder
     private var sessionPicker: some View {
         if let client = connection.client {
-            SessionPickerView(client: client) { action in
+            SessionPickerView(client: client, host: host) { action in
                 switch action {
-                case .attach(let mux, let name):
+                case .mux(.attach(let mux, let name)):
                     coordinator.terminal?.attachSession(mux: mux, name: name)
                     // Recorded only on attach: attaching is the user saying
                     // "this is where I am", and that is the thing worth coming
                     // back to. Recording on the connect flow's first shell
                     // would remember a session nobody chose.
                     lastSessions.record(LastSession(mux: mux, name: name, window: nil), for: host)
-                case .window(let mux, let session, let selector):
+                case .mux(.window(let mux, let session, let selector)):
                     coordinator.terminal?.selectWindow(
                         mux: mux, session: session, selector: selector
                     )
@@ -817,6 +817,13 @@ struct TerminalScreen: View {
                     lastSessions.record(
                         LastSession(mux: mux, name: session, window: selector), for: host
                     )
+                case .openDirectory(let path):
+                    // The Recent tab's whole point: a folder is where a session
+                    // *starts*, so opening one walks there and stays in the
+                    // session — rather than attaching to a session named after
+                    // the folder, which would be a different command.
+                    coordinator.terminal?.attachSessionDirectory(path)
+                    recents.record(path, for: host)
                 }
             }
         }
