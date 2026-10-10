@@ -214,6 +214,14 @@ const waiters = new Set()
 let nextId = 1
 let pendingApprovals = 0
 
+/// Moshi's five event categories, which is what an Inbox row can be. The
+/// bridges derive one from the agent's event name; this is the gate that keeps
+/// anything else off the wire.
+const CATEGORIES = new Set([
+  'approval_required', 'task_complete', 'session_started',
+  'tool_running', 'tool_finished',
+])
+
 function emit(event) {
   // Backfill title/body here rather than at each call site. POST /events does
   // it for the events agents send us, but the notices this file emits for
@@ -974,9 +982,15 @@ const server = createServer(async (req, res) => {
 
     const kind = parsed.kind === 'approval' ? 'approval' : 'notice'
     if (kind === 'approval') pendingApprovals++
+    // The finer category the bridge derived from the agent's own event name.
+    // Kept as a string and checked against the five we know: an agent's hook is
+    // a file the user can edit, and a sixth value must fall back to what the
+    // kind implies rather than reaching the app as a category nothing can draw.
+    const category = CATEGORIES.has(parsed.category) ? parsed.category : undefined
     const record = emit({
       source: parsed.source || 'agent',
       kind,
+      ...(category ? { category } : {}),
       title: parsed.title || '',
       body: parsed.body || '',
       data: parsed.data ?? null,
@@ -1075,9 +1089,15 @@ const server = createServer(async (req, res) => {
     // tie the notice to what it resolves, but the session is what a board
     // merges rows on, and a client that only looks at sessions would otherwise
     // open a second row for the answer.
+    // `tool_running`, not `task_complete`: the tool this approval was guarding
+    // is now — or has just been — let through, which is the same reading the
+    // Inbox reaches on its own for an answered approval. The two must agree, or
+    // the same row files under a different column depending on whether the host
+    // or the phone noticed it first.
     emit({
       source: 'app',
       kind: 'notice',
+      category: 'tool_running',
       title: `approval ${decision}`,
       data: { for: id, session: target.data?.session ?? null, decision, answer: answer || null },
     })
@@ -2299,7 +2319,13 @@ async function installClaude(agent, dryRun) {
 
   const wanted = {
     PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `"${bridge}" approval` }] }],
+    PostToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `"${bridge}" tool-finish` }] }],
     Stop: [{ hooks: [{ type: 'command', command: `"${bridge}" notice` }] }],
+    // A third kind rather than a category on `notice`: the two are separate
+    // invocations, and without this hook the Inbox can never show the
+    // `session_started` category at all — a whole row state that only exists
+    // if the installer asked for it.
+    SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: `"${bridge}" session-start` }] }],
   }
 
   const existing = await readJson(target)

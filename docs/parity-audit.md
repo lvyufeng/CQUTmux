@@ -28,14 +28,16 @@ inbox's project grouping plus its toolbar fill; half of the host-locale claim
 (LANG and LC_ALL now cross, the rc injection does not); the per-agent Usages
 windows; the browser-preview listener metadata; and `cqutmux diff`'s browser
 viewer, which closes a deliberate divergence, and the `cqutmux context` probe.
+Most recently the Inbox's five categories, which also turned up a gateway that
+was dropping the field the bridges were already sending.
 See the progress list below.
 The "Read first" change also had an adversarial pass that refuted two claims it
 first shipped with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 60 |
-| partial | 14 |
+| closed | 61 |
+| partial | 13 |
 | deliberate-divergence | 1 |
 | missing | 1 |
 
@@ -926,8 +928,9 @@ evidence. What is missing, in one line each:
   handling and the fallback are not.
 - Theme import is complete; the 570-theme `/themes` gallery it can import *from*
   does not exist.
-- Inbox rows carry a needs-you/working/done column, not the five named
-  categories.
+- Inbox rows now carry all five named categories (approval_required,
+  task_complete, session_started, tool_running, tool_finished) as well as the
+  needs-you/working/done column, which is derived from them.
 - Chat View renders message blocks; Markdown, code and image separation do not.
 - Chat View is the 4th segment of the Code pane, not a toolbar agent-icon entry,
   and its header lacks the agent/model/session line and the diff/preview

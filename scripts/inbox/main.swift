@@ -455,6 +455,167 @@ let resolved = try? JSONDecoder().decode(AgentEvent.self, from: Data(notice.utf8
 check(resolved?.resolvesEventID == 1, "the resolution notice names the event it resolves")
 check(resolved?.sessionKey == "sess-a", "and lands on that event's row")
 
+// MARK: - The five categories
+//
+// The wire carries two shapes (`approval`/`notice`) and five categories, and
+// the mapping between them is a guess whenever a hook did not send a category
+// of its own. A wrong guess does not crash — it files a row under the wrong
+// column, or labels a finished tool call as a finished task — so the derivation
+// is pinned here rather than read off a row.
+
+/// A notice whose hook did or did not say which of the five it was.
+func categorised(_ id: Int, declared: String?, kind: AgentEvent.Kind = .notice,
+                 decision: String? = nil, session: String? = "s1") -> AgentEvent {
+    var event = event(id, age: 0, kind: kind, session: session, decision: decision)
+    event.category = declared
+    return event
+}
+
+// No category on the wire: the shape has to be read, and the reading has to
+// agree with what the board did with the two kinds before categories existed.
+check(categorised(1, declared: nil, kind: .approval, decision: nil).eventCategory == .approvalRequired,
+      "an unanswered approval derives approval_required")
+check(categorised(2, declared: nil, kind: .approval, decision: "allow").eventCategory == .toolRunning,
+      "an answered approval derives tool_running — the tool it guarded is now running, not finished")
+check(categorised(3, declared: nil, kind: .notice).eventCategory == .taskComplete,
+      "a bare notice derives task_complete")
+
+// `session_started` is never derived. Nothing in an approval or a notice is
+// evidence that a session began, and inventing it would put a row on the board
+// for a session that is not doing anything — activity that did not happen.
+let derivable = AgentEvent.Category.allCases.filter { category in
+    categorised(4, declared: nil, kind: .notice).eventCategory == category
+    || categorised(4, declared: nil, kind: .approval).eventCategory == category
+    || categorised(4, declared: nil, kind: .approval, decision: "allow").eventCategory == category
+}
+check(!derivable.contains(.sessionStarted),
+      "session_started is only ever sent, never guessed (derived: \(derivable.map(\.rawValue)))")
+
+// A declared category wins over the shape: this is the whole point of the
+// field, and an implementation that kept reading the kind would pass every
+// check above and still show the wrong one for every agent that reports its
+// own events.
+check(categorised(5, declared: "session_started").eventCategory == .sessionStarted,
+      "a declared session_started is believed (the shape alone would say task_complete)")
+check(categorised(6, declared: "tool_finished").eventCategory == .toolFinished,
+      "and so is a declared tool_finished on a notice")
+
+// A sixth category from a newer hook must not blank the Inbox: the string is
+// kept as a string and only mapped when this build knows it.
+check(categorised(7, declared: "brand_new_thing").declaredCategory == nil,
+      "an unknown category string decodes to no category rather than failing")
+check(categorised(7, declared: "brand_new_thing").eventCategory == .taskComplete,
+      "and falls back to what its shape implies")
+
+// Every category has to be reachable from the wire spelling, or a hook that
+// sends one is describing something this build cannot show.
+for category in AgentEvent.Category.allCases {
+    let decoded = try? JSONDecoder().decode(
+        AgentEvent.self,
+        from: Data("""
+        {"id":9,"at":"2023-11-14T22:13:20.123Z","source":"claude-code","kind":"notice",
+         "category":"\(category.rawValue)","title":"x","body":"","data":{}}
+        """.utf8)
+    )
+    check(decoded?.eventCategory == category,
+          "the wire spelling \(category.rawValue) decodes to its category")
+    check(!category.label.isEmpty, "\(category.rawValue) has a label for the row")
+}
+
+// MARK: - The category the row reports, and the column it files into
+
+/// The single row the board builds from these events.
+func onlyRow(_ events: [AgentEvent]) -> InboxBoard.Row? {
+    let board = column(of: events)
+    return board.active.count == 1 ? board.active.first : nil
+}
+
+let runningRow = onlyRow([categorised(10, declared: "tool_running", session: "s-run")])
+check(runningRow?.category == .toolRunning, "a row whose newest event is tool_running says so")
+check(runningRow?.column == .working, "and files into Working")
+
+let finishedRow = onlyRow([categorised(11, declared: "tool_finished", session: "s-fin")])
+check(finishedRow?.category == .toolFinished, "a finished tool call is tool_finished, not a finished task")
+check(finishedRow?.column == .done, "and is Done — the tool finished, so nothing is waiting")
+
+let startedRow = onlyRow([categorised(12, declared: "session_started", session: "s-start")])
+check(startedRow?.category == .sessionStarted, "a session that just began says session_started")
+check(startedRow?.column == .done,
+      "and does not sit in Working — nothing is in flight, and a board full of idle sessions buries the real work")
+
+// The row's category is the one its column was decided from, so the two cannot
+// disagree. Each category is fed on the wire that can actually carry it —
+// `approval_required` is only meaningful on an approval, the rest on a notice.
+let wireKind: [AgentEvent.Category: AgentEvent.Kind] = [
+    .approvalRequired: .approval,
+    .toolRunning: .notice,
+    .toolFinished: .notice,
+    .taskComplete: .notice,
+    .sessionStarted: .notice,
+]
+for category in AgentEvent.Category.allCases {
+    let kind = wireKind[category] ?? .notice
+    guard let row = onlyRow([categorised(13, declared: category.rawValue, kind: kind, session: "s-\(category.rawValue)")]) else {
+        check(false, "\(category.rawValue) builds exactly one row")
+        continue
+    }
+    let expected: InboxBoard.Column = category == .approvalRequired ? .needsYou
+        : (category == .toolRunning ? .working : .done)
+    check(row.category == category && row.column == expected,
+          "\(category.rawValue) is reported as itself and files into \(expected.title)")
+}
+
+// And a row in "Needs you" must have something to answer. The buttons come from
+// `row.pending`, so a row filed there without it is the worst state the board
+// has: it holds the screen's most prominent slot and offers no way to clear it.
+// A notice that claims `approval_required` is exactly that trap — the category
+// is declared but there is no approval event behind it — and it must not be
+// taken at its word.
+let declaredOnNotice = onlyRow([categorised(14, declared: "approval_required", kind: .notice, session: "s-liar")])
+check(declaredOnNotice?.column != .needsYou,
+      "a notice claiming approval_required is not put in Needs you — there is nothing behind it to answer")
+check(declaredOnNotice?.pending == nil, "which is why: it carries no approval to answer")
+
+// The same, for every row of every column: Needs you implies a pending event.
+for kind in [AgentEvent.Kind.approval, .notice] {
+    for declared in [nil, "approval_required", "tool_running", "tool_finished", "session_started"] {
+        let board = column(of: [categorised(15, declared: declared, kind: kind, session: "s-x")])
+        for row in board.active where row.column == .needsYou {
+            check(row.pending != nil,
+                  "a \(kind.rawValue)/\(declared ?? "none") row in Needs you has an approval to answer")
+        }
+    }
+}
+
+// The gateway's resolution notice carries a category of its own now
+// (`tool_running`), and it must still not decide the row. It is our
+// bookkeeping: left to decide, answering an approval would move every row to
+// Working on the strength of a notice about the user's own tap.
+let gatewayNotice = AgentEvent(
+    id: 20, at: wireDate.string(from: base), source: "app", kind: .notice,
+    category: "tool_running", title: "approval allow", body: "", decision: nil,
+    answer: nil, data: { var p = AgentEvent.Payload(
+        teammate: nil, session: nil, cwd: nil, for: nil, options: nil)
+        p.`for` = 19
+        p.session = "s-own"
+        return p }()
+)
+let ownOnly = onlyRow([gatewayNotice])
+check(ownOnly?.category != .toolRunning,
+      "our own resolution notice does not put the row in Working on the strength of our own note")
+check(ownOnly?.column != .working, "and the row it would have made is not Working")
+
+// An answered approval plus its resolution notice: the row reads
+// `tool_running` — derived from the answered approval, not from the notice —
+// and files into Working, which is what the host is actually saying.
+let answeredPlusNotice = [
+    categorised(19, declared: nil, kind: .approval, decision: "allow", session: "s-ans"),
+    gatewayNotice,
+]
+check(onlyRow(answeredPlusNotice)?.category == .toolRunning,
+      "an answered approval reads as tool_running even with the notice alongside it")
+check(onlyRow(answeredPlusNotice)?.column == .working, "and sits in Working")
+
 if failures > 0 {
     print("\nINBOX_FAIL  (\(failures) of \(checks) failed)")
     exit(1)

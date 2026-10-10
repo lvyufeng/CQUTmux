@@ -13,7 +13,7 @@
 // chances for one of them to be subtly different. The differences here are
 // exactly the field names, so they live in a table.
 //
-// Usage: agent-hook.mjs <source> <approval|notice>
+// Usage: agent-hook.mjs <source> <approval|notice|session-start|tool-finish>
 //
 // Never blocks the agent: any failure exits 0. A hook that errors is far worse
 // than a missing notification, because the agent waits on it.
@@ -100,10 +100,39 @@ const message = pick(payload, [
   'message', 'response', 'summary',
 ])
 
-const title = kind === 'approval'
-  ? (typeof tool === 'string' && tool) || 'tool call'
-  : 'Task finished'
-const body = kind === 'approval' ? flatten(detail) : flatten(message)
+// Which of Moshi's five categories this is.
+//
+// The agent's own event name is the best evidence, because a payload says which
+// event fired; the kind we were invoked with is the fallback, for an agent that
+// sends no event name or an install that predates this table. The Inbox derives
+// the same value from the kind when the field is missing, so a category is a
+// refinement that must never contradict the shape — `notice` for a tool's end
+// is still a notice, not an approval.
+const eventName = pick(payload, ['hook_event_name', 'hookEventName', 'event'])
+const CATEGORY_OF_EVENT = {
+  PreToolUse: 'approval_required',
+  PostToolUse: 'tool_finished',
+  Stop: 'task_complete',
+  SessionStart: 'session_started',
+  SessionEnd: 'task_complete',
+}
+const CATEGORY_OF_KIND = {
+  approval: 'approval_required',
+  'session-start': 'session_started',
+  'tool-finish': 'tool_finished',
+  notice: 'task_complete',
+}
+const category = CATEGORY_OF_EVENT[eventName] || CATEGORY_OF_KIND[kind] || 'task_complete'
+
+// Two readers of the same fact: a category that only describes the end of a
+// turn is a turn summary, and every other category is about a tool that is
+// named in the payload. Reading the title off the *category* rather than off
+// the kind is what keeps `tool_finished` from being announced as "Task
+// finished" — both arrive as a `notice` on the wire.
+const title = category === 'task_complete'
+  ? 'Task finished'
+  : (typeof tool === 'string' && tool) || 'tool call'
+const body = category === 'task_complete' ? flatten(message) : flatten(detail)
 
 const cwd = pick(payload, ['cwd', 'workspace', 'working_directory', 'workingDirectory'])
 const model = pick(payload, ['model', 'model_name', 'modelName'])
@@ -111,6 +140,7 @@ const model = pick(payload, ['model', 'model_name', 'modelName'])
 const event = {
   source,
   kind,
+  category,
   title: String(title).slice(0, 200),
   body: body.slice(0, 1000),
   data: {
@@ -119,9 +149,7 @@ const event = {
     ...(model ? { model: String(model) } : {}),
     // The agent's own event name, kept so a future hook can be told apart from
     // an old one without the gateway guessing from the fields present.
-    ...(pick(payload, ['hook_event_name', 'hookEventName', 'event'])
-      ? { event: String(pick(payload, ['hook_event_name', 'hookEventName', 'event'])) }
-      : {}),
+    ...(eventName ? { event: String(eventName) } : {}),
   },
 }
 

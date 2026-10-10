@@ -58,6 +58,13 @@ struct InboxBoard {
         /// path while the header only needs the project name.
         var directory: String?
         var column: Column
+        /// What the session's newest agent event *was* — the finer of Moshi's
+        /// five categories, where `column` is only the three buckets they fall
+        /// into. Two rows can share a column and mean different things ("a tool
+        /// finished" and "the turn finished" are both Done), and a row that
+        /// cannot say which has to be described by the column, which is how a
+        /// finished tool call gets read as a finished task.
+        var category: AgentEvent.Category
         /// Newest first.
         var events: [AgentEvent]
         /// The approval or question still waiting on an answer, if any.
@@ -254,11 +261,17 @@ struct InboxBoard {
 
         let pending = byRecency.last { $0.isPending }
 
+        // The column now reads the event's *category* rather than its two-value
+        // kind, so `tool_running` (a newer hook saying a tool is mid-flight)
+        // holds a row in Working the way a plainly unanswered approval already
+        // did. The derived fallback for the old kinds is designed to agree with
+        // the rule that was here before: an unanswered approval is
+        // `approval_required` (Needs you) and an answered one `tool_running`
+        // (Working), so nothing that worked keeps working by accident.
         let column: Column
         if pending != nil {
             column = .needsYou
-        } else if deciding?.kind == .approval {
-            // An answered approval is work in progress, not work finished.
+        } else if deciding?.eventCategory == .toolRunning {
             column = .working
         } else {
             column = .done
@@ -291,6 +304,11 @@ struct InboxBoard {
             project: project,
             directory: directory,
             column: column,
+            // The same event the column was decided from, so the row cannot
+            // say one thing and file under another. The only way to reach the
+            // fallback is a row with no events at all, which the board never
+            // builds; it exists so the initialiser is total.
+            category: deciding?.eventCategory ?? .taskComplete,
             events: byRecency.reversed(),
             pending: pending,
             latest: latest,

@@ -71,6 +71,19 @@ else:
 if "Stop" not in hooks:
     fail("Claude Code has no Stop hook")
 
+# Three more events exist only to carry a category. Without them the Inbox can
+# never show `tool_finished` or `session_started` for Claude at all — two of
+# Moshi's five row states would be unreachable from a real install, and the
+# board would look complete while missing them. Asserted by the argument the
+# bridge is invoked with, because a hook that calls the bridge with the wrong
+# kind is installed and produces the wrong category forever.
+for event, argument in [("PostToolUse", "tool-finish"), ("SessionStart", "session-start")]:
+    if event not in hooks:
+        fail(f"Claude Code has no {event} hook, so its category can never be shown")
+    elif argument not in json.dumps(hooks[event]):
+        fail(f"Claude Code's {event} does not call the bridge with `{argument}`:"
+             f" {json.dumps(hooks[event])}")
+
 # --- Codex -----------------------------------------------------------------
 # The feature flag is the whole reason this agent gets its own check: hooks are
 # ignored without it, so writing hooks.json alone would be a silent no-op.
@@ -252,10 +265,13 @@ bridge_case() {
     node host/cqutmux-hook/agent-hook.mjs "$source" "$kind"
 }
 
+# Each agent's documented payload, with the event name the agent really fires:
+# the bridge reads the category off that name where it is present, so a payload
+# without one is the fallback path and is what the Kimi case below covers.
 bridge_case "Claude Code" claude-code approval \
-  '{"session_id":"s1","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}'
+  '{"hook_event_name":"PreToolUse","session_id":"s1","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}'
 bridge_case "Codex" codex notice \
-  '{"session_id":"s2","last_assistant_message":"all done"}'
+  '{"hook_event_name":"Stop","session_id":"s2","last_assistant_message":"all done"}'
 bridge_case "Cursor" cursor approval \
   '{"conversation_id":"s3","toolName":"Shell","toolInput":{"command":"ls"}}'
 bridge_case "Kimi" kimi approval \
@@ -270,6 +286,26 @@ bridge_case "Antigravity" antigravity notice \
 printf '%s' '{"session_id":"s6","tool_name":"Bash","tool_input":{"command":"ls"}}' \
   | HOME="$FAKE_HOME" CQUTMUX_PORT=24999 \
     bash host/cqutmux-hook/claude-code-hook.sh approval
+
+# The three ways a tool's *end* reaches us, because they are three different
+# programs reading three different payloads and any one of them being wrong
+# shows a finished tool call as a finished task: the node bridge told the kind
+# with no event name to read, the node bridge given the agent's own event name,
+# and the shell bridge's own kind.
+printf '%s' '{"session_id":"s7","tool_name":"Bash","tool_input":{"command":"ls"}}' \
+  | HOME="$FAKE_HOME" CQUTMUX_PORT=24999 \
+    node host/cqutmux-hook/agent-hook.mjs codex tool-finish
+printf '%s' '{"hook_event_name":"PostToolUse","session_id":"s8","tool_name":"Bash"}' \
+  | HOME="$FAKE_HOME" CQUTMUX_PORT=24999 \
+    node host/cqutmux-hook/agent-hook.mjs codex notice
+printf '%s' '{"session_id":"s9","tool_name":"Bash","tool_input":{"command":"ls"}}' \
+  | HOME="$FAKE_HOME" CQUTMUX_PORT=24999 \
+    bash host/cqutmux-hook/claude-code-hook.sh tool-finish
+
+# And the one category nothing else can produce: a session beginning.
+printf '%s' '{"session_id":"s10"}' \
+  | HOME="$FAKE_HOME" CQUTMUX_PORT=24999 \
+    bash host/cqutmux-hook/claude-code-hook.sh session-start
 
 python3 - <<'PY'
 import json, urllib.request
@@ -290,7 +326,14 @@ for source in ["claude-code", "codex", "cursor", "kimi", "antigravity"]:
     if not found:
         problems.append(f"{source} produced no event at all")
         continue
-    event = found[-1]
+    # The newest event *with a body*: the `session-start` kind is deliberately
+    # bodyless (there is nothing to say yet), and it is the newest claude-code
+    # event by the time the shell cases run.
+    with_body = [e for e in found if e.get("body")]
+    if not with_body:
+        problems.append(f"{source} produced no event with a body")
+        continue
+    event = with_body[-1]
     if not event.get("data", {}).get("session"):
         problems.append(f"{source}'s event lost the session id — the bridge did not find"
                         f" the field name for this agent (data: {event.get('data')})")
@@ -298,8 +341,74 @@ for source in ["claude-code", "codex", "cursor", "kimi", "antigravity"]:
         problems.append(f"{source}'s event has an empty body")
 
 count = sum(len(v) for v in by_source.values())
-if count < 6:
-    problems.append(f"expected 6 events (five node bridges plus the shell one), got {count}")
+if count < 10:
+    problems.append(f"expected 10 events (five node bridges plus five shell/kind ones), got {count}")
+
+# Every category, on the session that was sent to produce it. Checked by session
+# rather than by source: several of these come from the same agent, and the
+# point is which event produced which category, not who sent it.
+expected_category = {
+    "s1": "approval_required",   # PreToolUse, named by the agent's payload
+    "s2": "task_complete",       # Stop, named by the agent's payload
+    "s3": "approval_required",   # approval kind, no event name to read
+    "s4": "approval_required",
+    "s5": "task_complete",       # notice kind, no event name to read
+    "s6": "approval_required",   # the shell bridge's `approval`
+    "s7": "tool_finished",       # the node bridge's `tool-finish`, no event name
+    "s8": "tool_finished",       # PostToolUse, named by the agent's payload
+    "s9": "tool_finished",       # the shell bridge's `tool-finish`
+    "s10": "session_started",    # the shell bridge's `session-start`
+}
+seen = {}
+for event in events:
+    session = (event.get("data") or {}).get("session")
+    if session in expected_category:
+        seen[session] = event.get("category")
+for session, want in sorted(expected_category.items()):
+    got = seen.get(session)
+    if got != want:
+        problems.append(f"session {session} produced category {got!r}, expected {want!r}")
+
+covered = set(seen.values())
+
+# `tool_running` is the one no bridge kind produces: it is what the *gateway*
+# says when an approval is answered, meaning "the tool it was guarding is now
+# let through". Resolving one here proves that half of the mapping too, and it
+# is the half the phone cannot derive for an approval answered on the watch or
+# by a timeout — there the only thing that arrives is this notice.
+approval_id = None
+for event in events:
+    if (event.get("data") or {}).get("session") == "s1":
+        approval_id = event.get("id")
+if approval_id is None:
+    problems.append("no approval to resolve, so tool_running could not be checked")
+else:
+    resolve = urllib.request.Request(
+        f"http://127.0.0.1:24999/approve/{approval_id}",
+        data=json.dumps({"decision": "allow"}).encode(),
+        headers={"Authorization": "Bearer t", "content-type": "application/json"},
+    )
+    urllib.request.urlopen(resolve).read()
+    after = json.load(urllib.request.urlopen(request))
+    if isinstance(after, dict):
+        after = after.get("events", [])
+    notices = [e for e in after if (e.get("data") or {}).get("for") == approval_id]
+    if not notices:
+        problems.append("resolving an approval produced no notice")
+    elif notices[-1].get("category") != "tool_running":
+        problems.append("the resolution notice is not tool_running:"
+                        f" {notices[-1].get('category')!r}, so answering an approval"
+                        " files the row as finished instead of in progress")
+    else:
+        covered.add("tool_running")
+
+# All five reachable, as a set. The per-session checks above can each pass while
+# the set is short — one wrong mapping and one missing kind would cancel out.
+missing = {"approval_required", "task_complete", "session_started",
+           "tool_running", "tool_finished"} - covered
+if missing:
+    problems.append(f"these categories are unreachable from a real bridge: {sorted(missing)}")
+
 if problems:
     for problem in problems:
         print(f"FAIL: {problem}")

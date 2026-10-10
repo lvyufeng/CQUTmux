@@ -8,10 +8,78 @@ struct AgentEvent: Identifiable, Codable, Hashable {
         case notice
     }
 
+    /// What kind of thing happened, in Moshi's five names.
+    ///
+    /// The wire carries two — `approval` and `notice` — but those two are a
+    /// *shape* (does it want a decision?) and not a category: "the turn
+    /// finished", "a tool started", "a tool finished" and "a session began" are
+    /// all `notice`, and the board cannot tell them apart. Newer hooks say which
+    /// it was; older ones and other agents still say only the shape, so the
+    /// category is *derived* when the hook did not send one rather than being
+    /// required. That derivation is the part that fails quietly — a wrong guess
+    /// files a row under the wrong column — so it lives here, not in a view.
+    enum Category: String, Codable, CaseIterable {
+        case approvalRequired = "approval_required"
+        case taskComplete = "task_complete"
+        case sessionStarted = "session_started"
+        case toolRunning = "tool_running"
+        case toolFinished = "tool_finished"
+
+        /// The two that hold a row open: a decision is outstanding, or a tool
+        /// is mid-flight. The other three are statements that something already
+        /// happened and need nothing from the user.
+        var isAwaiting: Bool {
+            self == .approvalRequired || self == .toolRunning
+        }
+
+        var label: String {
+            switch self {
+            case .approvalRequired: "Approval required"
+            case .taskComplete: "Task complete"
+            case .sessionStarted: "Session started"
+            case .toolRunning: "Tool running"
+            case .toolFinished: "Tool finished"
+            }
+        }
+    }
+
+    /// The category the hook sent, when it sent one this build knows. An
+    /// unrecognised string is `nil` rather than a decode failure, so a hook that
+    /// grows a sixth category cannot blank the Inbox.
+    var declaredCategory: Category? {
+        category.flatMap(Category.init(rawValue:))
+    }
+
+    /// The event's category: what the hook said, or what its shape implies.
+    ///
+    /// The fallback is deliberately conservative, and it has to agree with what
+    /// the board already did with the two old kinds. An `approval` with nothing
+    /// decided is `approval_required`; an `approval` that has been answered is
+    /// `tool_running`, because the tool it was guarding is now — or has just —
+    /// run, which is the "work in progress, not work finished" the board already
+    /// rule the answered case by. A bare `notice` is `task_complete`, the only
+    /// notice the shipped hooks produced before categories existed. Guessing
+    /// `session_started` from a shape that carries no such evidence would invent
+    /// activity, so it is never guessed — only ever sent.
+    var eventCategory: Category {
+        if let declared = declaredCategory { return declared }
+        switch kind {
+        case .approval: return isPending ? .approvalRequired : .toolRunning
+        case .notice: return .taskComplete
+        }
+    }
+
     var id: Int
     var at: String
     var source: String
     var kind: Kind
+    /// The finer category the hook sent, when it sent one — one of
+    /// `Category`'s five raw values. Optional on the wire: the shipped hooks
+    /// predate categories, and an event from one of those still has to
+    /// decode. Left as a String rather than a `Category` so a hook that grows
+    /// a sixth value cannot make the whole page fail to decode; the mapping
+    /// to `Category` happens in `declaredCategory`.
+    var category: String?
     // Optional to match the wire. The gateway omits both on its own notices —
     // `POST /events` accepts an event with neither — and a non-optional field
     // here made `JSONDecoder` throw on the *whole page*, so a single
