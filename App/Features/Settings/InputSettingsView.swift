@@ -49,6 +49,8 @@ struct InputSettingsView: View {
 
             Section {
                 Toggle("Two-finger swipes drive the multiplexer", isOn: $input.muxGestures)
+                Toggle("Scroll past the bottom dismisses the keyboard",
+                       isOn: $input.dismissKeyboardOnScrollPastEnd)
             } header: {
                 Label("Terminal gestures", systemImage: "hand.draw")
             } footer: {

@@ -85,6 +85,9 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// Whether the two-finger swipes drive the multiplexer. See
     /// `InputSettings.muxGestures`.
     var muxGestures = true
+    /// Whether scrolling past the end of the buffer dismisses the keyboard. See
+    /// `InputSettings.dismissKeyboardOnScrollPastEnd`.
+    var dismissKeyboardOnScrollPastEnd = true
     /// Whether a pinch zooms the pane instead of changing the font size. See
     /// `ToolbarSettings.PinchAction`.
     var pinchZoomsPane = false
@@ -144,7 +147,11 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         // inside SwiftTerm, and a second opinion about where the bottom is
         // would fight it. `.interactive` releases the keyboard as the drag
         // passes the end of the content, which is the gesture Moshi describes.
-        keyboardDismissMode = .interactive
+        // It is now conditional — see `InputSettings.dismissKeyboardOnScrollPastEnd`
+        // for the program that has no scrollback to pass the end of, where
+        // every drag would otherwise reach it and the keyboard would never
+        // stay put.
+        applyKeyboardDismissMode()
 
         installGestures()
 
@@ -180,6 +187,17 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     /// subview that only reads the style when it is told to.
     func applyCursor(_ settings: CursorSettings) {
         settings.apply(to: self)
+    }
+
+    /// Applies the scroll-to-dismiss preference. Called when the view is built
+    /// and again whenever the setting changes, so a flip lands on the next
+    /// drag rather than on the next connection.
+    ///
+    /// `.interactive` is the scroll-past-the-end gesture; `.none` leaves the
+    /// keyboard alone, for a program with no scrollback where the end is
+    /// reached by every drag.
+    func applyKeyboardDismissMode() {
+        keyboardDismissMode = dismissKeyboardOnScrollPastEnd ? .interactive : .none
     }
 
     deinit {

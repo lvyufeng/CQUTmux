@@ -17,6 +17,7 @@ final class InputSettings {
         static let hidesWindowRow = "input.hidesWindowRow"
         static let muxGestures = "input.muxGestures"
         static let chatMode = "input.chatMode"
+        static let dismissKeyboardOnScrollPastEnd = "input.dismissKeyboardOnScrollPastEnd"
     }
 
     /// The D-pad corner actions, as raw strings keyed by corner.
@@ -280,6 +281,22 @@ final class InputSettings {
         didSet { store.set(chatMode, forKey: Key.chatMode) }
     }
 
+    /// Whether scrolling past the end of the buffer dismisses the on-screen
+    /// keyboard.
+    ///
+    /// On by default, because that is the gesture Moshi ships and the one a
+    /// user arriving from it will reach for. It is a switch rather than an
+    /// unconditional mapping because not every program treats scrollback as
+    /// somewhere to be: a full-screen TUI that has *no* scrollback gives the
+    /// drag nothing to scroll, so "past the end" is every drag, and the
+    /// keyboard — the thing the user is typing with — would vanish on the
+    /// first flick. Off, the drag is left entirely to the terminal.
+    var dismissKeyboardOnScrollPastEnd: Bool {
+        didSet {
+            store.set(dismissKeyboardOnScrollPastEnd, forKey: Key.dismissKeyboardOnScrollPastEnd)
+        }
+    }
+
     /// The bar's items, in order. Stored as raw values so a build that adds an
     /// item does not lose a user's arrangement, and one that removes an item
     /// does not resurrect it.
@@ -301,6 +318,12 @@ final class InputSettings {
         // behaviour or the feature would ship switched off for everyone.
         muxGestures = store.object(forKey: Key.muxGestures) as? Bool ?? true
         chatMode = store.bool(forKey: Key.chatMode)
+        // Default on: the value is absent on every install that predates the
+        // setting, and `.interactive` was what those installs already had, so
+        // "absent" has to mean on or the dismiss gesture would vanish for
+        // existing users the moment they updated.
+        dismissKeyboardOnScrollPastEnd =
+            store.object(forKey: Key.dismissKeyboardOnScrollPastEnd) as? Bool ?? true
 
         let stored = store.stringArray(forKey: Key.barItems) ?? []
         let restored = stored.compactMap(Item.init(rawValue:))

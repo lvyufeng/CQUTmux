@@ -1231,6 +1231,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         // and the session picker already trust.
         view.muxKind = host.mux
         view.muxGestures = input.muxGestures
+        view.dismissKeyboardOnScrollPastEnd = input.dismissKeyboardOnScrollPastEnd
         view.pinchZoomsPane = pinchZoomsPane
         view.pinchZoomsHerdrPane = pinchZoomsHerdrPane
         view.onPinchZoom = onPinchZoom
@@ -1327,6 +1328,10 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
         uiView.muxPrefix = mux.prefix(for: host.mux)
         uiView.muxKind = host.mux
         uiView.muxGestures = input.muxGestures
+        // A live setting like the one above: a flip should change how the next
+        // drag behaves, not wait for the next connection.
+        uiView.dismissKeyboardOnScrollPastEnd = input.dismissKeyboardOnScrollPastEnd
+        uiView.applyKeyboardDismissMode()
         uiView.pinchZoomsPane = pinchZoomsPane
         uiView.pinchZoomsHerdrPane = pinchZoomsHerdrPane
         uiView.onPinchZoom = onPinchZoom
