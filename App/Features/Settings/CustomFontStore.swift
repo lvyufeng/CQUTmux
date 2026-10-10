@@ -35,6 +35,36 @@ final class CustomFontStore {
         var postScriptName: String
         /// The file's name inside the fonts directory.
         var fileName: String
+        /// The file's extension, kept because it is not recoverable from the
+        /// PostScript name and it decides whether the font is a collection —
+        /// which the code viewers do not use.
+        var fileExtension: String
+
+        // `fileExtension` was added after fonts had already been imported. The
+        // synthesized decoder does *not* fall back to a property default for a
+        // missing key — it throws — so a record written by an earlier build
+        // would fail to decode, `load` would leave the list empty, and the
+        // user's imported fonts would disappear from the picker on update.
+        // Decoding tolerantly is what keeps them.
+        init(id: String, displayName: String, postScriptName: String, fileName: String, fileExtension: String) {
+            self.id = id
+            self.displayName = displayName
+            self.postScriptName = postScriptName
+            self.fileName = fileName
+            self.fileExtension = fileExtension
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            displayName = try container.decode(String.self, forKey: .displayName)
+            postScriptName = try container.decode(String.self, forKey: .postScriptName)
+            fileName = try container.decode(String.self, forKey: .fileName)
+            // Recovered from the file name when the record predates the field,
+            // so an old collection is still recognised as one.
+            fileExtension = try container.decodeIfPresent(String.self, forKey: .fileExtension)
+                ?? (fileName as NSString).pathExtension.lowercased()
+        }
     }
 
     private(set) var fonts: [Imported] = []
@@ -77,9 +107,13 @@ final class CustomFontStore {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
+        // `.otc` is included because the terminal can render it: it is an
+        // OpenType collection like `.ttc`, and a terminal needs a font *name*,
+        // which Core Text resolves inside the collection. The code viewers do
+        // not use a collection — see `isCollection`.
         let extensionName = url.pathExtension.lowercased()
-        guard ["ttf", "otf", "ttc"].contains(extensionName) else {
-            lastError = "\(url.lastPathComponent) is not a font. Pick a .ttf, .otf or .ttc file."
+        guard ["ttf", "otf", "ttc", "otc"].contains(extensionName) else {
+            lastError = "\(url.lastPathComponent) is not a font. Pick a .ttf, .otf, .ttc or .otc file."
             return nil
         }
         guard let data = try? Data(contentsOf: url), !data.isEmpty else {
@@ -115,7 +149,8 @@ final class CustomFontStore {
             id: fileName,
             displayName: displayName(of: cgFont, fallback: url.deletingPathExtension().lastPathComponent),
             postScriptName: postScript,
-            fileName: fileName
+            fileName: fileName,
+            fileExtension: extensionName
         )
         fonts.removeAll { $0.id == imported.id }
         fonts.append(imported)
@@ -183,6 +218,24 @@ final class CustomFontStore {
     }
 
     func contains(id: String) -> Bool { fonts.contains { $0.id == id } }
+
+    /// The imported record for an id, for a caller that needs more than the
+    /// PostScript name — the code viewers, which must know whether the font is
+    /// a collection.
+    func font(id: String) -> Imported? { fonts.first { $0.id == id } }
+
+    /// Whether an imported font's file is a *collection* (`.ttc`/`.otc`).
+    ///
+    /// A collection bundles several faces and has no single face to pick, so the
+    /// diff and file viewers do not use one — they fall back to the system mono
+    /// stack. The terminal does use it: a terminal renders by name, and Core
+    /// Text resolves a name inside the collection. The rule lives here, apart
+    /// from the renderers, because the failure is invisible: a collection set
+    /// in a diff looks like a font that merely did not apply, not like the
+    /// wrong choice of face.
+    static func isCollection(fileName: String) -> Bool {
+        ["ttc", "otc"].contains((fileName as NSString).pathExtension.lowercased())
+    }
 
     #if DEBUG
     /// Imports a font from a path, for a UI run that cannot drive the document

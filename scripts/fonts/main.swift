@@ -152,6 +152,47 @@ if let name = imported?.postScriptName {
           "and it is not silently substituting a different font")
 }
 
+// MARK: - Collections are terminal-only
+
+// The claim: a `.ttc`/`.otc` is used by the terminal and *not* by the diff and
+// file viewers, which have no single face to pick from a collection. The rule
+// fails silently in the other direction — a collection set in a diff renders
+// as *some* face Core Text picked, which reads as a font that did not apply.
+check(CustomFontStore.isCollection(fileName: "Menlo.ttc"), "a .ttc is a collection")
+check(CustomFontStore.isCollection(fileName: "Fonts.otc"), "a .otc is a collection")
+check(CustomFontStore.isCollection(fileName: "FONTS.OTC"), "the extension is read case-insensitively")
+check(!CustomFontStore.isCollection(fileName: "Menlo-Regular.ttf"), "a .ttf is not a collection")
+check(!CustomFontStore.isCollection(fileName: "Inter.otf"), "a .otf is not a collection")
+// A font whose *name* contains a dot must not be mistaken for its extension.
+check(!CustomFontStore.isCollection(fileName: "NoSuchFont-9.9.ttf"), "only the last extension counts")
+// And neither must one whose *name* contains "ttc"/"otc": a substring match on
+// the whole file name would call these collections and send a single-face font
+// to the system stack in the diff viewer.
+check(!CustomFontStore.isCollection(fileName: "otc-sans.ttf"), "a name containing 'otc' is not a collection")
+check(!CustomFontStore.isCollection(fileName: "Fira-ttc-mono.otf"), "a name containing 'ttc' is not a collection")
+
+// The record keeps the extension, because it is not recoverable from the
+// PostScript name — `Menlo.ttc` and `Menlo-Regular.ttf` can resolve to the same
+// face, and only the file says which was imported.
+check(imported?.fileExtension == "ttc" || imported?.fileExtension == "ttf",
+      "the imported record keeps its file extension")
+check(imported.map { CustomFontStore.isCollection(fileName: $0.fileName) } == false
+        || imported?.fileExtension == "ttc",
+      "and the collection rule agrees with what was stored")
+
+// MARK: - A record from before the extension was kept
+
+// The synthesized decoder would throw on the missing key, `load` would leave
+// the list empty, and every font the user had imported would disappear from the
+// picker on update. This is that record.
+let legacy = """
+[{"id":"Legacy.ttc","displayName":"Legacy","postScriptName":"Legacy-Regular","fileName":"Legacy.ttc"}]
+""".data(using: .utf8)!
+let decoded = try? JSONDecoder().decode([CustomFontStore.Imported].self, from: legacy)
+check(decoded?.count == 1, "a record written before fileExtension existed still decodes")
+check(decoded?.first?.fileExtension == "ttc",
+      "and its extension is recovered from the file name, so a collection stays one")
+
 // MARK: - Being told which one is chosen
 
 let picking = store("picking", directory: scratch.appendingPathComponent("picking"))

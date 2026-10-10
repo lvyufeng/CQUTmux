@@ -56,9 +56,35 @@ final class TerminalFontStore {
     /// at launch.
     @ObservationIgnored var customFonts: CustomFontStore?
 
+    /// The terminal's font. A collection is fine here: a terminal renders by
+    /// name, and Core Text resolves a name inside a `.ttc`/`.otc`.
     func uiFont() -> UIFont {
         let base = resolveBase()
         return cjk.applied(to: base, size: size)
+    }
+
+    /// The font for the diff and file viewers.
+    ///
+    /// Falls through to the system mono stack when the chosen font is a
+    /// collection: the claim is that a `.ttc`/`.otc` is terminal-only, and the
+    /// reason is that a collection has no single face to pick. Rendering it
+    /// here would *appear* to work — Core Text answers with some face out of
+    /// the collection — which is a diff set in a face the user did not choose.
+    /// This is the same system mono `uiFont` already falls back to when a font
+    /// is removed.
+    ///
+    /// The CJK fallback is deliberately not applied: the diff viewer never had
+    /// it, and adding it here would change what the diff already renders for the
+    /// users who are not the subject of this rule. A font that renders CJK in
+    /// the terminal is not the same claim as a diff that does.
+    func codeFont() -> UIFont {
+        if family == .custom,
+           let id = customFontID,
+           let imported = customFonts?.font(id: id),
+           CustomFontStore.isCollection(fileName: imported.fileName) {
+            return UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        }
+        return uiFont()
     }
 
     /// The chosen family's font, falling back through the custom font and then
@@ -353,8 +379,10 @@ struct FontSettingsView: View {
     /// the interpolations plus the literals exceed what the type checker will
     /// do inside a view builder, and it reports that as a timeout.
     private var importFooter: String {
-        var text = "A .ttf, .otf or .ttc file. It is copied into CQUTmux, so "
-            + "removing it from Files later does not break the terminal."
+        var text = "A .ttf, .otf, .ttc or .otc file. It is copied into CQUTmux, so "
+            + "removing it from Files later does not break the terminal. "
+            + "A collection (.ttc/.otc) is used by the terminal but not by the "
+            + "diff and file viewers, which have no single face to pick from one."
         if let error = customFonts.lastError {
             text += "\n\n\(error)"
         }
@@ -365,8 +393,14 @@ struct FontSettingsView: View {
     /// content type on iOS, so the extensions are declared here rather than
     /// relying on a UTI that does not exist.
     private static var fontTypes: [UTType] {
-        ["public.truetype-font", "public.opentype-font", "public.truetype-font-collection"]
-            .compactMap { UTType($0) }
+        [
+            "public.truetype-font",
+            "public.opentype-font",
+            "public.truetype-font-collection",
+            // The OpenType equivalent of `.ttc`. A collection is a valid font
+            // here — the terminal renders it — so the picker must offer it.
+            "public.opentype-font-collection",
+        ].compactMap { UTType($0) }
     }
 
     /// A few lines of the sort of output the terminal actually shows, so the

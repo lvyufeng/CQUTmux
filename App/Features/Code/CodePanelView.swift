@@ -212,13 +212,13 @@ struct CodePanelView: View {
         }
         .sheet(item: $openFile) { (file: FileContents) in
             NavigationStack {
-                FileView(file: file, font: fonts.uiFont(), spacing: fonts.lineSpacing)
+                FileView(file: file, font: fonts.codeFont(), spacing: fonts.lineSpacing)
             }
         }
         .sheet(item: $openDiff) { file in
             if let client = connection.client {
                 NavigationStack {
-                    FileDiffView(file: file, root: path, client: client, font: fonts.uiFont(), spacing: fonts.lineSpacing)
+                    FileDiffView(file: file, root: path, client: client, font: fonts.codeFont(), spacing: fonts.lineSpacing)
                 }
             }
         }
@@ -315,7 +315,7 @@ struct CodePanelView: View {
                     // — it is how you see the shape of a change across files —
                     // so it stays, below what you would normally tap first.
                     Section("All changes") {
-                        DiffText(diff.diff, font: fonts.uiFont(), spacing: fonts.lineSpacing)
+                        DiffText(diff.diff, font: fonts.codeFont(), spacing: fonts.lineSpacing)
                     }
                 }
             }
