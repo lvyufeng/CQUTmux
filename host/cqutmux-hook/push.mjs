@@ -94,9 +94,17 @@ export function createPushService(args) {
     return isNew
   }
 
+  // The connection is created lazily on the first send, so there may be nothing
+  // to close; and closing it is what lets a one-shot caller — the check that
+  // drives this against a local server — reach the end of its process instead
+  // of being held open by an idle HTTP/2 session.
+  const close = () => { if (client) { client.close(); client = undefined } }
+
+  const disabled = { enabled: false, tokens, activityTokens, startTokens, register, registerActivity, unregisterActivity, close: () => {}, notify: async () => {}, notifyActivity: async () => {} }
+
   const enabled = Boolean(args.pushKey && args.pushKeyId && args.pushTeamId)
   if (!enabled) {
-    return { enabled: false, tokens, activityTokens, startTokens, register, registerActivity, unregisterActivity, notify: async () => {}, notifyActivity: async () => {} }
+    return disabled
   }
 
   let key
@@ -104,10 +112,14 @@ export function createPushService(args) {
     key = readFileSync(args.pushKey, 'utf8')
   } catch (error) {
     process.stderr.write(`[push] cannot read --push-key ${args.pushKey}: ${error.message}\n`)
-    return { enabled: false, tokens, activityTokens, startTokens, register, registerActivity, unregisterActivity, notify: async () => {}, notifyActivity: async () => {} }
+    return disabled
   }
 
-  const host = args.pushSandbox ? APNS_HOST_SANDBOX : APNS_HOST
+  // `--push-host` points the sender somewhere other than Apple. It exists so the
+  // request can be inspected — headers, topic, JWT, body — against a local HTTP/2
+  // server, which is the only way to check what is *sent* without a signing key
+  // and a device. It is not a way to make pushes work without Apple.
+  const host = args.pushHost || (args.pushSandbox ? APNS_HOST_SANDBOX : APNS_HOST)
   const topic = args.pushTopic || 'app.cqutmux.ios'
 
   let cached = { token: '', at: 0 }
@@ -191,6 +203,7 @@ export function createPushService(args) {
     register,
     registerActivity,
     unregisterActivity,
+    close,
     /**
      * Delivers a Live Activity start/update/end.
      *

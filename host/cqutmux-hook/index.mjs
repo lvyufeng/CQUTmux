@@ -2707,6 +2707,10 @@ server.listen(args.port, '127.0.0.1', () => {
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     retractToken()
+    // The APNs client holds an HTTP/2 session open for as long as the gateway
+    // runs. Closing it is what lets the process actually end rather than being
+    // kept alive by an idle socket after the listener is already closed.
+    push.close()
     // One helper process per simulator may be alive; stopping them here keeps a
     // stopped gateway from leaving private frameworks resident behind it.
     stopAllSessions()
