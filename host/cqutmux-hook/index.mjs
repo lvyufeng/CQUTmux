@@ -57,6 +57,7 @@ import {
   isProblem,
 } from './doctor-mux.mjs'
 import { resolveCommand } from './platform.mjs'
+import { servicePlan, SERVICE_ID } from './service.mjs'
 
 const run = promisify(execFile)
 
@@ -1394,7 +1395,7 @@ const SETTABLE = [
 
 const COMMANDS = new Set([
   'pair', 'install', 'uninstall', 'serve', 'status', 'doctor', 'logs', 'diff',
-  'set', 'usage', 'version', 'update', 'help', 'context', 'locale',
+  'set', 'usage', 'version', 'update', 'help', 'context', 'locale', 'service',
 ])
 
 function usage() {
@@ -1410,7 +1411,10 @@ function usage() {
   cqutmux doctor         check that this host is ready for the app
   cqutmux logs [-f]      tail the gateway log
   cqutmux serve          run the gateway (same as running with no arguments)
-  cqutmux install        print how to keep the gateway running
+  cqutmux install        wire up the agent hooks
+  cqutmux service install   run the gateway at login (launchd / systemd)
+  cqutmux service status    is that service loaded and running
+  cqutmux service uninstall remove it again
   cqutmux uninstall      remove the hooks this tool installed
   cqutmux set            show the config settings and their file, or change one
   cqutmux set --first-run  reopen the first-run prompt on the next install
@@ -1520,6 +1524,8 @@ async function runCommand(name, argv) {
       return update(argv)
     case 'locale':
       return localeCommand(positionals.slice(1))
+    case 'service':
+      return serviceCommand(positionals.slice(1))
   }
 }
 
@@ -1596,6 +1602,105 @@ async function localeCommand(rest) {
 /// is the same number the app's Support screen shows.
 function versionCommand() {
   process.stdout.write(`cqutmux ${VERSION}\n`)
+}
+
+/// `cqutmux service install|status|uninstall`.
+///
+/// The gateway is a foreground process; without this, stopping the terminal
+/// that started it stops the host, and the app quietly finds nothing where it
+/// expected a gateway. Moshi's `moshi-hook service install` registers a real
+/// service and prints no instructions to follow by hand — a copy-paste step is
+/// the step that does not happen, and the failure it leaves looks exactly like
+/// a host that was never set up.
+///
+/// The file content is built by `service.mjs` (pure, so it is checked without
+/// either supervisor present); what lives here is only the reading of the host
+/// — the paths, the log, whether a service is already loaded — and the actual
+/// `launchctl`/`systemctl` calls.
+async function serviceCommand(rest) {
+  const action = rest[0] || 'status'
+  const home = homedir()
+  const logPath = join(home, '.cqutmux', 'hook.log')
+  const plan = servicePlan({
+    home,
+    logPath,
+    nodePath: process.execPath,
+    // `process.argv[1]` is this file, which is the same one `install` prints in
+    // its systemd example — the service has to run the copy on disk, not a
+    // cached import.
+    scriptPath: process.argv[1],
+    port: args.port,
+    token: args.token,
+  })
+
+  if (!plan.supported) {
+    process.stderr.write(
+      'cqutmux: service install is not implemented on this platform.\n' +
+      'Run `cqutmux serve` under your own supervisor instead.\n')
+    process.exit(1)
+  }
+
+  if (action === 'install') {
+    await mkdir(dirname(plan.path), { recursive: true })
+    await mkdir(dirname(logPath), { recursive: true }).catch(() => {})
+    await writeFile(plan.path, plan.content, 'utf8')
+    process.stdout.write(`wrote ${plan.path}\n`)
+    const loaded = await tryRun(plan.load[0], plan.load.slice(1))
+    if (!loaded.ok) {
+      // The file is on disk either way, so say which part failed rather than
+      // leaving a "done" that is only half true.
+      process.stderr.write(
+        `cqutmux: wrote the unit but could not load it (${loaded.message}).\n` +
+        `Load it yourself with: ${plan.load.join(' ')}\n`)
+      process.exit(1)
+    }
+    process.stdout.write(`running at login: ${SERVICE_ID}\n`)
+    return
+  }
+
+  if (action === 'uninstall') {
+    // Unload first, then remove: a unit file deleted from under a loaded
+    // service leaves the running process with no file describing it, which
+    // `status` then cannot explain.
+    const unloaded = await tryRun(plan.unload[0], plan.unload.slice(1))
+    if (!unloaded.ok) process.stderr.write(`cqutmux: unload reported: ${unloaded.message}\n`)
+    await rm(plan.path, { force: true })
+    if (existsSync(plan.path)) {
+      process.stderr.write(`cqutmux: could not remove ${plan.path}\n`)
+      process.exit(1)
+    }
+    process.stdout.write(`removed ${plan.path}\n`)
+    return
+  }
+
+  if (action !== 'status') {
+    process.stderr.write(`cqutmux: service ${action} is not a subcommand (install|status|uninstall)\n`)
+    process.exit(1)
+  }
+
+  if (!existsSync(plan.path)) {
+    process.stdout.write(`no service installed (${plan.path} does not exist)\n`)
+    process.exit(1)
+  }
+  const result = await tryRun(plan.status[0], plan.status.slice(1))
+  process.stdout.write(`${plan.path}\n${result.stdout.trim() || result.message || 'not running'}\n`)
+  if (!result.ok) process.exit(1)
+}
+
+/// Runs a command and reports failure rather than throwing, so a caller can say
+/// *which* step of a chain failed. `launchctl load` on an already-loaded plist,
+/// and `systemctl --user` with no session bus, are both ordinary outcomes here.
+async function tryRun(cmd, cmdArgs) {
+  try {
+    const { stdout } = await run(cmd, cmdArgs, { timeout: 10000 })
+    return { ok: true, stdout: String(stdout ?? '') }
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: String(error.stdout ?? ''),
+      message: String(error.stderr || error.message || error).trim(),
+    }
+  }
 }
 
 function setCommand(rest) {
