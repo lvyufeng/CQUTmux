@@ -23,7 +23,7 @@
 import { createServer } from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
-import { execFile, spawn } from 'node:child_process'
+import { execFile, spawn, spawnSync } from 'node:child_process'
 import { readdir, readFile, stat, mkdir, writeFile, appendFile, rm, chmod } from 'node:fs/promises'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { resolve, relative, isAbsolute, join, dirname } from 'node:path'
@@ -35,6 +35,7 @@ import { recentDirectories } from './recent.mjs'
 import { commandHistory } from './history.mjs'
 import { windowsForSource } from './usage.mjs'
 import { parseLsof, parseSs, describe } from './listeners.mjs'
+import { renderDiffHtml } from './diffpage.mjs'
 import { terminal as qrTerminal } from './qr.mjs'
 import { sendGesture, stopAllSessions, touchHelperAvailable } from './simtouch.mjs'
 
@@ -2336,18 +2337,110 @@ function isOurs(group, bridge) {
 /// opened, so `cqutmux diff` can be run from a hook or a script without leaving
 /// something behind. (The app's own Diff viewer reads `/diff` directly.)
 async function diff(argv) {
-  const rest = argv.filter(a => a !== 'diff' && a !== '--no-open' && a !== '--port')
-  const cwd = resolve(rest.find(a => !a.startsWith('-')) || process.cwd())
+  // Argument order is free: a bare token is the repo path, `--port` takes the
+  // next token, `--no-open` takes none. Parsed in a loop rather than by
+  // filtering, because filtering cannot tell a port number from a directory
+  // named the same as one.
+  let cwdArg = null
+  let port = 0
+  let open = true
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]
+    if (arg === 'diff') continue
+    if (arg === '--no-open') { open = false; continue }
+    if (arg === '--port') {
+      port = Number(argv[++i])
+      continue
+    }
+    if (!arg.startsWith('-')) cwdArg = arg
+  }
+  // 0 means "any free port", which is the default so two invocations do not
+  // collide on a fixed one.
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    process.stderr.write('cqutmux: --port must be an integer 0-65535 (0 = any free port)\n')
+    process.exit(1)
+  }
+
+  const cwd = resolve(cwdArg || process.cwd())
   const result = await gitDiff(cwd)
   if (!result.isRepo) {
     process.stderr.write(`cqutmux: ${cwd} is not a git repository\n`)
     process.exit(1)
   }
-  for (const file of result.files) {
-    process.stdout.write(`  ${file.status.padEnd(2)} ${file.path}\n`)
+
+  // A viewer server, separate from the gateway on purpose: the gateway is
+  // long-lived and token-guarded, while this is a page opened once and thrown
+  // away. Bound to loopback, so it is not reachable from the network even
+  // though it carries no token.
+  const viewer = createServer(async (req, res) => {
+    try {
+      // Re-read on every request so a browser refresh shows the current state,
+      // rather than a snapshot frozen when the command started.
+      const fresh = await gitDiff(cwd)
+      const html = renderDiffHtml({
+        files: fresh.files, diff: fresh.diff, title: cwd, version: VERSION,
+      })
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
+      res.end(html)
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' })
+      res.end(`cqutmux diff: ${error.message || error}\n`)
+    }
+  })
+
+  await new Promise((resolve, reject) => {
+    viewer.once('error', reject)
+    viewer.listen(port, '127.0.0.1', resolve)
+  })
+  const actual = viewer.address().port
+  const url = `http://127.0.0.1:${actual}/`
+  process.stdout.write(`cqutmux diff: serving ${cwd} at ${url}\n`)
+  process.stdout.write('  Ctrl-C to stop.\n')
+
+  if (open) {
+    const opened = openInBrowser(url)
+    if (!opened.opened) {
+      // Not an error: the URL is printed above, and a headless host has nothing
+      // to open. Printing a false "opened" would be worse than saying so.
+      process.stderr.write('cqutmux: no browser to open; the URL is above\n')
+    }
   }
-  process.stdout.write(`\n${result.files.length} changed file(s). Open the app's Diff view, `
-    + `or run \`cqutmux serve\` and GET /diff?root=${encodeURIComponent(cwd)}.\n`)
+
+  // Hold until the user stops it. Returning here would be returning to the
+  // subcommand dispatcher, which calls `process.exit` — closing the server
+  // before the browser could ever reach it. So the command's lifetime *is* the
+  // server's lifetime, and it ends on Ctrl-C.
+  await new Promise(resolve => {
+    const stop = () => {
+      viewer.close()
+      process.stdout.write('\ncqutmux diff: stopped\n')
+      resolve()
+    }
+    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, stop)
+  })
+}
+
+/// Opens a URL in the user's browser, best-effort.
+///
+/// Returns whether a command started one, so the caller can tell "opened" from
+/// "nothing here opens browsers" instead of printing a success it did not have.
+/// The commands are the platform's own opener; the URL is passed as an argument,
+/// never through a shell, so a path in it cannot be read as a command.
+function openInBrowser(url, platform = process.platform) {
+  const attempts = platform === 'darwin'
+    ? [['open', [url]]]
+    : platform === 'win32'
+      ? [['cmd', ['/c', 'start', '', url]]]
+      : [['xdg-open', [url]], ['open', [url]]]
+  for (const [command, argv] of attempts) {
+    try {
+      const child = spawnSync(command, argv, { stdio: 'ignore' })
+      if (child.status === 0) return { opened: true, command }
+    } catch {
+      // Try the next one.
+    }
+  }
+  return { opened: false }
 }
 
 /// Publishes the token the hooks need, so they do not have to be configured

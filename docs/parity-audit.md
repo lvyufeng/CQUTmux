@@ -26,15 +26,16 @@ that is still open.
 **Since then, more closed** — "Read first" on a pending approval; the Watch
 inbox's project grouping plus its toolbar fill; half of the host-locale claim
 (LANG and LC_ALL now cross, the rc injection does not); the per-agent Usages
-windows; and the browser-preview listener metadata. See the progress list below.
+windows; the browser-preview listener metadata; and `cqutmux diff`'s browser
+viewer, which closes a deliberate divergence. See the progress list below.
 The "Read first" change also had an adversarial pass that refuted two claims it
 first shipped with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 57 |
-| partial | 16 |
-| deliberate-divergence | 2 |
+| closed | 59 |
+| partial | 15 |
+| deliberate-divergence | 1 |
 | missing | 1 |
 
 (The machine-readable `counters` field in `parity-audit.json` had drifted three
@@ -873,7 +874,26 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   checks) runs plain node; assuming single-word commands reddens exactly the two
   cases covering it.
 
-### The 17 that are still open, grouped by what is actually missing
+- **`cqutmux diff` opens a viewer in the browser.** It used to print the changed
+  file list and tell the user to go and look at the app — a recorded deliberate
+  divergence, since the app has its own viewer. But the doc page describes a
+  one-shot browser viewer on a stable loopback port, and it is the CLI that is
+  being tested, so the divergence was the gap. `host/cqutmux-hook/diffpage.mjs`
+  renders a self-contained page; `diff()` serves it on `127.0.0.1`, prints the
+  URL, opens the browser, and holds until Ctrl-C. `--port N` (0 = any free port)
+  and `--no-open` both work.
+  The reason the rendering is a separate, tested module: a diff is arbitrary
+  repository text, and a page built by concatenation breaks — or *runs* — on what
+  it displays. A `<script>` in a source file, or in a *filename* (which the
+  filesystem allows and the page puts in an element id), is escaped, and a line's
+  leading `+`/`-` is treated as the diff's mark rather than as content.
+  `scripts/diffpage-check.sh` (36 checks) runs plain node with no browser;
+  removing the escaping reddens 9 of them. The end-to-end smoke test found two
+  real bugs: the subcommand dispatcher calls `process.exit` when a command
+  returns, so the server was killed the instant it started — the command now
+  holds until a signal; and a clean tree rendered an empty `<ul></ul>`.
+
+### The 16 that are still open, grouped by what is actually missing
 
 A second independent pass on 2026-10-10 rewrote each of these with file:line
 evidence. What is missing, in one line each:
@@ -898,8 +918,6 @@ evidence. What is missing, in one line each:
   and its header lacks the agent/model/session line and the diff/preview
   controls.
 - Tool cards exist; mini diffs, task groups and expanded plan cards do not.
-- `cqutmux diff` prints the changed-file list and reroutes to the app's Diff
-  view; it opens no browser viewer (see the deliberate-divergence note for why).
 - Side-by-side diff and line-level modify highlights are absent.
 - The Browse tab walks the tree and opens files, but as plain monospaced text —
   no syntax highlighting, no historical commits.
