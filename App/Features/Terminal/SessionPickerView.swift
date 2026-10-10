@@ -42,11 +42,51 @@ struct SessionPickerView: View {
     /// Which tab the picker is on.
     ///
     /// Sessions first: the live sessions are what a picker is opened for, and
-    /// Recent is the way back to a folder rather than the main event.
-    enum Tab: String, CaseIterable, Identifiable {
-        case sessions, recent
-        var id: String { rawValue }
-        var title: String { self == .sessions ? "Sessions" : "Recent" }
+    /// Recent is the way back to a folder rather than the main event. Between
+    /// the two sit one tab per multiplexer the host actually runs sessions
+    /// under, so a host running both tmux and zellij can be read one mux at a
+    /// time — Moshi's per-multiplexer tabs — without losing the unified list.
+    ///
+    /// Not `CaseIterable`: which mux tabs exist depends on the host's live
+    /// sessions, so the list is built from the board rather than from a fixed
+    /// set of cases. A tab that is always empty is worse than no tab, which is
+    /// why a mux with nothing to show gets no case at all.
+    enum Tab: Hashable, Identifiable {
+        case sessions
+        case recent
+        case mux(String)
+
+        var id: String {
+            switch self {
+            case .sessions: "sessions"
+            case .recent: "recent"
+            case .mux(let mux): "mux:\(mux)"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .sessions: "Sessions"
+            case .recent: "Recent"
+            case .mux(let mux): Tab.displayName(forMux: mux)
+            }
+        }
+
+        /// How a mux is named on its tab.
+        ///
+        /// Fixed for the three the app knows, because each has its own spelling
+        /// the codebase already uses ("tmux" is never capitalised, "Zellij" and
+        /// "Herdr" are). An unfamiliar mux keeps whatever the host called it
+        /// rather than being forced into one of the three, so a fourth
+        /// multiplexer gets a readable tab without a code change.
+        static func displayName(forMux mux: String) -> String {
+            switch mux {
+            case "tmux": "tmux"
+            case "zellij": "Zellij"
+            case "herdr": "Herdr"
+            default: mux
+            }
+        }
     }
 
     /// What a tap asks the terminal to do. A session attach and a directory
@@ -64,6 +104,37 @@ struct SessionPickerView: View {
         case window(mux: String, session: String, selector: String)
     }
 
+    // NOTE: Moshi also offers "Skip" at the bottom of this list — connect
+    // without attaching to any session, dropping into a plain login shell.
+    // CQUTmux cannot offer it without a change to connection logic that this
+    // UI change cannot verify, so it is deliberately left out.
+    //
+    // The picker has no way to ask for a plain shell: every action it can send
+    // is either a mux command (`MuxAction`) or a directory `cd`, and both are
+    // typed into a connection that is *already* running the host's session
+    // command. The session command is not a per-action parameter — it is read
+    // once when the view is built (`TerminalViewRepresentable.swift:1218`,
+    // `host.sessionCommand`) and, for mosh/ET, baked into the transport
+    // launcher before the connection exists (`TransportFactory.swift:70`).
+    // "Skip" means connecting with *no* session command, which is a decision
+    // made at build/connect time, not a message the picker can send over the
+    // wire.
+    //
+    // A faithful Skip would have to re-run `connection.connect(to:)` (or
+    // rebuild `CQUTTerminalView`) with `startupCommand`/`sessionCommand` nil.
+    // Two things make that unsafe to wire blind: (1) the transport is
+    // constructed in `makeUIView` from the host, so emptying the command after
+    // connect does not affect an already-live mosh/ET launcher; (2) the same
+    // `startupCommand` is what a reconnect replays (`didRunStartup`), so a
+    // half-applied Skip would drop back into the mux on the next reconnect.
+    // Getting it right means a session-command override threaded through
+    // `TerminalViewRepresentable` and both transports — a change to connection
+    // behaviour, out of scope here.
+    //
+    // What already exists and is *not* Skip: the "Recent folders" and "Agent
+    // history" rows send a bare `cd`, but that lands inside the mux session's
+    // shell, not a fresh login shell. See `CQUTTerminalView.attachSessionDirectory`.
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -71,7 +142,7 @@ struct SessionPickerView: View {
                 // the two halves are reached, and a picker hidden behind a
                 // scroll would make the Recent tab look like it is not there.
                 Picker("View", selection: $tab) {
-                    ForEach(Tab.allCases) { tab in
+                    ForEach(availableTabs) { tab in
                         Text(tab.title).tag(tab)
                     }
                 }
@@ -113,6 +184,30 @@ struct SessionPickerView: View {
             guard tab == .recent else { return }
             await loadDiscovered()
         }
+        .onChange(of: availableTabs) { _, tabs in
+            // The board arrives after the first render, so the tab a host's
+            // sessions justify may only appear once `load()` returns — or, on a
+            // refresh, disappear when the last zellij session is killed. Falling
+            // back to the unified list keeps the picker on something rather than
+            // on a tab the control no longer draws.
+            if !tabs.contains(tab) { tab = .sessions }
+        }
+    }
+
+    /// The tabs this host's board justifies: the unified Sessions list, Recent,
+    /// and one per multiplexer that actually has sessions.
+    ///
+    /// Ordered mux tabs after Sessions and before Recent, so the unified view
+    /// stays the first thing a thumb lands on and Recent keeps its place at the
+    /// end. Derived rather than stored so it follows a refresh without a second
+    /// piece of state to keep in step — the one list both sizes the control and
+    /// decides whether the current tab still exists.
+    private var availableTabs: [Tab] {
+        var muxes: [String] = []
+        for session in board?.sessions ?? [] where !muxes.contains(session.mux) {
+            muxes.append(session.mux)
+        }
+        return [.sessions] + muxes.map(Tab.mux) + [.recent]
     }
 
     @ViewBuilder
@@ -122,6 +217,8 @@ struct SessionPickerView: View {
             sessionsContent
         case .recent:
             recentList
+        case .mux(let mux):
+            muxContent(mux)
         }
     }
 
@@ -156,6 +253,37 @@ struct SessionPickerView: View {
                     }
                 }
             }
+    }
+
+    /// A single multiplexer's slice of the board — the same rows as the unified
+    /// list, filtered to one mux.
+    ///
+    /// The tabs above the control already guarantee the mux has at least one
+    /// session, so the filtered list is never empty; the empty branch is the
+    /// board having gone away (a refresh that dropped the last session), and it
+    /// says so rather than showing a blank screen under a tab that still exists
+    /// from the previous render.
+    @ViewBuilder
+    private func muxContent(_ mux: String) -> some View {
+        if let error {
+            ContentUnavailableView {
+                Label("Can't reach the host", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(error)
+            }
+        } else if let sessions = board?.sessions.filter({ $0.mux == mux }), !sessions.isEmpty {
+            if layout.presents == "cards" {
+                cardList(sessions)
+            } else {
+                list(sessions)
+            }
+        } else {
+            ContentUnavailableView {
+                Label("No \(Tab.displayName(forMux: mux)) sessions", systemImage: "rectangle.stack.badge.minus")
+            } description: {
+                Text("The host is no longer reporting any \(mux) sessions.")
+            }
+        }
     }
 
     /// The Recent tab: the way back into a folder, and into the session that
