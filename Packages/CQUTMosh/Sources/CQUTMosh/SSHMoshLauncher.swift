@@ -86,7 +86,11 @@ public final class SSHMoshLauncher: MoshServerLauncher, @unchecked Sendable {
         // environment from its own `-l` list. A variable we only sent over the
         // channel would therefore be missing from the one shell the user
         // actually types into — which is the whole point of exporting it.
-        var args = ["-l", "LANG=en_US.UTF-8", "-c", "256", "-s"]
+        // The locale defaults to en_US.UTF-8 for the reason below, but a
+        // configured value wins: mosh-server rejects two `-l` for one name, so
+        // hardcoding it here would silently discard the user's choice — the
+        // session would come up UTF-8 and read as if the setting had applied.
+        var args = ["-l", "LANG=\(configuration.environment["LANG"] ?? "en_US.UTF-8")", "-c", "256", "-s"]
         for (name, value) in configuration.environment.sorted(by: { $0.key < $1.key }) {
             // LANG is already above, and repeating it would only risk two
             // different values for one name.

@@ -1103,7 +1103,7 @@ private struct TerminalViewRepresentable: UIViewRepresentable {
             frame: .zero,
             configuration: configuration,
             startupCommand: host.sessionCommand.isEmpty ? nil : host.sessionCommand,
-            startupPreamble: integrations.shellExportLine,
+            startupPreamble: integrations.shellExportLines.joined(separator: "\n"),
             theme: theme,
             font: fonts.uiFont(),
             transport: transport

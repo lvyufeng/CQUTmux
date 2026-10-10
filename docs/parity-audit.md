@@ -817,6 +817,30 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   `ForEach(groups) { Section { ForEach(group.items) } }` in `ApprovalListView`,
   with no header drawn when there is only one group.
 
+- **The host locale, half of it.** The claim is two halves, and only one is now
+  built. `IntegrationSettings` carries a stored locale and derives both `LANG`
+  and `LC_ALL` from it — the pair, because a host whose `/etc/profile` sets its
+  own `LC_ALL` would otherwise ignore the `LANG` we sent, and that is exactly the
+  host where a mis-set locale bites. The value rides every path that carries an
+  environment: SSH's request, Mosh's `-l` list (where the launcher used to
+  hardcode `LANG=en_US.UTF-8` and *skip* a configured one, so the setting would
+  have looked applied and done nothing), and the line typed at the session's
+  first prompt.
+  It is empty by default for the same reason the client marker is off by
+  default: setting a locale a host does not have installed makes every command
+  print a `setlocale` warning, so defaulting it on would turn an upgrade into a
+  regression on exactly the minimal hosts most likely to lack it.
+  A locale is only sent if it is a UTF-8 name made solely of locale characters —
+  the value is pasted into a shell line unquoted, so `C` (which would mojibake
+  the terminal) and `en_US.UTF-8; rm -rf /` are both dropped rather than
+  sanitised. Writing the check caught a real bug here: `isUTF8` read to the end
+  of the name, so it saw `UTF-8@euro` and rejected every modified locale such as
+  `de_DE.UTF-8@euro`. `scripts/integrations-check.sh` is now 41 checks, and
+  reverting that fix reddens exactly the one case covering it.
+  **Still open:** the claim's second half, writing the exports into `~/.zshenv`
+  and a non-interactive `~/.bashrc`. No helper writes any rc file, so shells the
+  agent spawns still see the host's own locale.
+
 ### The 18 that are still open, grouped by what is actually missing
 
 A second independent pass on 2026-10-10 rewrote each of these with file:line
@@ -829,7 +853,7 @@ evidence. What is missing, in one line each:
   last host/session at cold launch.
 - Chat mode's composer takes typed text only — the mic and image buttons are in
   the bar it replaces.
-- `LANG` is set for the host; `LC_ALL` is set nowhere and no rc file is written.
+- The interactive session can now be given a locale (`Settings → Integrations`, exported as both `LANG` and `LC_ALL` and carried by SSH and Mosh), but nothing writes `~/.zshenv` or a non-interactive `~/.bashrc`, so shells the agent spawns itself still see the host's default locale. The rc-injection half is unbuilt.
 - The diff viewer does take the custom font (that half is done); `.ttc`/`.otc`
   handling and the fallback are not.
 - Theme import is complete; the 570-theme `/themes` gallery it can import *from*

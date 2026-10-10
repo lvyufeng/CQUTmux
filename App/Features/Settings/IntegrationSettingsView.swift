@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Settings → Integrations. One section, because one integration option
-/// changes anything on the host.
+/// Settings → Integrations. The options that change something on the *host*
+/// rather than in the app: the client marker an rc file can branch on, and the
+/// locale the session runs under.
 struct IntegrationSettingsView: View {
     @State private var integrations = IntegrationSettings()
 
@@ -25,9 +26,46 @@ struct IntegrationSettingsView: View {
                     CodeLine("set-option -ga update-environment \" \(IntegrationSettings.variable)\"")
                 }
             }
+
+            Section {
+                TextField("Leave empty for the host's own locale", text: $integrations.locale)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.system(.body, design: .monospaced))
+
+                // The model drops a locale it cannot safely send. Saying so here
+                // is the difference between "the setting does nothing" and "the
+                // setting is doing nothing, and here is why" — the check covers
+                // the dropping, and only the screen can cover the telling.
+                if !integrations.locale.isEmpty,
+                   !IntegrationSettings.isExportableLocale(integrations.locale) {
+                    Label(
+                        "Not a UTF-8 locale name — nothing will be sent.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                }
+            } header: {
+                Label("Locale", systemImage: "globe")
+            } footer: {
+                Text(localeFooter)
+            }
         }
         .navigationTitle("Integrations")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// The locale field's explanation. Kept out of the `body` for the same
+    /// reason as `footer`.
+    private var localeFooter: String {
+        "Sets LANG and LC_ALL in every session, so the host renders UTF-8 output "
+            + "— box-drawing, CJK and emoji — instead of escaping it. Empty by "
+            + "default: a locale the host does not have installed makes every "
+            + "command print a setlocale warning, so turning this on is a choice "
+            + "rather than a default. Most hosts have en_US.UTF-8; every libc has "
+            + "C.UTF-8. A value that is not a UTF-8 locale is ignored rather than "
+            + "sent. SSH and Mosh sessions honour it; Eternal Terminal cannot."
     }
 
     /// Kept out of the `body`: the interpolations and the concatenation together
