@@ -769,6 +769,16 @@ struct SessionBoard: Codable {
         var attached: Bool
         var createdAt: String?
         var windowList: [Window]
+        /// The multiplexer's own handle for this row, when its name is not one.
+        ///
+        /// Herdr is why this exists. Its rows here are *workspaces*, addressed by
+        /// id, and the `name` shown is the workspace's label — which is what the
+        /// user reads but not what `herdr workspace focus` takes. Attaching by
+        /// the label happened to send a workspace name to `herdr --session`,
+        /// which is a different namespace entirely. tmux and zellij name their
+        /// sessions the way their own clients accept them, so they leave this
+        /// nil and `name` is used.
+        var attach: String?
         /// Herdr's own view of the agent in the workspace — `working`,
         /// `blocked`, `idle`, `done`. Absent for tmux and zellij, which have
         /// no such notion.

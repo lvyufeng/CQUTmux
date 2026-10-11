@@ -269,6 +269,46 @@ check(selectTab(21, "tmux") == nil, "and so is tab 21")
 // so a host that gets nil here must not get a row of buttons.
 check(selectTab(1, "zellij") != nil, "a zellij host gets the row")
 
+// MARK: - Attaching to a session
+
+// Herdr's rows are workspaces. The label is what the user reads; the command
+// takes the id. Sending the label to `herdr --session` — what this did before —
+// is a different namespace, so "Attach" launched a session named after the
+// workspace instead of moving to the workspace. No error, wrong place.
+check(MuxSettings.attachCommand(mux: "herdr", name: "api", handle: "w3")
+        == "herdr workspace focus 'w3'",
+      "herdr attaches by the workspace id, not the label")
+check(MuxSettings.attachCommand(mux: "herdr", name: "api", handle: nil)
+        == "herdr workspace focus 'api'",
+      "with no id it falls back to the name rather than sending nothing")
+check(!(MuxSettings.attachCommand(mux: "herdr", name: "api", handle: "w3") ?? "")
+        .contains("--session"),
+      "herdr attach is not the --session namespace, which names another thing")
+
+// A label with a space is ordinary and would arrive as two arguments unquoted.
+check(MuxSettings.attachCommand(mux: "herdr", name: "x", handle: "my work")
+        == "herdr workspace focus 'my work'",
+      "a workspace id with a space stays one shell word")
+check(MuxSettings.attachCommand(mux: "tmux", name: "it's here", handle: nil)?
+        .contains("'it'\\''s here'") == true,
+      "a quote in a session name is escaped, not broken out of")
+
+// tmux and zellij name their sessions the way their clients accept them, so a
+// handle on the row is not theirs to use.
+check(MuxSettings.attachCommand(mux: "tmux", name: "work", handle: "ignored")?
+        .contains("tmux switch-client -t 'work'") == true,
+      "tmux ignores a handle and attaches by name")
+check(MuxSettings.attachCommand(mux: "zellij", name: "dev", handle: nil)
+        == "zellij attach 'dev'",
+      "zellij attaches by name")
+
+// The failure this whole area is prone to: a tmux command into a host running
+// something else. An unrecognised mux must send nothing rather than guess.
+check(MuxSettings.attachCommand(mux: "screen", name: "x", handle: nil) == nil,
+      "an unrecognised multiplexer is not guessed at")
+check(MuxSettings.attachCommand(mux: "", name: "x", handle: nil) == nil,
+      "and neither is an empty one")
+
 if failures > 0 {
     print("\nMUX_FAIL  (\(failures) of \(checks) failed)")
     exit(1)

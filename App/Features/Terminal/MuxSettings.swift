@@ -322,4 +322,49 @@ final class MuxSettings {
     enum MirrorAxis: String, Codable {
         case next, previous
     }
+
+    /// The line that switched to a session on `mux`, or nil when the row carries
+    /// nothing this client can address.
+    ///
+    /// This is the whole attach rule, kept off the view so it can be checked
+    /// without a terminal: the same class of mistake as the tab row, and just as
+    /// quiet. Herdr is why the row needs *two* names. Its rows are workspaces —
+    /// the app shows the workspace's **label**, which is what a person reads,
+    /// while `herdr workspace focus` takes the **id**. Those are different
+    /// strings, and `herdr --session <label>` is a third thing again (a named
+    /// persistent session): sending the label there launched or attached a
+    /// session instead of moving to the workspace, which reads as "Attach did
+    /// nothing useful" with no error anywhere.
+    ///
+    /// tmux and zellij name their sessions the way their own clients accept them,
+    /// so their handle is nil and the name is used — and for them a wrong handle
+    /// is not a risk, because there is none to pass.
+    static func attachCommand(mux: String, name: String, handle: String?) -> String? {
+        let named = shellQuoted(name)
+        switch mux {
+        case "zellij":
+            return "zellij attach \(named)"
+        case "herdr":
+            // The handle when the row has one, the name otherwise: a herdr
+            // snapshot whose workspace carries no id still beats sending nothing.
+            return "herdr workspace focus \(shellQuoted(handle ?? name))"
+        case "tmux":
+            return "tmux switch-client -t \(named) 2>/dev/null || tmux attach -t \(named)"
+        default:
+            // An unrecognised mux is not guessed at: a tmux command into a host
+            // running something else is the failure this whole area is prone to.
+            return nil
+        }
+    }
+
+    /// A word a POSIX shell runs as one argument.
+    ///
+    /// The single-quote escape every shell understands: end the quote, emit an
+    /// escaped quote, reopen. A session label is user-chosen and routinely has a
+    /// space in it, so quoting it is not optional — and the `herdr workspace
+    /// focus` form is the one that made it matter, since a workspace label with
+    /// a space and no quoting arrives as two arguments.
+    static func shellQuoted(_ text: String) -> String {
+        "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
 }

@@ -393,7 +393,9 @@ struct TerminalScreen: View {
                     current: nil
                 ) {
                 case .restore(let session, let window):
-                    coordinator.terminal?.attachSession(mux: session.mux, name: session.name)
+                    coordinator.terminal?.attachSession(
+                        mux: session.mux, name: session.name, handle: session.handle
+                    )
                     if let window, !window.isEmpty {
                         // A beat, for the same reason the link path waits: the
                         // client has to have attached before the jump means
@@ -879,22 +881,30 @@ struct TerminalScreen: View {
         if let client = connection.client {
             SessionPickerView(client: client, host: host) { action in
                 switch action {
-                case .mux(.attach(let mux, let name)):
-                    coordinator.terminal?.attachSession(mux: mux, name: name)
+                case .mux(.attach(let mux, let name, let handle)):
+                    coordinator.terminal?.attachSession(mux: mux, name: name, handle: handle)
                     // Recorded only on attach: attaching is the user saying
                     // "this is where I am", and that is the thing worth coming
                     // back to. Recording on the connect flow's first shell
                     // would remember a session nobody chose.
-                    lastSessions.record(LastSession(mux: mux, name: name, window: nil), for: host)
-                case .mux(.window(let mux, let session, let selector)):
+                    lastSessions.record(
+                        LastSession(mux: mux, name: name, window: nil, handle: handle), for: host
+                    )
+                case .mux(.window(let mux, let session, let selector, let handle)):
                     coordinator.terminal?.selectWindow(
                         mux: mux, session: session, selector: selector
                     )
                     // A window jump is the same session with a window; keeping
                     // the window means reopening lands on the pane in use, not
                     // the session's default one.
+                    //
+                    // The handle rides along, because a window jump is also a
+                    // statement about which session to come back to: dropping it
+                    // here would restore the right window on the wrong session,
+                    // which for herdr means focusing a workspace by its label.
                     lastSessions.record(
-                        LastSession(mux: mux, name: session, window: selector), for: host
+                        LastSession(mux: mux, name: session, window: selector, handle: handle),
+                        for: host
                     )
                 case .openDirectory(let path):
                     // The Recent tab's whole point: a folder is where a session

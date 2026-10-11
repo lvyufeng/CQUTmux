@@ -105,8 +105,10 @@ struct SessionPickerView: View {
     /// A multiplexer command, tagged with its mux so the terminal knows which
     /// client to drive.
     enum MuxAction {
-        case attach(mux: String, name: String)
-        case window(mux: String, session: String, selector: String)
+        /// `handle` is the multiplexer's own address for the row when its name
+        /// is not one — herdr's workspace id. See `SessionBoard.Session.attach`.
+        case attach(mux: String, name: String, handle: String?)
+        case window(mux: String, session: String, selector: String, handle: String?)
     }
 
     // Moshi's "Skip" sits at the bottom of this list: connect without
@@ -329,7 +331,7 @@ struct SessionPickerView: View {
         case .lastSession(let last):
             Section("Last session") {
                 Button {
-                    act(.mux(.attach(mux: last.mux, name: last.name)))
+                    act(.mux(.attach(mux: last.mux, name: last.name, handle: last.handle)))
                     dismiss()
                 } label: {
                     Label("Attach to \(last.name)", systemImage: "arrow.uturn.backward")
@@ -338,7 +340,7 @@ struct SessionPickerView: View {
                 // nobody was in would be inventing a place.
                 if let window = last.window, !window.isEmpty {
                     Button {
-                        act(.mux(.window(mux: last.mux, session: last.name, selector: window)))
+                        act(.mux(.window(mux: last.mux, session: last.name, selector: window, handle: last.handle)))
                         dismiss()
                     } label: {
                         Label("Window \(window) in \(last.name)", systemImage: "rectangle.on.rectangle")
@@ -448,14 +450,14 @@ struct SessionPickerView: View {
             ForEach(sessions) { session in
                             Section {
                                 Button {
-                                    act(.mux(.attach(mux: session.mux, name: session.name)))
+                                    act(.mux(.attach(mux: session.mux, name: session.name, handle: session.attach)))
                                     dismiss()
                                 } label: {
                                     Label("Attach", systemImage: "rectangle.connected.to.line.below")
                                 }
                                 ForEach(session.windowList) { window in
                                     Button {
-                                        act(.mux(.window(mux: session.mux, session: session.name, selector: window.selector)))
+                                        act(.mux(.window(mux: session.mux, session: session.name, selector: window.selector, handle: session.attach)))
                                         dismiss()
                                     } label: {
                                         HStack {
@@ -584,7 +586,7 @@ struct SessionPickerView: View {
             }
 
             Button {
-                act(.mux(.attach(mux: session.mux, name: session.name)))
+                act(.mux(.attach(mux: session.mux, name: session.name, handle: session.attach)))
                 dismiss()
             } label: {
                 Label("Attach", systemImage: "rectangle.connected.to.line.below")
@@ -597,7 +599,7 @@ struct SessionPickerView: View {
             FlowLayout(spacing: 6) {
                 ForEach(session.windowList) { window in
                     Button {
-                        act(.mux(.window(mux: session.mux, session: session.name, selector: window.selector)))
+                        act(.mux(.window(mux: session.mux, session: session.name, selector: window.selector, handle: session.attach)))
                         dismiss()
                     } label: {
                         HStack(spacing: 4) {

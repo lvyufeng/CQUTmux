@@ -693,17 +693,31 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     @objc private func hardwareReconnect() { reconnect() }
     @objc private func hardwarePaste() { pasteFromClipboard() }
 
-    @objc private func hardwarePrevWindow() {
-        write(Data(muxPrefix.bytes)); write(Data([0x70])) // prefix, then p
-    }
+    @objc private func hardwarePrevWindow() { sendMuxCommand(.previousTab) }
 
-    @objc private func hardwareNextWindow() {
-        write(Data(muxPrefix.bytes)); write(Data([0x6E])) // prefix, then n
-    }
+    @objc private func hardwareNextWindow() { sendMuxCommand(.nextTab) }
 
+    /// ⌘1…⌘9 — the same jump the quick-access row's buttons make, so a number
+    /// means the same thing however it was asked for.
     @objc private func hardwareWindow(_ sender: UIKeyCommand) {
         guard let input = sender.input, let index = Int(input) else { return }
-        selectWindow(mux: "tmux", session: "", selector: String(index))
+        selectTab(index, mux: muxKind)
+    }
+
+    /// Sends a multiplexer command through the checked table, exactly as a
+    /// two-finger sweep does.
+    ///
+    /// The hardware window keys used to compose their bytes by hand — `muxPrefix`
+    /// then `p`/`n`, and `selectWindow(mux: "tmux", …)` for the numbers — which
+    /// is tmux's binding and nobody else's. On a zellij or herdr host the same
+    /// bytes are a *different* command, and on a plain shell they are a stray
+    /// control character typed into whatever is running. The bar's tab row
+    /// already refused to do that (see `tabRowApplies`); a hardware keyboard got
+    /// the unguarded path. `bytes(prefix:mux:)` returns nil for a mux that has no
+    /// such binding, so an unavailable command now sends nothing.
+    private func sendMuxCommand(_ command: MuxSettings.MuxCommand) {
+        guard let bytes = command.bytes(prefix: muxPrefix, mux: muxKind) else { return }
+        write(Data(bytes))
     }
 
     // MARK: - Key injection (used by the accessory bar)
@@ -840,20 +854,20 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
 
     /// Switches to a session on whichever multiplexer owns it. tmux prefers
     /// `switch-client` when we are already inside a client and `attach`
-    /// otherwise; zellij and herdr both re-attach by name.
-    func attachSession(mux: String, name: String) {
-        let quoted = "'" + name.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        switch mux {
-        case "zellij":
-            write(Data("zellij attach \(quoted)\n".utf8))
-        case "herdr":
-            // `herdr --session` launches or attaches to the named persistent
-            // session; the bare form would attach to the default one and land
-            // the user in the wrong place.
-            write(Data("herdr --session \(quoted)\n".utf8))
-        default:
-            write(Data("tmux switch-client -t \(quoted) 2>/dev/null || tmux attach -t \(quoted)\n".utf8))
+    /// otherwise; zellij re-attaches by name; herdr *focuses a workspace*.
+    ///
+    /// `handle` is the multiplexer's own address for the row, when the name
+    /// shown is not one the client accepts — see `SessionBoard.Session.attach`.
+    /// Herdr is the case that needs it: the rows are workspaces, addressed by
+    /// id, and `herdr --session <name>` is a *different namespace* (a named
+    /// persistent session) that a workspace label is not an address in. Sending
+    /// the label there launched or attached a session by that name instead of
+    /// moving to the workspace, which looks like "attach did nothing useful".
+    func attachSession(mux: String, name: String, handle: String? = nil) {
+        guard let command = MuxSettings.attachCommand(mux: mux, name: name, handle: handle) else {
+            return
         }
+        write(Data((command + "\n").utf8))
     }
 
     /// Jumps to a window/tab in the attached client, and for tmux to a pane

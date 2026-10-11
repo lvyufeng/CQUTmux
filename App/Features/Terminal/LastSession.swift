@@ -8,6 +8,11 @@ struct LastSession: Codable, Hashable {
     /// How the mux addresses the window. A string because herdr uses a tab id
     /// (`w1:t2`), not a number — the same reason the picker carries one.
     var window: String?
+    /// The multiplexer's own handle for the session, when its name is not one —
+    /// herdr's workspace id. Carried so a resumed herdr row can be focused by
+    /// id rather than by the label the user reads; nil for tmux and zellij,
+    /// whose names their clients accept. See `SessionBoard.Session.attach`.
+    var handle: String?
 }
 
 /// Whether to resume, and what that resume is.

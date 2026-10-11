@@ -869,6 +869,12 @@ async function herdrSessions(args) {
     return {
       mux: 'herdr',
       name: workspace.label,
+      // What `herdr workspace focus` takes. The label is what the user reads;
+      // the id is what the command accepts, and they are not interchangeable —
+      // the app used to hand the label to `herdr --session`, which is a
+      // different namespace (a named persistent session), so "attach" launched
+      // or attached a session instead of moving to the workspace.
+      attach: workspace.id,
       windows: tabs.length || workspace.tabCount,
       attached: workspace.focused,
       createdAt: null,
@@ -1559,6 +1565,21 @@ for (let i = 0; i < argv.length; i++) {
   }
 }
 const positional = positionals[0]
+// `--help` and `--version` are flags, not positionals, so without this they are
+// swallowed by the loop above and `command` stays null — which falls through to
+// the server and *starts the gateway*. Typing the near-universal spelling of
+// "tell me how to use this" would then hang with a listening daemon and no
+// usage text, the worst possible answer to that question. These are the one
+// place a bare flag is a command, so they are handled before the dispatch.
+if (argv.includes('--help') || argv.includes('-h')) {
+  process.stdout.write(usage() + '\n')
+  process.exit(0)
+}
+if (argv.includes('--version') || argv.includes('-v')) {
+  process.stdout.write(`cqutmux ${VERSION}\n`)
+  process.exit(0)
+}
+
 const command = positional && COMMANDS.has(positional) ? positional : null
 
 if (command === 'serve') {
