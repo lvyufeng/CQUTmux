@@ -47,7 +47,23 @@ that is still open.
 
 **Later still** — browsing a commit's own tree from the History tab, and real syntax highlighting in the file viewer, which together close the "Browse tab walks the repo file tree at any past commit; files open as syntax-highlighted source" entry.
 
-**And the last `missing` entry is now `partial`** The other two partials are the two Live Activity halves that share the same wall: the Lock Screen now carries Allow/Deny buttons (an AppIntent writing into an App Group the app drains), and the host builds and addresses the pushes that would drive one while the app is suspended. Both are implemented and checked at the rule level, and both stop short of `closed` for the same reason — the entitlements that would let a device exercise them need a paid provisioning profile, so no tap and no push has actually been observed. — the host builds and addresses Live Activity pushes (push-to-start to the app-level token, updates to the per-activity one) and the app obtains and uploads both tokens under the Live Activity switch. It stops short of `closed` on purpose: the `aps-environment` entitlement that would let a real device receive one needs a paid provisioning profile, so the payloads are checked but never delivered.
+**The last `missing` entry is now `partial`.** The two `partial` rows are the
+Live Activity halves, and they no longer share one wall. The app side is now
+*verified at runtime*, not only rule-checked: `scripts/liveactivity-delivery-check.sh`
+launches the app on a simulator with `CQUT_DEV_TEST_ACTIVITY=1` — the Settings
+test button's own code path, reached without a tap — and asserts that
+`Activity.request` returns `started` and that the widget extension is launched to
+render it (6 checks, two consecutive clean runs). That closes the "no tap has
+been observed" half of the row and covers the Lock Screen Allow/Deny buttons'
+render path and the app obtaining and uploading both activity tokens.
+
+What still stops the rows short of `closed` is narrower: push *delivery* — that
+an APNs payload starts or updates an activity on a suspended app. That needs an
+`aps-environment` entitlement (a paid provisioning profile) and a physical
+device, and `xcrun simctl push` does not stand in for it: its own help says only
+application remote pushes are supported, with liveactivity outside that. So the
+payloads are checked and the app end is now exercised, but no push has been
+delivered. That is a hardware/profile limit, not missing implementation.
 
 **Since then, more closed** — "Read first" on a pending approval; the Watch
 inbox's project grouping plus its toolbar fill; the host-locale claim, both

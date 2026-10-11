@@ -1,4 +1,5 @@
 import SwiftUI
+import OSLog
 
 /// Top-level shell. On a phone it is a tab bar; on a regular-width screen
 /// (iPad) the same surfaces become a sidebar, so the terminal keeps the large
@@ -97,11 +98,20 @@ struct RootView: View {
                 let outcome = ActivityManager().update(
                     hostName: "Test host", events: AgentActivityPreview.sampleEvents()
                 )
-                // Printed, not just acted on: `Activity.request` failing is
-                // invisible from here — no exception reaches the UI, and the
-                // activity simply is not there — so a run that cannot tap the
-                // button needs the outcome in the log to tell the two apart.
+                // Reported twice, and each earns its place. `print` goes to
+                // the pty a human watching `--console-pty` reads. The `Logger`
+                // line is what scripts/liveactivity-delivery-check.sh reads
+                // back from the unified log: stdout to a pipe is block-buffered,
+                // so a follow that is killed loses the unflushed line — which
+                // made a started activity read as no activity at all. The
+                // in-process `OSLogStore` SupportView uses reads this process's
+                // `print` too, but that store is not reachable from outside.
+                // Both exist because `Activity.request` failing is otherwise
+                // invisible: no exception reaches the UI, the activity simply
+                // is not there.
                 print("CQUT_TEST_ACTIVITY: \(outcome)")
+                Logger(subsystem: "app.cqutmux.ios", category: "activity")
+                    .notice("CQUT_TEST_ACTIVITY: \(String(describing: outcome))")
             }
             #endif
         }
