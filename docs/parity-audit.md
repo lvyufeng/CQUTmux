@@ -9,6 +9,25 @@ Result: **76 confirmed gaps, 30 claims refuted.** The raw findings — claim,
 status, file:line evidence, and the verifier's reasoning — are in
 `docs/parity-audit.json`.
 
+## The refuted list was re-tested (2026-10-11)
+
+A refuted claim is where a real gap hides: "already implemented" or "not really
+a Moshi capability" is a judgement, and a wrong one silently deletes parity
+work. All 30 were re-tested against the current tree and against the doc page
+each came from. **Five were wrongly refuted** and have been implemented —
+single tap binding, the host key `suppress-push-while-unlocked`, the Chat View
+approval bar, Settings → Hooks → "Use preview", and serve-sim auto-detection —
+moving from `refuted` to `closed`. Three more (`multiplexer` cwd-list, the herdr
+prefix, the tab row) had stale *reasoning* but their capabilities do exist, so
+they stay refuted with the basis corrected. The counts above are the original
+pass; the live numbers are the JSON's `confirmed` (81) and `refuted` (25)
+arrays.
+
+The pattern worth keeping: every one of the five failed on a refutation that
+used "recorded deliberate divergence" to override a doc page that said
+otherwise. The recorded decision was real; it just was not what the doc asked
+for.
+
 ## Basis of this audit (decided 2026-10-11)
 
 The comparison basis is **getmoshi.app's documentation plus its App Store

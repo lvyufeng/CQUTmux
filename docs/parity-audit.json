@@ -532,9 +532,39 @@
       "status": "closed",
       "evidence": "host/cqutmux-hook/index.mjs:1351-1352 writes hooks to a single target, `~/.claude/settings.json` via `claude-code-hook.sh`; grep for `codex|opencode|cursor|kimi|copilot` under host/ finds no installer paths. Only Claude Code is wired. PLAN.md:326 states the caveat ('按命令字符串…本脚本路径').",
       "verification": "Searched the repo for any multi-agent installer. `cqutmux install` (host/cqutmux-hook/index.mjs:1347-1406) writes hooks to exactly one target: `~/.claude/settings.json` via the single bridge `claude-code-hook.sh` (lines 1351-1352). No loop over agent config locations, no Codex/OpenCode/Cursor/Kimi/Copilot paths. Grep across host/, scripts/, App/ for those agent names and their config dirs (.codex, .config/opencode, .cursor, .continue) yields only unrelated hits: the app's display label `case \"codex\": \"Codex\"` (AgentEvent.swift:142), a watch-usage fixture, and terminal cursor UI. host/cqutmux-hook/README.md:60 itself narrows the scope to `~/.claude/settings.json`. PLAN.md:322-327 documents the `install` decision but only regarding merge semantics (recognising own entries by command-string path, backup, refuse-to-parse) — not an intentional decision to support only Claude Code. No alternative/differently-named installer exists, so the gap is real and the claim's \"partial\" status holds.\n\nSame change as gap 43: multi-agent install now covers five agents by their documented formats rather than Claude Code alone."
+    },
+    {
+      "page": "gestures",
+      "claim": "Single tap is a bindable gesture (Moshi: \"No-op by default. Bind to show keyboard, send Escape/Tab, or run a custom shortcut\").",
+      "status": "closed",
+      "evidence": "**Closed c98c885.** TerminalGesture gained a `singleTap` case (App/Features/Terminal/GestureBinding.swift), default no-op; our recogniser coexists with SwiftTerm's own (cancelsTouchesInView=false + simultaneous recognition) so link-open/mouse-reporting survive. Checked in scripts/shortcut-grammar/gestures.swift. The prior refutation relied on the recorded absence being deliberate, which does not make a documented capability present."
+    },
+    {
+      "page": "hook-settings",
+      "claim": "Host config key `suppress-push-while-unlocked`.",
+      "status": "closed",
+      "evidence": "**Closed f033b72.** Added to SETTABLE and parsed; the gateway reads `IOConsoleLocked` from the Root IOKit plane (correct across fast user switching) and drops only the visible banner, leaving the event record and Live Activity flowing. A failed read or non-macOS host does not suppress, per the doc. The prior refutation substituted the client-side \"Pause notifications\" toggle — a user-initiated full pause, not the documented automatic suppression."
+    },
+    {
+      "page": "chat-view",
+      "claim": "Chat View shows a floating approval bar (Approve/Deny) acting on the live session.",
+      "status": "closed",
+      "evidence": "**Closed c98c885.** App/Features/Agents/ChatApproval.swift (pure selection rule) + an overlay in ChatView.swift resolving through the same HookClient.resolve path the Inbox uses. The prior refutation argued the Inbox covered it; the doc describes the Chat View bar as a second surface."
+    },
+    {
+      "page": "browser-preview",
+      "claim": "Settings → Hooks → \"Use preview\" toggles whether the Code panel offers browser preview.",
+      "status": "closed",
+      "evidence": "**Closed f033b72.** AgentActivitySettings.usePreview (default on) gates both the Code panel toolbar button and the same button in Chat mode; Hooks screen renders the toggle. The doc: \"turn Use preview back on to bring it back\"."
+    },
+    {
+      "page": "simulator-preview",
+      "claim": "A serve-sim simulator preview is auto-detected (process/command line, $TMPDIR/serve-sim/ state file, page marker) and shown as \"Simulator Preview\", never listed twice.",
+      "status": "closed",
+      "evidence": "**Closed d4f2102.** host/cqutmux-hook/serve-sim.mjs implements all three documented triggers + the no-duplicate rule; wired into listening-port discovery and surfaced in the Preview pane. scripts/serve-sim-check.sh (68 checks). The prior refutation conceded detection was absent and dismissed it as not a gap."
     }
   ],
-  "refutedCount": 30,
+  "refutedCount": 25,
   "refuted": [
     {
       "page": "first-session",
@@ -576,10 +606,6 @@
       "location": "/Users/lvyufeng/Projects/CQUTmux/App/Features/Terminal/GestureBinding.swift:43-59"
     },
     {
-      "page": "gestures",
-      "why": "The literal capability (a `tap` gesture case bindable to show-keyboard / Escape-Tab / custom shortcut) does not exist in the enum or recognizers, but the task defines refutation as also covering a \"divergence genuinely recorded as a decision with a sound reason.\" That condition is met, and exposed to the user, not merely in code comments. GestureBinding.swift:61-68 documents the exclusion and sets `TerminalGesture.unsupported = \"Single tap belongs to text selection and mouse reporting.\"`, which is rendered in GestureEditorView.swift:29 (\"...\\(TerminalGesture.unsupported)\"). PLAN.md:205-206 records the same decision. The reason is technically sound and matches the implementation: CQUTTerminalView.installGestures() adds recognizers only for gestures \"the terminal does not already use\"; SwiftTerm's own single-tap drives mouse reporting and long-press selection, so a competing recognizer would have to fail first and would steal the tap's current behavior. The enum comment (lines 6-8) further frames the four-case set as matching Moshi's bindable set, the design target. This is a deliberate, documented, sound architectural decision, so the claimed \"missing\" gap is refuted."
-    },
-    {
       "page": "scrolling",
       "why": "The gap is not real: an in-app scrollback buffer that can be dragged back through output exists and is active in the app.\n\nHow it works, with sources:\n- `App/Features/Terminal/CQUTTerminalView.swift:10` — `final class CQUTTerminalView: TerminalView, ...`. TerminalView is not a plain view: on iOS it is `open class TerminalView: UIScrollView, ...` (build/SourcePackages/checkouts/SwiftTerm/Sources/SwiftTerm/iOS/iOSTerminalView.swift:54), and its content height is the entire line buffer: `contentSize = CGSize(width: cols*cellWidth, height: lines.count*cellHeight)` (iOSTerminalView.swift:1790). That is the scrollback buffer, and the scroll geometry is the framework's `contentOffset`.\n- The user drags back through it with one finger via SwiftTerm's own pan handler: `panSelectionHandler` calls `scrollDown(lines: deltaRow)` when mouse reporting is off (iOSTerminalView.swift:1282), and `scrollDown`/`scrollUp`/`scrollTo(row:)` move `yDisp`/`contentOffset` through the buffer (AppleTerminalView.swift:2647-2742). The CQUT subclass does not disable this: `isScrollEnabled` is left at its default true, and its gesture constraints only stop its two-wheel pan from colliding with SwiftTerm's recognizers (CQUTTerminalView.swift:228-234, 194).\n- Scrollback is bounded at 500 lines. CQUT uses the frame-only initializer `super.init(frame: frame)` (CQUTTerminalView.swift:80), so no `TerminalOptions` is passed and SwiftTerm's `.default` applies, which is `scrollback: 500` (TerminalOptions.swift:118). There is indeed no CQUT-side sizing call to `changeScrollback`, but that is the deliberate delegation the PLAN documents (PLAN.md:256-259: the scroll geometry lives inside SwiftTerm and a second opinion about \"where the bottom is\" would fight it).\n- The cited empty `scrolled(source:position:)` at CQUTTerminalView.swift:647 is a pure notification callback (fired from AppleTerminalView.swift:2695/2843/2855 to report the fraction scrolled); implementing it is unrelated to whether the buffer exists or is draggable, so its emptiness is not evidence of a missing buffer.\n\nThe claim's wording is \"in-app scrollback buffer sized so it can be dragged back through agent output/build logs,\" with the parenthetical that the page deliberately has 'no setting to change length'. That is exactly the state here: a working, draggable buffer whose length is fixed at the framework's 500-line default and intentionally not exposed. The only true divergence is \"no CQUT-side tuning,\" which is a recorded architectural decision with a sound reason and matches the page, not a missing capability. Search found no other scrollback store (only the two CQUTTerminalView comments, which describe falling through to the same buffer), so nothing was overlooked under another name.",
       "location": "/Users/lvyufeng/Projects/CQUTmux/App/Features/Terminal/CQUTTerminalView.swift:10"
@@ -619,10 +645,6 @@
       "location": "/Users/lvyufeng/Projects/CQUTmux/host/cqutmux-hook/index.mjs:776"
     },
     {
-      "page": "hook-settings",
-      "why": "Searched hard. The literal key `suppress_push_while_unlocked` is indeed absent from the gateway — `host/cqutmux-hook/index.mjs:146-149` parses only always_on_discovery, usage_collection, suppress_nested_agent_push, scan_ports. But the documented capability (silence visible pushes while the console/app is unlocked) IS implemented, under a different name and on the client: PushCoordinator.isPaused (App/Features/Agents/PushRegistration.swift:45-58) is a persistent UserDefaults setting that is enforced in UNUserNotificationCenter willPresent (App/Features/Agents/AppDelegate.swift:61-75), returning completionHandler([]) to suppress the banner of a foreground/unlocked push — exactly the effect Moshi's setting describes. It is exposed as the \"Pause notifications\" toggle (SecuritySettingsView.swift:140-160). Moreover this is recorded as a deliberate architectural choice: push.mjs:1-19 and AppDelegate.swift:66-69 explain the gateway sends to every registered device and cannot know a device's state, so suppression is enforced at the last point before display; the Moshi key is macOS-console-specific and CQUTmux is an iOS app whose analogue of \"unlocked console\" is the app's foreground state, which the willPresent path handles. The proxy webhook path governs the Mac, not the phone, so it has no console-lock concept to mute. Caveat: if the requirement is read strictly as \"a fifth TOML key parsed by the gateway,\" it is genuinely absent; read as \"the ability to silence visible pushes while the app is unlocked,\" the capability exists and the divergence is a sound, documented decision."
-    },
-    {
       "page": "licensing",
       "why": "The claimed capability (license membership: 3-device limit, license-key join, device-list removal, shared Pro/fan-out/cloud-dictation quota) genuinely has no implementation — no StoreKit import, no product IDs, no license-key redemption, no device-list UI, no shared-quota logic anywhere in App/ or host/; entitlements file holds only keychain + iCloud; the sole pro plumbing (CustomShortcut.swift:47-54, freeLimit=3 + canAdd(pro:)) is never called. HOWEVER, the divergence is explicitly recorded as a deliberate decision with a sound reason, which the verification rule treats as grounds for refutation. IntegrationSettings.swift:9-11: 'Moshi gates this behind Pro; we do not, and that is a deliberate divergence rather than an oversight. Reproducing a paywall would be reproducing a business model, not a feature.' This principle is generalized at PLAN.md:582 ('一处刻意的分歧：Moshi 把这个开关放在 Pro 后面，我们没有——复刻付费墙是复刻商业模式，不是复刻功能') and corroborated by PLAN.md:575, which establishes that Moshi's licensing/push depend on the hosted api.getmoshi.app service — a server this clean-room project deliberately does not run, in line with its stated feature-parity (not business-model) scope. The recorded rationale is sound for a project whose goal is functional parity: a license/StoreKit/membership system is a paid distribution model, and its join/device-list/shared-quota semantics require Moshi's server, which the repo intentionally omits. Hence the gap is an intentionally recorded divergence, not an unnoticed omission.",
       "location": "App/Features/Settings/IntegrationSettings.swift:9-11 (also PLAN.md:582, PLAN.md:575)"
@@ -638,24 +660,9 @@
       "location": "/Users/lvyufeng/Projects/CQUTmux/App/Features/Terminal/CQUTTerminalView.swift:476, /Users/lvyufeng/Projects/CQUTmux/App/Features/Terminal/TerminalViewRepresentable.swift:366, /Users/lvyufeng/Projects/CQUTmux/PLAN.md:579"
     },
     {
-      "page": "chat-view",
-      "why": "The audit's mechanical observation is correct but the claim does not survive scrutiny. (1) The capability — responding to permission requests via Approve/Deny — exists and is fully wired: App/Features/Agents/InboxView.swift:337-340 renders Allow/Deny buttons that call client.resolve(event, allow:); InboxView.swift:112-113 wires resolve/answer; Watch/WatchBridge.swift and the lock-screen notification actions (PushRegistration.swift, AppDelegate.swift:50) also answer the same approvals. HookClient.resolve (HookClient.swift:237) issues POST /approve/:id. (2) The divergence in placement — responding in the Inbox board rather than an inline bar in ChatView — is a recorded, deliberate architectural decision. PLAN.md row 579 states the Chat View is read-only (\"我们的 Chat 目前只读不写\") and explicitly defers the interactive question/approval card to the next row; row 580 states that card was implemented in the Inbox and the Apple Watch, with Allow/Deny deliberately suppressed when options exist. The reason holds: ChatView.swift (all 262 lines) is a transcript reader that polls the agent's own log file via client.transcript(path:) and has no access to the live event stream that approvals depend on, so approval decisions live with the event/board model (Inbox) rather than the read-only log reader. The feature is thus neither absent nor accidentally misplaced, but present under a documented alternative design. Only the literal phrase \"inside Chat View\" is unmet, which is a placement/UX difference, not a missing capability.",
-      "location": "App/Features/Agents/InboxView.swift:337"
-    },
-    {
       "page": "browser-preview",
       "why": "The capability (configure discovery: restrict which dev-server ports are probed/reported) IS implemented, via the deliberately chosen config-file mechanism rather than CLI subcommands. loadConfig (index.mjs:92) reads ~/.config/cqutmux/config.toml [gateway].scan_ports; applyConfig (index.mjs:149) applies it with flags winning over the file; scanPortAllowed (index.mjs:157+) plus the /ports handler (index.mjs:442, 724) filter out-of-range ports entirely. It is tested in scripts/cli-check.sh:411-430 and documented in host/cqutmux-hook/README.md (\"Config file\") and PLAN.md:355. The claim's premise is that `moshi-hook set scan-ports`/`servers` are \"documented CLI subcommands\"; that is not the project's spec. The project's own design records the config file as the persistence mechanism for exactly these settings: commit bd2df4d scopes the CLI page to Moshi's \"project tmux launcher and one-shot diff viewer\" (no set/servers), and commit 1c71890 / PLAN.md:355 map the five persistent settings, including scan_ports, to docs/hook-settings and the TOML file. So the divergence is a recorded architectural decision covering the requirement, not a missing feature. It is true that no set/servers subcommands exist (COMMANDS at index.mjs:998; runCommand at 1076-1090), but the underlying requirement is satisfied and the divergence is documented, so the gap is refuted.",
       "location": "/Users/lvyufeng/Projects/CQUTmux/host/cqutmux-hook/index.mjs:92"
-    },
-    {
-      "page": "browser-preview",
-      "why": "The browser-preview capability is fully implemented, not missing. PreviewView.swift renders a WKWebView of a host dev server reached through the SSH tunnel via PreviewBridge, opened from CodePanelView.swift:83-87 (menu item \"Browser preview\"; sibling \"Simulator preview\" at :88-92). The host gateway backs it (index.mjs /ports scan; the scan_ports config setting is documented in host/cqutmux-hook/README.md as narrowing \"what Browser Preview probes\"). PLAN.md:463 records both browser and simulator preview as merged and simulator-tested; README.md lists them as done. The audit's own evidence concedes the feature exists and only disputes the entry point: it wants a Settings -> Hooks -> \"Use preview\" toggle, whereas the app opens preview from the Code panel. I searched the whole repo: no \"Use preview\" Setting, no Hooks settings section (SettingsView.swift has none), and no differently-named counterpart toggle. But the divergence is purely UI placement, not a functional gap. The Code panel's Preview menu is the app's established, deliberate home for preview-adjacent actions — \"Go to directory\"/\"Pasted files\" live there too, and PLAN.md:238 documents placing Recents in that same menu as a conscious choice. The claim's \"partial\" status overstates the issue: the capability exists, is wired end to end, and is tested, so it is refuted as a feature gap. (Note: a Settings \"Hooks\" panel matching Moshi's naming is not replicated, and PLAN.md/commit 1c71890 mention Moshi's \"five\" hook settings while only four are parsed — but no preview-related setting is among the named ones, and the preview feature itself is complete.)",
-      "location": "/Users/lvyufeng/Projects/CQUTmux/App/Features/Code/CodePanelView.swift:83"
-    },
-    {
-      "page": "simulator-preview",
-      "why": "The claimed divergence is real but does NOT constitute an unaddressed feature gap, so the gap is refuted. The simulator-preview capability exists and is delivered in the repo: host/cqutmux-hook/index.mjs:451-480 enumerates booted simulators via `xcrun simctl list devices booted --json` (Apple's stable interface, not serve-sim), and index.mjs:734-751 serves `GET /simulator/screenshot` by running `xcrun simctl io <udid> screenshot` and returning a raw PNG; the app polls it every 1.5s (SimulatorPreviewView.swift:153-169) over the existing SSH/direct-tcpip gateway. A repo-wide grep finds zero occurrences of serve-sim/serve_sim/serveSim and zero video-streaming tech (no WebRTC/H.264/MJPEG), confirming the architecture differs exactly as claimed. Critically, the divergence is genuinely recorded as a deliberate decision with sound reason: SimulatorPreviewView.swift:4-10 documents the PNG-over-SSH design, and PLAN.md:89 (plus :64, :463; README:21/37/65) records simulator preview as confirmed-delivered via CodePanelView/SimulatorPreviewView. Minor nuance the auditor partly missed: automatic detection (process name / state file / page marker) specifically does not exist — preview is entered manually via the Code-panel toolbar menu (CodePanelView.swift:83-92) — but enumeration itself is automatic via simctl, which answers the requirement's substance with a cleaner mechanism. Per the task's refutation rule, a capability that exists and a divergence recorded with sound reason means refuted=true.",
-      "location": "/Users/lvyufeng/Projects/CQUTmux/host/cqutmux-hook/index.mjs:734"
     },
     {
       "page": "apple-watch",
@@ -683,9 +690,10 @@
     }
   ],
   "counters": {
-    "closed": 73,
+    "closed": 78,
     "partial": 2,
     "deliberate-divergence": 1,
     "missing": 0
-  }
+  },
+  "recheckNote": "2026-10-11: all refuted claims re-tested against the working tree and their source doc pages. 5 were wrongly refuted and have been implemented (see the closed entries citing commits f033b72/c98c885/d4f2102); 3 more had stale reasoning (multiplexer cwd-list, herdr prefix, tab-row) but their capabilities do exist, so they remain refuted with corrected basis."
 }
