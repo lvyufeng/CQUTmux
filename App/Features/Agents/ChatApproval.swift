@@ -40,6 +40,26 @@ enum ChatApproval {
         return nil
     }
 
+    /// Every event that belongs to the session at `directory`, newest first.
+    ///
+    /// The shared selection behind both the approval bar and the Working
+    /// indicator: the two ask different questions of the same session, and if
+    /// they disagreed about *which* events are that session's — the approval bar
+    /// showing one session's request while the spinner reflected another's
+    /// activity — the screen would contradict itself with nothing to show why.
+    ///
+    /// The chat can be opened with no directory at all: the Terminal falls back
+    /// to ".", the gateway's own working directory, and reads the transcript
+    /// from there. The session on screen is then whatever the gateway resolved,
+    /// and which events are *theirs* cannot be read off the events — the cwd
+    /// they carry is absolute. So with no directory every event is handed back
+    /// (callers that need a single one, like the approval bar, further require
+    /// there be exactly one, where there is nothing to choose wrongly).
+    static func forSession(in events: [AgentEvent], directory path: String) -> [AgentEvent] {
+        guard !isUnknown(path) else { return events }
+        return events.filter { matches($0, path: path) }
+    }
+
     /// Whether an event's working directory is the one a Chat View is reading.
     ///
     /// Exact match first, then the last path component. The chat's path can be

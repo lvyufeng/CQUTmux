@@ -24,6 +24,8 @@ swiftc -O -o "$OUT/check" \
   "$ROOT/App/Shared/ISODate.swift" \
   "$ROOT/App/Features/Agents/AgentEvent.swift" \
   "$ROOT/App/Features/Agents/ChatApproval.swift" \
+  "$ROOT/App/Features/Agents/ChatScroll.swift" \
+  "$ROOT/App/Features/Agents/ChatWorking.swift" \
   "$ROOT/scripts/chat-approval/main.swift" 2>&1 | grep -v "^ *$" || true
 
 [[ -x "$OUT/check" ]] || { echo "CHAT_APPROVAL_BUILD_FAIL"; exit 1; }

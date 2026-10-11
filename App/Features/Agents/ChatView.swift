@@ -19,6 +19,16 @@ struct ChatView: View {
     @State private var error: String?
     @State private var loading = true
     @State private var follow = true
+    /// Whether the jump-to-bottom control is showing. It appears exactly when
+    /// the reader has scrolled away from the newest turn — the other half of the
+    /// same fact `follow` carries, kept separate because the two answer
+    /// different questions: `follow` decides whether new output scrolls the view,
+    /// this decides whether the affordance to go back down is on screen.
+    @State private var showsJumpToBottom = false
+    /// Whether a turn is in progress for the session on screen, read off the
+    /// live event stream rather than the transcript (a log says what happened,
+    /// not whether the agent is busy now).
+    @State private var working = false
     /// The agent, model and session for the header. Derived from the transcript
     /// on each load rather than stored on the wire: the header is a reading of
     /// the messages, not a field the gateway has to remember to send.
@@ -140,12 +150,38 @@ struct ChatView: View {
                         MessageView(message: message)
                             .id(message.id)
                     }
+                    // The Working indicator, "follows the active turn": it sits
+                    // at the end of the conversation because that is where the
+                    // active turn is, and it draws nothing when no turn is live
+                    // so it cannot linger as a spinner over a finished session.
+                    if working {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Working…")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityLabel("The agent is working")
+                    }
                     Color.clear.frame(height: 1).id(Self.bottom)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
             }
             .defaultScrollAnchor(.bottom)
+            // Where the reader is, in one number: how much content sits below
+            // what they can see. Zero at the bottom, growing as they scroll up.
+            // That single number decides both whether new output should follow
+            // them (it should not, while they are reading back) and whether the
+            // jump-to-bottom control is offered — the rule is `ChatScroll`'s, so
+            // the threshold is checked rather than guessed at on screen.
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentSize.height - geometry.visibleRect.maxY
+            } action: { _, distanceToBottom in
+                let stillFollowing = ChatScroll.follows(afterScrollDistance: distanceToBottom)
+                follow = stillFollowing
+                showsJumpToBottom = !stillFollowing
+            }
             .onChange(of: transcript.messages.count) { _, _ in
                 guard follow else { return }
                 withAnimation(.easeOut(duration: 0.2)) {
@@ -170,6 +206,33 @@ struct ChatView: View {
                     )
                     .padding(.horizontal, 12)
                     .padding(.bottom, 10)
+                }
+            }
+            // The jump-to-bottom control: "If you scroll up, a jump-to-bottom
+            // control appears so new output does not pull you away from what you
+            // are reading." It rides bottom-trailing rather than bottom-centre so
+            // it never sits under the approval bar, and it is drawn only while
+            // the reader is away from the newest turn.
+            .overlay(alignment: .bottomTrailing) {
+                if showsJumpToBottom {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo(Self.bottom, anchor: .bottom)
+                        }
+                        follow = true
+                        showsJumpToBottom = false
+                    } label: {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.title2)
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(Color.white, themes.current.accentColor)
+                            .padding(6)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("Jump to newest")
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 10)
+                    .transition(.opacity)
                 }
             }
         }
@@ -202,6 +265,10 @@ struct ChatView: View {
             // view's error, which is reserved for the conversation itself.
             changed = try? await client.gitDiff(path: path)
             header.setControls(ChatHeader.controls(fileCount: changed?.files.count, isRepo: changed?.isRepo == true))
+            // Whether a turn is live is read off the same event stream the
+            // approval bar reads, from the same session selection — so the
+            // spinner and the bar can never describe two different sessions.
+            working = ChatWorking.isWorking(in: client.events, directory: path)
             // An error the gateway reported while still returning a page is
             // kept for the empty state and cleared once there is something to
             // show; a stale error over a working view is noise.

@@ -154,6 +154,84 @@ check(ChatApproval.pending(in: [], directory: "/w/a") == nil, "no events means n
 check(ChatApproval.pending(in: [event(1, kind: .notice, cwd: "/w/a")], directory: "/w/a") == nil,
       "no pending events means no bar")
 
+// MARK: - The share: the Working indicator reads the same session
+
+// The approval bar and the Working indicator both ask "what is this session's",
+// and if they answered differently the screen would contradict itself — a
+// spinner driven by one session's events while the bar offers another's request.
+// `forSession` is the one selection; these pin that it agrees with the join the
+// bar uses.
+check(ChatApproval.forSession(in: [event(1, cwd: "/w/api")], directory: "/w/api").map(\.id) == [1],
+      "forSession selects the events whose cwd is the chat's directory")
+check(ChatApproval.forSession(in: [event(1, cwd: "/w/api"), event(2, cwd: "/w/web")],
+                              directory: "/w/api").map(\.id) == [1],
+      "and leaves another session's out")
+check(ChatApproval.forSession(in: [event(1, cwd: "/w/api")], directory: ".").count == 1,
+      "with no known directory every event is handed back")
+
+// MARK: - The Working indicator
+
+// "A Working indicator follows the active turn." Whether a turn is live is read
+// off the newest event's category, and the three that mean "mid-turn" must not
+// be confused with the three that mean "over" — a spinner that lingers over a
+// finished session, or clears while the agent is still thinking, both read as
+// the app disagreeing with the agent.
+func classified(_ id: Int, _ category: AgentEvent.Category, cwd: String = "/w/api") -> AgentEvent {
+    var e = event(id, kind: .notice, cwd: cwd)
+    e.category = category.rawValue
+    return e
+}
+
+check(ChatWorking.isWorking(in: [classified(1, .approvalRequired)], directory: "/w/api"),
+      "a pending approval is the session working")
+check(ChatWorking.isWorking(in: [classified(1, .toolRunning)], directory: "/w/api"),
+      "so is a tool mid-flight")
+check(ChatWorking.isWorking(in: [classified(1, .toolFinished)], directory: "/w/api"),
+      "and a tool that returned but whose turn has not ended")
+check(!ChatWorking.isWorking(in: [classified(1, .taskComplete)], directory: "/w/api"),
+      "a finished turn is not working")
+check(!ChatWorking.isWorking(in: [classified(1, .error)], directory: "/w/api"),
+      "nor is a failed turn")
+check(!ChatWorking.isWorking(in: [classified(1, .sessionStarted)], directory: "/w/api"),
+      "nor has a session that only just started begun a turn")
+check(!ChatWorking.isWorking(in: [], directory: "/w/api"),
+      "no events at all is not working")
+
+// Newest wins: a session that finished a turn after a tool ran is done, however
+// recently the tool event arrived — reading any-but-newest would leave the
+// spinner up over a finished session forever.
+check(!ChatWorking.isWorking(in: [classified(1, .toolRunning), classified(2, .taskComplete)],
+                             directory: "/w/api"),
+      "the newest event decides — a later completion clears the spinner")
+check(ChatWorking.isWorking(in: [classified(1, .taskComplete), classified(2, .toolRunning)],
+                            directory: "/w/api"),
+      "and a later tool start turns it back on")
+
+// The same session join as the bar: another directory's activity must not light
+// this session's spinner.
+check(!ChatWorking.isWorking(in: [classified(1, .toolRunning, cwd: "/w/other")], directory: "/w/api"),
+      "another session's activity does not show as this one working")
+
+// MARK: - The jump-to-bottom trigger
+
+// "If you scroll up, a jump-to-bottom control appears." The threshold is the
+// rule that fails quietly: too eager and the control is up while the reader is
+// at the bottom waiting for the answer; too lazy and they are stranded mid-log
+// with no way back. Pinned as a function of the distance below the fold.
+check(ChatScroll.follows(afterScrollDistance: 0), "at the bottom the view follows the newest turn")
+check(ChatScroll.follows(afterScrollDistance: 10), "a small nudge still follows")
+check(!ChatScroll.follows(afterScrollDistance: ChatScroll.followThreshold),
+      "scrolling a full screen up stops following")
+check(!ChatScroll.follows(afterScrollDistance: 500), "and far up certainly does")
+check(ChatScroll.follows(afterScrollDistance: -20),
+      "an overscroll past the end (negative distance) still follows")
+// The boundary is exclusive on the threshold: exactly at it is no longer
+// following, which is what makes the "appears" edge land in one place.
+check(!ChatScroll.follows(afterScrollDistance: ChatScroll.followThreshold),
+      "the threshold itself is the edge, not inside it")
+check(ChatScroll.follows(afterScrollDistance: ChatScroll.followThreshold - 0.5),
+      "and a hair inside it still follows")
+
 if failures > 0 {
     print("\nCHAT_APPROVAL_FAIL  (\(failures) of \(checks) failed)")
     exit(1)
