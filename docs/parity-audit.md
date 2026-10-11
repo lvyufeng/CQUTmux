@@ -88,14 +88,15 @@ first shipped with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 72 |
+| closed | 73 |
 | partial | 2 |
-| deliberate-divergence | 2 |
+| deliberate-divergence | 1 |
 | missing | 0 |
 
-(The machine-readable `counters` field in `parity-audit.json` had drifted three
-entries behind the per-entry statuses; this pass recomputes it from the entries
-themselves, so the table above and that field now agree.)
+(The machine-readable `counters` field in `parity-audit.json` is recomputed from
+the entries themselves, so the table above and that field agree. The theme
+gallery moved from `deliberate-divergence` to `closed` on 2026-10-11 — see the
+addendum — which is the 73/1 split here rather than the earlier 72/2.)
 
 **Read the numbers with care.** "Closed" means a counterpart exists and was
 traced end to end by a reader that was trying to refute it. It does not mean
