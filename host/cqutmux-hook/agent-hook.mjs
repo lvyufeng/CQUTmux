@@ -122,7 +122,20 @@ const CATEGORY_OF_KIND = {
   'tool-finish': 'tool_finished',
   notice: 'task_complete',
 }
-const category = CATEGORY_OF_EVENT[eventName] || CATEGORY_OF_KIND[kind] || 'task_complete'
+// A hook may say which category its event is in its own payload. That is the
+// only route to `error`, which no event name or kind maps to — the gateway
+// accepts it, but nothing would ever send it if the bridge dropped it here.
+// The known set is enumerated rather than trusted: an unrecognised string from a
+// newer agent must fall back to the derived category, not carry through and be
+// refused by the gateway's own gate, which would make the whole event vanish.
+const KNOWN_CATEGORIES = new Set([
+  'approval_required', 'task_complete', 'session_started',
+  'tool_running', 'tool_finished', 'error',
+])
+const declaredCategory = pick(payload, ['category', 'event_category', 'eventCategory'])
+const category = (typeof declaredCategory === 'string' && KNOWN_CATEGORIES.has(declaredCategory))
+  ? declaredCategory
+  : (CATEGORY_OF_EVENT[eventName] || CATEGORY_OF_KIND[kind] || 'task_complete')
 
 // Two readers of the same fact: a category that only describes the end of a
 // turn is a turn summary, and every other category is about a tool that is

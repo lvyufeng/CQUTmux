@@ -89,7 +89,13 @@ struct DeepLink: Equatable {
 
         switch route {
         case "tmux", "zellij", "herdr":
-            guard let name = value("session") ?? value("workspace") else {
+            // `session` is the spelling these links are written with; `name` is
+            // Moshi's older parameter kept as a compatibility alias, and
+            // `workspace` is herdr's own word for it. All three resolve to the
+            // same field, and `session` wins when a link carries both — a
+            // link that names two sessions is one whose author changed their
+            // mind, and the newer spelling is what they meant.
+            guard let name = value("session") ?? value("name") ?? value("workspace") else {
                 return .failure(.missingParameter("session"))
             }
             // tmux and zellij take a number here, and a typo should be caught

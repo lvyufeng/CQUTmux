@@ -57,6 +57,22 @@ check(target("cqutmux://tmux?session=work&window=3")
         == .session(mux: "tmux", name: "work", window: "3", pane: nil),
       "a tmux link with only a window still parses as before")
 
+// `name=` is the parameter these links carried before it was spelled
+// `session=`, and Moshi keeps reading it. A link written by an older build
+// that lands nowhere is a link a user stops trusting, so it has to resolve to
+// the same session.
+check(target("cqutmux://tmux?name=work") == .session(mux: "tmux", name: "work", window: nil, pane: nil),
+      "the older name= parameter still names the session")
+check(target("cqutmux://herdr?name=w1") == .session(mux: "herdr", name: "w1", window: nil, pane: nil),
+      "and does so for herdr too")
+// When a link carries both, the newer spelling wins — the author changed their
+// mind, and picking the old value would land them where they were moving away
+// from.
+check(target("cqutmux://tmux?session=new&name=old") == .session(mux: "tmux", name: "new", window: nil, pane: nil),
+      "session= wins when a link carries both spellings")
+check(target("cqutmux://tmux?name=work&pane=2") == .session(mux: "tmux", name: "work", window: nil, pane: "2"),
+      "the alias composes with the other parameters")
+
 // The new pane parameter on its own.
 check(target("cqutmux://tmux?session=work&pane=2")
         == .session(mux: "tmux", name: "work", window: nil, pane: "2"),

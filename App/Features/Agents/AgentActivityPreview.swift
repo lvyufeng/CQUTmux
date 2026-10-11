@@ -114,6 +114,11 @@ enum AgentActivityPreview {
         // activity exists to report what a running agent is doing, and "a
         // session began" is the moment before there is anything to report.
         case .sessionStarted: return .taskComplete
+        // An error is still a *finished* thing on the Lock Screen: the activity
+        // has no failure glyph, and inventing one here would mean the widget
+        // and the app could disagree about it. The banner carries the
+        // distinction; the activity reports that the turn is over.
+        case .error: return .taskComplete
         }
     }
 

@@ -178,7 +178,15 @@ final class MuxSettings {
             case ("tmux", .nextTab): return head + [0x6E]         // prefix n
             case ("tmux", .previousTab): return head + [0x70]     // prefix p
             case ("tmux", .zoomPane): return head + [0x7A]        // prefix z
-            case ("zellij", .nextTab): return Array("zellij action go-to-tab 1\n".utf8)
+            case ("zellij", .nextTab):
+                // `go-to-tab` takes an index, and the host's zellij resolves the
+                // *direction* commands against the current tab — which is why
+                // both halves are `go-to-next/previous-tab` and not a number.
+                // `go-to-tab 1` was here before: it jumps to tab 1 from wherever
+                // you are, so "next tab" and "previous tab" both had somewhere to
+                // go and the bug was silent — the swipe scrolled you to the first
+                // tab instead of the one next to the current one.
+                return Array("zellij action go-to-next-tab\n".utf8)
             case ("zellij", .previousTab):
                 // `go-to-tab` takes an index, not a direction, so "previous" is a
                 // command the host's own zellij resolves against the current tab.

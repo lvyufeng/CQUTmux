@@ -307,6 +307,21 @@ printf '%s' '{"session_id":"s10"}' \
   | HOME="$FAKE_HOME" CQUTMUX_PORT=24999 \
     bash host/cqutmux-hook/claude-code-hook.sh session-start
 
+# `error` is the one category no event name or kind maps to — the payload has to
+# declare it. The kind here is `notice`, whose derived category is
+# `task_complete`, so this passing proves the declared value wins over the
+# derived one rather than merely being accepted alongside it.
+printf '%s' '{"session_id":"s11","category":"error","message":"build failed"}' \
+  | HOME="$FAKE_HOME" CQUTMUX_PORT=24999 \
+    node host/cqutmux-hook/agent-hook.mjs claude-code notice
+
+# An unrecognised category must NOT carry through: the gateway's own gate would
+# drop it, and dropping the *category* drops the whole event, so a newer agent's
+# unknown string has to fall back to the derived one instead.
+printf '%s' '{"session_id":"s12","category":"some_future_thing"}' \
+  | HOME="$FAKE_HOME" CQUTMUX_PORT=24999 \
+    node host/cqutmux-hook/agent-hook.mjs claude-code notice
+
 python3 - <<'PY'
 import json, urllib.request
 
@@ -358,6 +373,8 @@ expected_category = {
     "s8": "tool_finished",       # PostToolUse, named by the agent's payload
     "s9": "tool_finished",       # the shell bridge's `tool-finish`
     "s10": "session_started",    # the shell bridge's `session-start`
+    "s11": "error",              # the payload declares it; no name/kind maps to it
+    "s12": "task_complete",      # an unknown declared category falls back
 }
 seen = {}
 for event in events:
@@ -404,8 +421,10 @@ else:
 
 # All five reachable, as a set. The per-session checks above can each pass while
 # the set is short — one wrong mapping and one missing kind would cancel out.
+# All six reachable, as a set. The per-session checks above can each pass while
+# the set is short — one wrong mapping and one missing kind would cancel out.
 missing = {"approval_required", "task_complete", "session_started",
-           "tool_running", "tool_finished"} - covered
+           "tool_running", "tool_finished", "error"} - covered
 if missing:
     problems.append(f"these categories are unreachable from a real bridge: {sorted(missing)}")
 

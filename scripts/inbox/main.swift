@@ -490,6 +490,11 @@ let derivable = AgentEvent.Category.allCases.filter { category in
 }
 check(!derivable.contains(.sessionStarted),
       "session_started is only ever sent, never guessed (derived: \(derivable.map(\.rawValue)))")
+// `error` is the same shape of thing: an approval or a notice carries no
+// evidence that anything failed, so deriving it would invent a failure — a red
+// row for a turn that simply finished. Only a payload that says `error` gets one.
+check(!derivable.contains(.error),
+      "error is only ever sent, never guessed (derived: \(derivable.map(\.rawValue)))")
 
 // A declared category wins over the shape: this is the whole point of the
 // field, and an implementation that kept reading the kind would pass every

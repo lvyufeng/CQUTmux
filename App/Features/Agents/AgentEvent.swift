@@ -24,12 +24,28 @@ struct AgentEvent: Identifiable, Codable, Hashable {
         case sessionStarted = "session_started"
         case toolRunning = "tool_running"
         case toolFinished = "tool_finished"
+        /// A failed turn. Moshi names `error` alongside `approval_required` as
+        /// the category an agent should send "when the event also needs a
+        /// visible iOS notification", so it is a *banner-worthy* category — the
+        /// reason it is here rather than folded into `task_complete`. The two
+        /// agree on the Inbox (both are statements that something already
+        /// happened and hold no row open) but not on the wire: an `error` is an
+        /// alert, a `task_complete` updates the activity silently.
+        case error
 
         /// The two that hold a row open: a decision is outstanding, or a tool
-        /// is mid-flight. The other three are statements that something already
+        /// is mid-flight. The rest are statements that something already
         /// happened and need nothing from the user.
         var isAwaiting: Bool {
             self == .approvalRequired || self == .toolRunning
+        }
+
+        /// Whether this category asks for a visible iOS notification, as
+        /// opposed to updating the Live Activity alone. Only these two do —
+        /// Moshi's own words for `error`, and the approval that is the whole
+        /// point of the app.
+        var needsVisibleNotification: Bool {
+            self == .approvalRequired || self == .error
         }
 
         var label: String {
@@ -39,6 +55,7 @@ struct AgentEvent: Identifiable, Codable, Hashable {
             case .sessionStarted: "Session started"
             case .toolRunning: "Tool running"
             case .toolFinished: "Tool finished"
+            case .error: "Error"
             }
         }
     }

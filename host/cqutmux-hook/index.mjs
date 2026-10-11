@@ -279,7 +279,7 @@ let pendingApprovals = 0
 /// anything else off the wire.
 const CATEGORIES = new Set([
   'approval_required', 'task_complete', 'session_started',
-  'tool_running', 'tool_finished',
+  'tool_running', 'tool_finished', 'error',
 ])
 
 function emit(event) {
@@ -310,7 +310,13 @@ function emit(event) {
   for (const waiter of waiters) waiter(record)
   // Fire-and-forget: a push that fails must not stop the event from being
   // recorded, since the app will still pick it up on its next poll.
-  if (record.kind === 'approval') {
+  //
+  // Two things warrant a *visible banner*: an approval, which is the app's
+  // whole point, and an `error`, which Moshi names alongside it as a category
+  // that "needs a visible iOS notification". A `task_complete` does not — it
+  // updates the Live Activity silently, which is why the banner test is here
+  // and not simply "every event".
+  if (record.kind === 'approval' || record.category === 'error') {
     // A visible banner — unless this host is unlocked with suppression on. The
     // event has already been recorded and the Live Activity still updates
     // below, so what this drops is the banner alone, which is the setting's

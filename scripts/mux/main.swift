@@ -152,10 +152,19 @@ check(bytes(.nextTab, "herdr", .controlSpace) == [0x00, 0x6E],
 
 // Zellij has no prefix, so its commands are lines its own CLI runs. A control
 // byte here would be typed into whatever the pane is running.
-check(bytes(.nextTab, "zellij") == Array("zellij action go-to-tab 1\n".utf8),
+check(bytes(.nextTab, "zellij") == Array("zellij action go-to-next-tab\n".utf8),
       "zellij switches tab through its own CLI, not a prefix key")
 check(bytes(.previousTab, "zellij") == Array("zellij action go-to-previous-tab\n".utf8),
       "zellij's previous tab is a CLI action")
+// The two directions have to be different commands. `go-to-tab 1` used to stand
+// in for "next": it is *a* command, and the swipe did move the tab, so a check
+// that only asked "did a zellij action line go out" passed while the swipe
+// always landed on tab 1. Only comparing the pair catches a forward command
+// that is not the opposite of the backward one.
+check(bytes(.nextTab, "zellij") != bytes(.previousTab, "zellij"),
+      "zellij's next and previous tabs are different commands")
+check(bytes(.nextTab, "zellij") != bytes(.zoomPane, "zellij"),
+      "and neither is the zoom command")
 check(bytes(.zoomPane, "zellij") == Array("zellij action toggle-fullscreen\n".utf8),
       "zellij's zoom is a CLI action")
 for command in [MuxSettings.MuxCommand.nextTab, .previousTab, .zoomPane] {
