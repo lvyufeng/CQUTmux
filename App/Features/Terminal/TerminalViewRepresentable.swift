@@ -80,6 +80,9 @@ struct TerminalScreen: View {
     @State private var pastedNotice: String?
     @State private var shortcuts = ShortcutStore()
     @State private var gestures = GestureStore()
+    /// The agent command panels, edited in place from the panel itself and
+    /// shared across sessions the way the other stores are.
+    @State private var agentPanels = AgentPanelStore()
     @State private var cursor = CursorSettings()
     @State private var input = InputSettings()
     @State private var mux = MuxSettings()
@@ -95,6 +98,12 @@ struct TerminalScreen: View {
     @State private var showGestures = false
     @State private var showJumpTo = false
     @State private var showHistory = false
+    /// The shortcut panel, opened by a long press on the Ctrl key or the
+    /// `.agentPanel` bar item. An overlay rather than a sheet: a long press on
+    /// a bar key has to leave the bar under the finger, and a sheet animating
+    /// up from the bottom would cover both the keys and the terminal the panel
+    /// is filling with text.
+    @State private var showAgentPanel = false
     /// The shell's command history, which is a separate list from the dictation
     /// one above despite both being called "history": one is what was said out
     /// loud and lives on the phone, the other is what was run and lives on the
@@ -300,6 +309,9 @@ struct TerminalScreen: View {
                 if case .success(let url) = result { attachFile(at: url) }
             }
             .overlay(alignment: .top) { pasteNotice }
+            .overlay {
+                if showAgentPanel { agentPanelLayer }
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if input.chatMode {
                     // Chat mode replaces the bar wholesale rather than adding a
@@ -543,6 +555,64 @@ struct TerminalScreen: View {
         MuxSettings.MuxCommand.selectTab(
             1, mux: effectiveMux, prefix: mux.prefix(for: effectiveMux)
         ) != nil
+    }
+
+    /// The agents the panel should show a tab for, read off the event stream.
+    ///
+    /// The events are the gateway's, so this is empty for a session with no
+    /// gateway connection — and then the panel is just Ctrl and the
+    /// multiplexer, which is the honest answer: nothing has told us an agent is
+    /// running. Detection is per *source*, not per session title, because that
+    /// is the field the host's hook sets.
+    private var detectedAgents: [AgentKind] {
+        AgentPanelPages.detect(fromSources: connection.client?.events.map(\.source) ?? [])
+    }
+
+    /// The one place a panel's button reaches the terminal. A parsed shortcut
+    /// goes through `send(_:)` so its steps are paced; a multiplexer chord,
+    /// whose prefix the grammar cannot express, is written raw. Both take the
+    /// same `coordinator.terminal?` the accessory bar's keys do — there is no
+    /// second path to the wire for the panel to drift onto.
+    private func openAgentPanel() {
+        withAnimation { showAgentPanel = true }
+    }
+
+    private func send(_ send: PanelSend) {
+        switch send {
+        case .shortcut(let parsed): coordinator.terminal?.send(parsed)
+        case .bytes(let raw): coordinator.terminal?.sendRaw(Data(raw))
+        }
+    }
+
+    private func agentPanel() -> some View {
+        NavigationStack {
+            AgentPanelBar(
+                agents: detectedAgents,
+                mux: effectiveMux,
+                prefix: mux.prefix(for: effectiveMux),
+                store: agentPanels,
+                onSend: send,
+                onDone: { withAnimation { showAgentPanel = false } }
+            )
+        }
+    }
+
+    /// The panel as it appears over the session: a scrim the user taps to
+    /// dismiss, and the panel card pinned to the bottom so the terminal stays
+    /// visible above it. This is what makes the panel safe to open by accident
+    /// — nothing is sent until a button is tapped, and the scrim is a way out
+    /// that is not a gesture the keys themselves would intercept.
+    private var agentPanelLayer: some View {
+        ZStack(alignment: .bottom) {
+            Color.black.opacity(0.25)
+                .ignoresSafeArea()
+                .onTapGesture { withAnimation { showAgentPanel = false } }
+            agentPanel()
+                .frame(maxHeight: 420)
+                .background(.regularMaterial, in: UnevenRoundedRectangle(
+                    topLeadingRadius: 16, topTrailingRadius: 16))
+                .transition(.move(edge: .bottom))
+        }
     }
 
     /// One tap per tab or window, 1–20, above the key bar.
@@ -1040,7 +1110,23 @@ struct TerminalScreen: View {
         case .history: historyButton
         case .dictation: dictationButton
         case .customKeys: customShortcutKeys
+        case .agentPanel: agentPanelButton
         }
+    }
+
+    /// The panel as a bar key, for the user who wants it a tap away rather than
+    /// a hold away. The same panel the Ctrl long press opens — this is only a
+    /// second way in, which is why it holds no state of its own.
+    private var agentPanelButton: some View {
+        Button {
+            openAgentPanel()
+        } label: {
+            Image(systemName: "command.square")
+                .frame(width: 40, height: 32)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 6))
+        .accessibilityLabel("Shortcuts panel")
     }
 
     /// A four-way pad with the corner slots bindable to the keys a terminal
@@ -1129,8 +1215,18 @@ struct TerminalScreen: View {
         }
         .buttonStyle(.bordered)
         .tint(locked ? .accentColor : nil)
+        // A long press is the panel. Not a conflict with the tap or the double
+        // tap: SwiftUI fires the tap only if the press lifts before the hold
+        // threshold, so one press cannot both arm Ctrl and open the panel. The
+        // two tap timestamps have to be cleared so the sequence tap → long
+        // press → tap is not read as a double tap across the hold, which would
+        // lock Ctrl the moment the panel was dismissed.
+        .onLongPressGesture(minimumDuration: 0.4) {
+            coordinator.lastControlTap = .distantPast
+            openAgentPanel()
+        }
         .accessibilityLabel(locked ? "Ctrl, locked" : "Ctrl")
-        .accessibilityHint(locked ? "Double-tap to unlock" : "Double-tap to lock")
+        .accessibilityHint("Long press for the shortcut panel")
     }
 
     private func key(_ label: String, _ key: CtrlKey) -> some View {

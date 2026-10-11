@@ -46,6 +46,7 @@ final class InputSettings {
         case history
         case dictation
         case customKeys
+        case agentPanel
 
         var id: String { rawValue }
 
@@ -66,6 +67,7 @@ final class InputSettings {
             case .history: "History"
             case .dictation: "Dictation"
             case .customKeys: "Custom keys"
+            case .agentPanel: "Shortcuts panel"
             }
         }
     }
@@ -87,7 +89,14 @@ final class InputSettings {
     /// a tap on the pane is bound to a gesture, and the recognisers take the
     /// touch before the responder could. So without this key, hiding the
     /// keyboard is one-way for the rest of the session.
-    static let optInItems: [Item] = [.history, .showKeyboard]
+    ///
+    /// The shortcuts panel is opted in for the same "not everyone" reason and
+    /// because it already has a gesture: long-pressing the Ctrl key opens it, so
+    /// a key on the bar is a second way to reach something a tap and a hold
+    /// already do. It is offered as a key because the long press is exactly the
+    /// kind of binding nobody discovers, and a user who wants it permanently
+    /// visible should not have to guess the gesture to get it.
+    static let optInItems: [Item] = [.history, .showKeyboard, .agentPanel]
 
     /// Every item the bar can show, whether or not it is on by default.
     ///

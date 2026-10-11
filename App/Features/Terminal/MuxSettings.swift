@@ -123,6 +123,13 @@ final class MuxSettings {
         case nextSession, previousSession
         /// Toggle the focused pane between split and full-screen.
         case zoomPane
+        /// Create a new window (tmux `prefix c`). Documented in Moshi's tmux
+        /// panel, and a real gap until now: the panel offered pane and session
+        /// moves but not the two things people reach for most.
+        case newWindow
+        /// Detach the client from the session (tmux `prefix d`), leaving it
+        /// running — the way to get back to a plain shell without killing work.
+        case detach
         /// Open the workspace navigator.
         case workspaceNavigator
         /// Open Herdr's goto prompt, which is how a tab past the ninth digit is
@@ -138,6 +145,8 @@ final class MuxSettings {
             case .nextSession: "Next session"
             case .previousSession: "Previous session"
             case .zoomPane: "Zoom pane"
+            case .newWindow: "New window"
+            case .detach: "Detach"
             case .workspaceNavigator: "Workspaces"
             case .gotoPrompt: "Goto"
             }
@@ -169,6 +178,12 @@ final class MuxSettings {
             // gesture for either would send a binding it does not have.
             case .nextSession, .previousSession:
                 return mux == "tmux"
+            // Creating a window and detaching are tmux's own bindings. Herdr has
+            // tabs rather than tmux's windows and no detach verb; zellij has its
+            // own `zellij action` forms, but neither is what these two send, so
+            // they are offered on tmux alone rather than mistranslated.
+            case .newWindow, .detach:
+                return mux == "tmux"
             case .workspaceNavigator, .gotoPrompt:
                 return mux == "herdr"
             }
@@ -192,6 +207,8 @@ final class MuxSettings {
             switch (mux, self) {
             case ("tmux", .nextPane): return head + [0x6F]        // prefix o
             case ("tmux", .previousPane): return head + [0x3B]    // prefix ;
+            case ("tmux", .newWindow): return head + [0x63]       // prefix c — create window
+            case ("tmux", .detach): return head + [0x64]          // prefix d — detach client
             case ("tmux", .nextTab): return head + [0x6E]         // prefix n
             case ("tmux", .previousTab): return head + [0x70]     // prefix p
             // prefix ( / prefix ) — tmux's own "previous/next session", the

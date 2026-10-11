@@ -126,6 +126,7 @@ struct InputSettingsView: View {
         case .history: "clock.arrow.circlepath"
         case .dictation: "mic"
         case .customKeys: "star"
+        case .agentPanel: "command.square"
         }
     }
 }
