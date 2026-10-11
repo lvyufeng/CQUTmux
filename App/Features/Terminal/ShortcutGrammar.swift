@@ -201,7 +201,7 @@ enum ShortcutGrammar {
         // A named key has to be the whole step: `Esc` is the Escape key, but
         // `Escape` followed by more characters is not a key name.
         if let named = namedKeys[body.lowercased()] {
-            return Step(bytes: applyModifiers(named, control: control, meta: meta),
+            return Step(bytes: applyModifiers(named, control: control, meta: meta, shift: shift),
                         label: labelPrefix + canonicalName(body))
         }
 
@@ -277,11 +277,20 @@ enum ShortcutGrammar {
         ("s-", "Shift+", { _, _, s in s = true }),
     ]
 
-    private static func applyModifiers(_ bytes: [UInt8], control: Bool, meta: Bool) -> [UInt8] {
+    private static func applyModifiers(
+        _ bytes: [UInt8], control: Bool, meta: Bool, shift: Bool = false
+    ) -> [UInt8] {
         var out = bytes
         if control, out.count == 1, let first = out.first, let mapped = controlByte(first) {
             out = [mapped]
         }
+        // Shift on a named key is a *different* key for exactly one of them:
+        // Tab. A terminal sends ⇧Tab as CSI Z (ESC [ Z), which is what Claude
+        // Code reads to cycle permission modes — the `⇧Tab` button in its panel
+        // is the whole reason this exists. Every other named key already has its
+        // own bytes or no shifted form, so shift is ignored for them rather than
+        // guessed at.
+        if shift, out == [0x09] { out = [0x1B, 0x5B, 0x5A] }
         if meta { out.insert(0x1B, at: 0) }
         return out
     }
