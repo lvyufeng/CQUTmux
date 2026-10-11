@@ -59,7 +59,10 @@ enum GestureChecks {
         expect(gestures.bytes(for: .swipeLeft), [0x02, 0x6E], "swipe left is next window when unbound")
         expect(gestures.bytes(for: .swipeRight), [0x02, 0x70], "swipe right is previous window when unbound")
         expect(gestures.bytes(for: .tripleTap), nil, "triple tap is unbound by default")
-        expect(TerminalGesture.allCases.count, 4, "single tap is not offered: it is SwiftTerm's")
+        expect(gestures.bytes(for: .singleTap), nil, "single tap is a no-op by default, as Moshi documents")
+        expect(gestures.text(for: .singleTap), nil, "and it carries no binding")
+        expect(TerminalGesture.allCases.contains(.singleTap), true, "single tap is offered for binding")
+        expect(TerminalGesture.allCases.count, 5, "tap, double tap, triple tap and two swipes")
     }
 
     static func bindingReplacesDefault() {
@@ -68,6 +71,10 @@ enum GestureChecks {
         gestures.set("C-c", for: .doubleTap)
         expect(gestures.bytes(for: .doubleTap), [0x03], "double tap follows the binding")
         expect(gestures.bytes(for: .swipeLeft), [0x02, 0x6E], "binding one gesture leaves the others alone")
+        // Moshi's documented example: bind tap to send Escape.
+        gestures.set("Esc", for: .singleTap)
+        expect(gestures.bytes(for: .singleTap), [0x1B], "single tap follows its binding once set")
+        expect(gestures.text(for: .singleTap), "Esc", "and the text round-trips")
     }
 
     static func clearingRestoresDefault() {

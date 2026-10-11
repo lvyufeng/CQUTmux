@@ -152,6 +152,26 @@ struct ChatView: View {
                     proxy.scrollTo(Self.bottom, anchor: .bottom)
                 }
             }
+            // Moshi's Chat View shows a floating approval bar with Approve and
+            // Deny over the conversation, in addition to the Inbox — a second
+            // surface for one action, not a second action. It rides here, as an
+            // overlay on the scroll view, rather than in the toolbar because it
+            // is about what is on screen: the pending approval for *this*
+            // session. When there is none it draws nothing, so it cannot crowd
+            // a conversation that needs no answer. Which event is this
+            // session's, and how it is answered, is checked in
+            // `scripts/chat-approval-check.sh`.
+            .overlay(alignment: .bottom) {
+                if let pending = ChatApproval.pending(in: client.events, directory: path) {
+                    ApprovalBar(
+                        event: pending,
+                        resolve: { client.resolve($0, allow: $1) },
+                        answer: { client.resolve($0, answer: $1) }
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                }
+            }
         }
     }
 
@@ -239,6 +259,82 @@ private struct ChatDiffSheet: View {
                 }
             }
         }
+    }
+}
+
+/// The floating approval bar: the pending approval for the session on screen,
+/// with the same Allow / Deny the Inbox row offers.
+///
+/// Flat and separated from the transcript on purpose — it is not a message, and
+/// a bar that looked like one would read as the agent having asked it rather
+/// than as the app asking the user. The actions go through the Inbox's own
+/// `resolve`/`answer`, so a decision made here is recorded on the host the same
+/// way a decision made in the Inbox is; nothing about the approval is special to
+/// this surface. The bar disappears the moment the event is answered because the
+/// event it is built from stops being pending — the same mutation the Inbox
+/// reads.
+private struct ApprovalBar: View {
+    let event: AgentEvent
+    let resolve: (AgentEvent, Bool) -> Void
+    let answer: (AgentEvent, String) -> Void
+    @Environment(ThemeStore.self) private var themes
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: event.isQuestion ? "questionmark.bubble" : "hand.raised.fill")
+                    .foregroundStyle(.orange)
+                Text(event.displayTitle.isEmpty ? event.sourceLabel : event.displayTitle)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(event.sourceLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            // The prompt, clamped the same way the Inbox clamps it so a large
+            // tool input cannot push the buttons off the screen. A question's
+            // body is the question, so it is shown whole — the same two rules
+            // the row and `AgentEvent` already agree on, reused rather than
+            // restated.
+            if !event.promptText.isEmpty {
+                Text(event.promptText)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(event.promptClampLines)
+            }
+            // A question is answered by picking one of its options; asking it as
+            // Allow / Deny would throw away the choice it was asked to make.
+            // The same two shapes the Inbox draws, for the same reason — the
+            // buttons are rebuilt here rather than shared with it because the
+            // Inbox's `EventActions` is private to that file, and the *actions*
+            // (not the layout) are what must not be duplicated.
+            if event.isQuestion {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(event.options) { option in
+                        Button(option.label) { answer(event, option.value) }
+                            .buttonStyle(.bordered)
+                    }
+                }
+                .controlSize(.small)
+            } else {
+                HStack(spacing: 10) {
+                    Button("Approve") { resolve(event, true) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(themes.current.accentColor)
+                    Button("Deny", role: .destructive) { resolve(event, false) }
+                        .buttonStyle(.bordered)
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(.orange.opacity(0.35), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
     }
 }
 

@@ -8,6 +8,7 @@ import Observation
 /// recogniser today. Pinch is deliberately not here — it is the font-size
 /// control, and a binding that could take it away would cost more than it gave.
 enum TerminalGesture: String, CaseIterable, Codable, Identifiable, Sendable {
+    case singleTap
     case doubleTap
     case tripleTap
     case swipeLeft
@@ -17,6 +18,7 @@ enum TerminalGesture: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var label: String {
         switch self {
+        case .singleTap: "Single tap"
         case .doubleTap: "Double tap"
         case .tripleTap: "Triple tap"
         case .swipeLeft: "Swipe left"
@@ -26,6 +28,7 @@ enum TerminalGesture: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var symbol: String {
         switch self {
+        case .singleTap: "hand.tap"
         case .doubleTap: "hand.tap.fill"
         case .tripleTap: "hand.point.up.left.fill"
         case .swipeLeft: "arrow.left"
@@ -42,6 +45,12 @@ enum TerminalGesture: String, CaseIterable, Codable, Identifiable, Sendable {
     /// having broken.
     var fallback: ShortcutGrammar.Parsed? {
         switch self {
+        case .singleTap:
+            // Moshi's default, verbatim: "No-op by default." An unbound single
+            // tap changes nothing — SwiftTerm's own tap keeps doing link-open,
+            // selection-clear and mouse reporting, exactly as before this case
+            // existed. The binding is opt-in.
+            return nil
         case .doubleTap:
             // Tab completion, which is what double tap has always sent.
             return try? ShortcutGrammar.parse("Tab")
@@ -58,14 +67,27 @@ enum TerminalGesture: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
-    /// Why single tap is not in the list above: SwiftTerm's own tap handling
-    /// drives mouse reporting and its long-press selection, and a recogniser of
-    /// ours would have to fail first to let those through — a tap would then
-    /// stop doing what it does today. The four here are ones the terminal does
-    /// not already use. Documented rather than silently missing for the same
-    /// reason a binding that stops parsing is flagged: the absence should be
-    /// deliberate and visible.
-    static let unsupported = "Single tap belongs to text selection and mouse reporting."
+    /// How our single-tap recogniser coexists with SwiftTerm's own.
+    ///
+    /// Moshi offers single tap as bindable — "No-op by default. Bind to show
+    /// keyboard, send Escape/Tab, or run a custom shortcut" — but SwiftTerm
+    /// already installs a single-tap recogniser of its own (`singleTap(_:)`),
+    /// and it is what drives link-open, selection-clear and mouse reporting.
+    ///
+    /// Our recogniser is not a replacement for it and does not wait on it, so a
+    /// tap still reaches SwiftTerm exactly as before. It is added with
+    /// `cancelsTouchesInView = false` and made to recognise simultaneously with
+    /// every other recogniser on the view, so it neither consumes a touch
+    /// SwiftTerm needs nor is suppressed by SwiftTerm's own recognisers. When
+    /// nothing is bound it still runs, finds no bytes, and does nothing.
+    ///
+    /// Limitation, recorded rather than hidden: a single tap has one action, so
+    /// a bound shortcut and the terminal's own tap effect fire together — a
+    /// mouse-reporting click the program was going to receive is still sent, and
+    /// a link under the finger is still opened. Moshi's own default is a no-op
+    /// for exactly this reason; binding a shortcut adds a behaviour, it does not
+    /// replace the tap. Unbinding restores the no-op and nothing else changes.
+    static let unsupported = "Single tap fires alongside the terminal's own tap (link-open, mouse reporting); binding adds an action rather than replacing it."
 }
 
 /// The user's gesture bindings.

@@ -213,8 +213,37 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         return gesture
     }()
 
+    /// Our single-tap recogniser. Moshi lists tap as bindable — "No-op by
+    /// default" — but SwiftTerm installs its own single-tap recogniser
+    /// (`singleTap(_:)`) for link-open, selection-clear and mouse reporting, and
+    /// we must not disturb it.
+    ///
+    /// This one is the opposite shape to the double/triple-tap above: it does
+    /// not weigh more than SwiftTerm's and is not waited on by it, so
+    /// SwiftTerm's tap always fires. It survives the two ways a same-tap
+    /// recogniser could otherwise suppress it — `cancelsTouchesInView = false`
+    /// so it never swallows the touch, and the simultaneous-recognition delegate
+    /// below so it is not the recogniser that wins a two-way tie — and it does
+    /// nothing at all until a binding makes it send bytes.
+    private lazy var singleTap: UITapGestureRecognizer = {
+        let gesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        gesture.numberOfTapsRequired = 1
+        gesture.cancelsTouchesInView = false
+        // So `shouldRecognizeSimultaneouslyWith` below is asked about this one
+        // and can let SwiftTerm's own tap fire beside it.
+        gesture.delegate = self
+        gesture.accessibilityValue = TerminalGesture.singleTap.rawValue
+        return gesture
+    }()
+
     private func installGestures() {
         addGestureRecognizer(pinch)
+
+        // Added before the double/triple taps. It must not be their
+        // `require(toFail:)` target: a single tap that SwiftTerm's double tap
+        // cancels (because we waited on it) would never bind at all, and
+        // SwiftTerm's own single tap does not wait on ours either.
+        addGestureRecognizer(singleTap)
 
         // Each recogniser carries its gesture in `accessibilityValue`, so the
         // handler can look up whatever the user bound it to. SwiftTerm draws
@@ -356,6 +385,22 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
         if gesture === wheel { return getTerminal().mouseMode != .off }
         return true
+    }
+
+    /// Lets our single tap and every other recogniser run together.
+    ///
+    /// A tap recogniser that wins against another same-tap recogniser cancels
+    /// it, and SwiftTerm's own single tap is the one that must survive — it is
+    /// what sends a mouse-reporting click and opens a link. Always returning
+    /// true means our recogniser only ever adds a bound action; it never takes
+    /// the tap away. The double and triple taps deliberately do not go through
+    /// here: they do not set this delegate, so they keep resolving between
+    /// themselves by `require(toFail:)` as before.
+    func gestureRecognizer(
+        _ gesture: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        true
     }
 
     /// SwiftTerm installs its own one-finger drag-to-mouse pan when a program
