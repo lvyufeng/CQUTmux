@@ -72,17 +72,21 @@ check(slugs.allSatisfy { !$0.hasPrefix("-") && !$0.hasSuffix("-") && !$0.contain
 // Spot-check that a document is not just parseable but carries what it says: the
 // background the entry declares is the background the theme has, and the mode
 // survived. A gallery of all-default themes would pass every check above.
+// The anchors are real entries from the generated catalogue. `Solarized
+// Dark`/`Light` were the old hand-written names, but the source calls them
+// `iTerm2 Solarized Dark`/`Light`, so the light/dark pair here is Catppuccin's,
+// which the source names plainly and which is a genuine light/dark pair.
 let dracula = parsed["dracula"]
 check(dracula?.background == "282a36", "Dracula's background came through")
 check(dracula?.dark == true, "and its mode")
 check(dracula?.ansi.count == 16, "and its sixteen colours")
-let solarizedLight = parsed["solarized-light"]
-check(solarizedLight?.dark == false, "a light theme reads as light")
-check(solarizedLight?.background == "fdf6e3", "with its own background")
+let latte = parsed["catppuccin-latte"]
+check(latte?.dark == false, "a light theme reads as light")
+check(latte?.background == "eff1f5", "with its own background")
 
-// The two spellings of the same palette are distinct entries, not one: they
-// collapse to different slugs and so different ids.
-check(parsed["solarized-dark"]?.background != parsed["solarized-light"]?.background,
+// Two entries of one family, one light and one dark, are distinct entries and
+// not one: they collapse to different slugs and so different ids.
+check(parsed["catppuccin-mocha"]?.background != parsed["catppuccin-latte"]?.background,
       "the dark and light halves of a palette are separate themes")
 
 // MARK: - The slug rule itself
@@ -117,20 +121,23 @@ check(ThemeGallery.entry(slug: "dracula")?.json != ThemeGallery.entry(slug: "nor
 
 check(ThemeGallery.search("").count == entries.count, "an empty search returns everything")
 check(ThemeGallery.search("   ").count == entries.count, "a whitespace search returns everything")
-check(ThemeGallery.search("dracula").map(\.slug) == ["dracula"], "a name finds its entry")
-check(ThemeGallery.search("DRACULA").map(\.slug) == ["dracula"], "case does not matter")
+check(ThemeGallery.search("catppuccin mocha").map(\.slug) == ["catppuccin-mocha"],
+      "a name finds its entry")
+check(ThemeGallery.search("CATPPUCCIN MOCHA").map(\.slug) == ["catppuccin-mocha"],
+      "case does not matter")
 // A slug typed by hand, with the separator a user would not guess, still lands.
-check(ThemeGallery.search("solarizeddark").isEmpty == false, "a squashed query finds a spaced name")
-check(ThemeGallery.search("solarized dark").contains { $0.slug == "solarized-dark" },
+check(ThemeGallery.search("catppuccinmocha").isEmpty == false,
+      "a squashed query finds a spaced name")
+check(ThemeGallery.search("catppuccin mocha").contains { $0.slug == "catppuccin-mocha" },
       "a spaced query finds the spaced name")
 check(ThemeGallery.search("zzzznope").isEmpty, "a query matching nothing returns nothing")
 // A hyphenated slug is the one query the squashed *name* cannot satisfy: the
-// name "Solarized Dark" has a space where the slug has a dash, so neither
-// `name.contains` nor the space-stripped form matches "solarized-dark". Only
+// name "Catppuccin Mocha" has a space where the slug has a dash, so neither
+// `name.contains` nor the space-stripped form matches "catppuccin-mocha". Only
 // the slug branch does — which is what makes this the check that pins it.
-check(ThemeGallery.search("solarized-dark").map(\.slug) == ["solarized-dark"],
-      "a hyphenated slug query finds its entry through the slug, not the name")
 check(ThemeGallery.search("catppuccin-mocha").map(\.slug) == ["catppuccin-mocha"],
+      "a hyphenated slug query finds its entry through the slug, not the name")
+check(ThemeGallery.search("tokyonight-storm").map(\.slug) == ["tokyonight-storm"],
       "and so does another")
 check(ThemeGallery.search("dark").allSatisfy { $0.name.lowercased().contains("dark") || $0.slug.contains("dark") },
       "a partial query matches on name or slug only")
