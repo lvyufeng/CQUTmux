@@ -415,6 +415,56 @@ curl -s -X POST -H 'content-type: application/json' \
 grep -q '"suppressed"' "$OUT/defaultnested.txt" && fail "suppression is on without being configured"
 ok "nested suppression is off unless configured"
 
+# suppress_push_while_unlocked is narrower than nested suppression: it drops only
+# the visible banner, and only while the Mac's console is unlocked. The unlocked
+# state is supplied by a stubbed `ioreg` on PATH so the result does not depend on
+# whether the machine running this check happens to be locked. macOS-only, since
+# that is where the host reads lock state from IOKit.
+if [[ "$(uname)" == "Darwin" ]]; then
+  UNLOCK_HOME="$OUT/unlockhome"
+  mkdir -p "$UNLOCK_HOME/.config/cqutmux" "$OUT/fakebin"
+  printf '[gateway]\nsuppress_push_while_unlocked = true\n' > "$UNLOCK_HOME/.config/cqutmux/config.toml"
+  cat > "$OUT/fakebin/ioreg" <<'SH'
+#!/bin/sh
+echo '      "IOConsoleLocked" = No'
+SH
+  chmod +x "$OUT/fakebin/ioreg"
+  UNLOCK_PORT=$((PORT + 6))
+  HOME="$UNLOCK_HOME" PATH="$OUT/fakebin:$PATH" \
+    node "$CLI" --port "$UNLOCK_PORT" > "$OUT/unlock.log" 2>&1 &
+  for _ in $(seq 1 20); do
+    grep -q listening "$OUT/unlock.log" 2>/dev/null && break
+    sleep 0.25
+  done
+  curl -s -X POST -H 'content-type: application/json' \
+    -d '{"source":"x","kind":"approval","title":"unlock-suppressed"}' \
+    "http://127.0.0.1:$UNLOCK_PORT/events" > /dev/null
+  grep -q 'suppressed visible banner' "$OUT/unlock.log" \
+    || fail "suppress_push_while_unlocked did not silence the banner while unlocked"
+  ok "suppress_push_while_unlocked silences the visible banner while unlocked"
+
+  # And the same config with a locked console must *not* suppress: the setting
+  # keys on lock state, so a run that silences regardless of it is a bug that
+  # would hide every approval on a locked machine.
+  cat > "$OUT/fakebin/ioreg" <<'SH'
+#!/bin/sh
+echo '      "IOConsoleLocked" = Yes'
+SH
+  LOCK_PORT=$((PORT + 7))
+  HOME="$UNLOCK_HOME" PATH="$OUT/fakebin:$PATH" \
+    node "$CLI" --port "$LOCK_PORT" > "$OUT/lock.log" 2>&1 &
+  for _ in $(seq 1 20); do
+    grep -q listening "$OUT/lock.log" 2>/dev/null && break
+    sleep 0.25
+  done
+  curl -s -X POST -H 'content-type: application/json' \
+    -d '{"source":"x","kind":"approval","title":"locked-not-suppressed"}' \
+    "http://127.0.0.1:$LOCK_PORT/events" > /dev/null
+  grep -q 'suppressed visible banner' "$OUT/lock.log" \
+    && fail "suppress_push_while_unlocked silenced a banner while the Mac was locked"
+  ok "suppress_push_while_unlocked leaves the banner alone while locked"
+fi
+
 # scan_ports: an entry means the same thing alone or inside a list. The range
 # in the array is the case that was silently dropped.
 listen_on() {
@@ -528,6 +578,17 @@ CQUTMUX_CONFIG="$CFG" run set usage-collection off > /dev/null
 AFTER="$(wc -c < "$CFG")"
 [[ "$BEFORE" == "$AFTER" ]] || fail "repeated set grew the config file ($BEFORE -> $AFTER)"
 ok "setting the same value twice leaves the file unchanged"
+
+# The unlocked-suppression key has to be *settable*, since Moshi documents it as
+# the fifth host config key and this CLI is where a host sets it. Written with
+# the hyphen people type, read back under the underscore the file stores.
+CQUTMUX_CONFIG="$CFG" run set suppress-push-while-unlocked on > /dev/null \
+  || fail "set rejected suppress-push-while-unlocked"
+grep -q 'suppress_push_while_unlocked = true' "$CFG" \
+  || fail "set did not write suppress_push_while_unlocked as a boolean: $(cat "$CFG")"
+CQUTMUX_CONFIG="$CFG" run set suppress-push-while-unlocked > "$OUT/unlockset.txt" 2>&1
+grep -q 'true' "$OUT/unlockset.txt" || fail "set did not read back suppress-push-while-unlocked"
+ok "set accepts suppress-push-while-unlocked and reads it back"
 
 # `usage` needs a gateway — it says so rather than printing an empty board.
 if CQUT_CLI_UNUSED=1 run usage --port 24997 > "$OUT/usage.txt" 2>&1; then

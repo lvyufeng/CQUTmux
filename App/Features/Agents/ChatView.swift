@@ -101,10 +101,16 @@ struct ChatView: View {
                             Label("Changes (\(changed.files.count))", systemImage: "plus.forwardslash.minus")
                         }
                     }
-                    Button {
-                        showPreview = true
-                    } label: {
-                        Label("Browser preview", systemImage: "safari")
+                    // Chat is a mode of the Code panel, so the Hooks "Use
+                    // preview" switch has to reach this copy of the button too
+                    // — otherwise the missing-button bug the setting documents
+                    // reappears the moment a session opens in Chat.
+                    if AgentActivitySettings.usePreview() {
+                        Button {
+                            showPreview = true
+                        } label: {
+                            Label("Browser preview", systemImage: "safari")
+                        }
                     }
                 } label: {
                     Label("More", systemImage: "ellipsis.circle")

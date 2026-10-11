@@ -23,7 +23,7 @@
 import { createServer } from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
-import { execFile, spawn, spawnSync } from 'node:child_process'
+import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process'
 import { readdir, readFile, stat, mkdir, writeFile, appendFile, rm, chmod } from 'node:fs/promises'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { resolve, relative, isAbsolute, join, dirname } from 'node:path'
@@ -92,6 +92,7 @@ function parseArgs(argv) {
     alwaysOnDiscovery: true,
     usageCollection: true,
     suppressNestedAgentPush: false,
+    suppressPushWhileUnlocked: false,
     scanPorts: 'all',
   }
   for (let i = 0; i < argv.length; i++) {
@@ -182,6 +183,7 @@ function applyConfig(args, config) {
   args.alwaysOnDiscovery = pick('always_on_discovery', args.alwaysOnDiscovery, true)
   args.usageCollection = pick('usage_collection', args.usageCollection, true)
   args.suppressNestedAgentPush = pick('suppress_nested_agent_push', args.suppressNestedAgentPush, false)
+  args.suppressPushWhileUnlocked = pick('suppress_push_while_unlocked', args.suppressPushWhileUnlocked, false)
   args.scanPorts = pick('scan_ports', args.scanPorts, 'all')
   return args
 }
@@ -234,6 +236,35 @@ applyConfig(args, config)
 
 const push = createPushService(args)
 
+/// Whether the Mac's console is unlocked. `suppress_push_while_unlocked`
+/// silences a *visible* approval banner while this is true; the event and the
+/// Live Activity update still flow, so the only thing lost is the banner on a
+/// machine the user is already sitting at.
+///
+/// This is truthful here only because the gateway runs on the same Mac as the
+/// console it reports on, which makes lock state host-decidable. `IOConsoleLocked`
+/// in the `Root` IOKit plane is the authoritative key: unlike the per-user
+/// `kCGSSessionOnConsoleKey`, it stays `true` after fast user switching hands
+/// the console to another account.
+///
+/// What the gateway *cannot* see is the app being foregrounded — the app is on
+/// the far end of an SSH session and never tells the host it is up — so this
+/// suppresses on Mac lock state alone. That is the documented signal ("an
+/// unlocked Mac does not necessarily mean somebody is looking at it"), not
+/// proof of attention. A read that fails, or a non-macOS host, returns `false`
+/// so the banner stays enabled: Moshi's rule is that a failed lock-state check
+/// must not let an approval disappear silently.
+function consoleUnlocked() {
+  if (process.platform !== 'darwin') return false
+  try {
+    const out = execFileSync('ioreg', ['-n', 'Root', '-d1'], { encoding: 'utf8' })
+    const line = out.split('\n').find(l => l.includes('"IOConsoleLocked"'))
+    return line !== undefined && !/=\s*Yes/.test(line)
+  } catch {
+    return false
+  }
+}
+
 /** @type {Array<object>} */
 const events = []
 const waiters = new Set()
@@ -277,9 +308,18 @@ function emit(event) {
   // Fire-and-forget: a push that fails must not stop the event from being
   // recorded, since the app will still pick it up on its next poll.
   if (record.kind === 'approval') {
-    push.notify(record).catch(error => {
-      process.stderr.write(`[push] ${error.message || error}\n`)
-    })
+    // A visible banner — unless this host is unlocked with suppression on. The
+    // event has already been recorded and the Live Activity still updates
+    // below, so what this drops is the banner alone, which is the setting's
+    // whole point: an approval answered at the Mac should not also buzz the
+    // phone that is sitting next to it.
+    if (args.suppressPushWhileUnlocked && consoleUnlocked()) {
+      process.stderr.write(`[push] suppressed visible banner; console is unlocked\n`)
+    } else {
+      push.notify(record).catch(error => {
+        process.stderr.write(`[push] ${error.message || error}\n`)
+      })
+    }
   }
   // The Live Activity path, separate from the alert: an approval gets a banner
   // *and* updates the activity, while a tool or session event only touches the
@@ -1397,7 +1437,8 @@ const VERSION = '0.1.0'
 /// parsed by a small hand-rolled reader, and a typo'd key that silently did
 /// nothing would be the exact failure this command exists to make visible.
 const SETTABLE = [
-  'always_on_discovery', 'usage_collection', 'suppress_nested_agent_push', 'scan_ports',
+  'always_on_discovery', 'usage_collection', 'suppress_nested_agent_push',
+  'suppress_push_while_unlocked', 'scan_ports',
 ]
 
 const COMMANDS = new Set([

@@ -91,6 +91,18 @@ check(!AgentActivitySettings.opensInboxOnTap(in: defaults), "an explicit off did
 AgentActivitySettings.reset(in: defaults)
 check(AgentActivitySettings.isEnabled(in: defaults), "reset did not return to the default")
 
+// 2b. "Use preview": the Code panel's Preview menu is hidden — not disabled —
+// when this is off, so a wrong default is a *missing* entry point rather than a
+// button that refuses. Never set means on, and an explicit off must survive so
+// the menu the user hid stays hidden across a relaunch.
+check(AgentActivitySettings.usePreview(in: defaults), "an unset Use preview preference was off")
+AgentActivitySettings.setUsePreview(false, in: defaults)
+check(!AgentActivitySettings.usePreview(in: defaults), "an explicit Use preview off did not stick")
+check(AgentActivitySettings.isEnabled(in: defaults),
+      "turning preview off also changed the Live Activity setting")
+AgentActivitySettings.setUsePreview(true, in: defaults)
+check(AgentActivitySettings.usePreview(in: defaults), "Use preview could not be turned back on")
+
 // 3. What the activity shows.
 let sample = AgentActivityPreview.sampleEvents()
 let content = AgentActivityPreview.content(for: sample)
@@ -286,6 +298,21 @@ print("PASS: defaults, both toggles, and what the activity shows")
 SWIFT
 
 swift "$WORK/main.swift"
+
+echo "==> checking that Use preview actually gates the Code panel's preview entry"
+
+# The setting is only real if the Code panel reads it. Two copies of the button
+# exist — the panel's own toolbar menu and the Chat mode's "More" menu, which is
+# a mode of the same panel — and either one left ungated is the exact
+# missing-button bug the setting exists to explain.
+grep -q 'AgentActivitySettings.usePreview()' App/Features/Code/CodePanelView.swift || {
+  echo "FAIL: the Code panel's Preview menu is not gated on Use preview"
+  exit 1
+}
+grep -q 'AgentActivitySettings.usePreview()' App/Features/Agents/ChatView.swift || {
+  echo "FAIL: Chat's Browser preview button is not gated on Use preview"
+  exit 1
+}
 
 echo "==> checking the plist key and that the request error is not swallowed"
 

@@ -1,10 +1,10 @@
 import Foundation
 
-/// The two Hooks settings the Live Activity answers to.
+/// The Hooks settings that live on this device rather than on the host.
 ///
-/// Both default to on, which is the state a device that has never opened this
-/// screen is in — so an absent key and an explicit `true` have to read the
-/// same. That is why these go through `object(forKey:)` rather than
+/// Both Live Activity keys default to on, which is the state a device that has
+/// never opened this screen is in — so an absent key and an explicit `true` have
+/// to read the same. That is why these go through `object(forKey:)` rather than
 /// `bool(forKey:)`: the latter cannot tell "never set" from "set to false", and
 /// a preference screen whose off switch appears already off on first launch is
 /// one the user has to correct before it works.
@@ -30,6 +30,17 @@ enum AgentActivitySettings {
     /// answer with the default and the toggle would change nothing.
     static let openInboxKey = "cqutmux.activity.openInbox"
 
+    /// Whether the Code panel offers browser preview at all.
+    ///
+    /// Moshi's browser-preview page says the preview button is simply *gone*
+    /// when preview is turned off here, and "turn Use preview back on to bring
+    /// it back" — so the flag hides the entry point rather than disabling it,
+    /// which is the difference between a button that says why it refuses and no
+    /// button to look for. On by default: the button is the only way to reach a
+    /// dev server from the app, and an install that has never opened this screen
+    /// must keep it.
+    static let usePreviewKey = "cqutmux.hooks.usePreview"
+
     static func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
         defaults.object(forKey: enabledKey) as? Bool ?? true
     }
@@ -44,6 +55,14 @@ enum AgentActivitySettings {
 
     static func setOpensInboxOnTap(_ on: Bool, in defaults: UserDefaults = .standard) {
         defaults.set(on, forKey: openInboxKey)
+    }
+
+    static func usePreview(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: usePreviewKey) as? Bool ?? true
+    }
+
+    static func setUsePreview(_ on: Bool, in defaults: UserDefaults = .standard) {
+        defaults.set(on, forKey: usePreviewKey)
     }
 
     /// What to do with the host's record of this device's activity.

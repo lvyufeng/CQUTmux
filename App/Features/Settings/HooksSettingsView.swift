@@ -16,6 +16,9 @@ struct HooksSettingsView: View {
     /// for a device that has never opened this screen.
     @AppStorage(AgentActivitySettings.enabledKey) private var liveActivities = true
     @AppStorage(AgentActivitySettings.openInboxKey) private var openInboxOnTap = true
+    /// The same key the Code panel gates its Preview menu on, read through
+    /// `@AppStorage` so the switch and the button cannot hold different values.
+    @AppStorage(AgentActivitySettings.usePreviewKey) private var usePreview = true
 
     @State private var activity = ActivityManager()
     @State private var testSummary: String?
@@ -41,6 +44,22 @@ struct HooksSettingsView: View {
                 Label("Live Activity", systemImage: "bolt.badge.clock")
             } footer: {
                 Text(footer)
+            }
+
+            Section {
+                Toggle("Use preview", isOn: $usePreview)
+            } header: {
+                Label("Preview", systemImage: "safari")
+            } footer: {
+                // Worded from what the Code panel actually does, because the
+                // failure this prevents is a user reporting a missing button:
+                // off, the Preview menu is gone rather than disabled, so there
+                // is nothing on screen that says where it went — which is
+                // exactly why the setting names the place it controls.
+                Text("Shows the Preview menu in the Code panel — browser preview "
+                     + "of a dev server running on the host, and the simulator "
+                     + "preview. Off, the menu is hidden; turn this back on to "
+                     + "bring it back.")
             }
 
             Section {

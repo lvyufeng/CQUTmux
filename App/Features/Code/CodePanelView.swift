@@ -91,7 +91,7 @@ struct CodePanelView: View {
             }
         }
         .toolbar {
-            if connection.client != nil {
+            if connection.client != nil, AgentActivitySettings.usePreview() {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button {

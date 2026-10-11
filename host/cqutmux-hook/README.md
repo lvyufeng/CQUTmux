@@ -86,10 +86,11 @@ so a host without a file is unaffected.
 
 ```toml
 [gateway]
-always_on_discovery        = true      # scan for dev servers without the app attached
-usage_collection           = true      # poll agent rate-limit data
-suppress_nested_agent_push = false     # drop events from agents spawned by agents
-scan_ports                 = "all"     # all | none | 3000 | "3000-3010" | [3000, "5173"]
+always_on_discovery           = true    # scan for dev servers without the app attached
+usage_collection              = true    # poll agent rate-limit data
+suppress_nested_agent_push    = false   # drop events from agents spawned by agents
+suppress_push_while_unlocked  = false   # silence visible banners while the Mac is unlocked
+scan_ports                    = "all"   # all | none | 3000 | "3000-3010" | [3000, "5173"]
 ```
 
 Only `[gateway]` is read today, and `doctor` says whether the file was found and
@@ -97,7 +98,13 @@ how many settings it understood — a file that exists but parses to nothing is
 the case worth catching, since it looks configured and is not. `suppress_nested_agent_push`
 drops the whole event, approvals included, not just the notification: an agent
 that is genuinely waiting for an answer would otherwise be silenced while the
-app still showed a pending approval. `scan_ports` narrows what Browser Preview
+app still showed a pending approval. `suppress_push_while_unlocked` is narrower:
+it drops only the *visible* approval banner while the Mac's console is unlocked
+(read from `IOConsoleLocked`), and the event and Live Activity update still flow.
+The gateway cannot see whether the app is foregrounded — it sits on the other end
+of an SSH session — so this keys on Mac lock state, which is the documented signal
+and not proof that somebody is looking. A failed check leaves the banner enabled.
+`scan_ports` narrows what Browser Preview
 probes; a port outside it is filtered out of `/ports` entirely.
 
 The reader handles sections, `key = value`, strings, numbers, booleans and
