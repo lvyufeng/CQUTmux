@@ -35,6 +35,9 @@ import { recentDirectories } from './recent.mjs'
 import { commandHistory } from './history.mjs'
 import { windowsForSource } from './usage.mjs'
 import { parseLsof, parseSs, describe } from './listeners.mjs'
+import {
+  stateDir, parseStateDirectory, pageCarriesPreviewMarker, classifyListeners,
+} from './serve-sim.mjs'
 import { renderDiffHtml } from './diffpage.mjs'
 import { listAtRevision, readAtRevision } from './revision.mjs'
 import { detectContext, sessionIndexFromTmux, contextPayload } from './context.mjs'
@@ -550,7 +553,23 @@ async function listeningPorts() {
     if (headers) probes.set(socket.port, { headers })
   }))
 
-  const listeners = describe(allowed, probes)
+  const described = describe(allowed, probes)
+
+  // A serve-sim preview is a listening port like any other, so it is classified
+  // here rather than in a list of its own. The state file names the port and the
+  // simulator; the probe headers say whether the page carries serve-sim's
+  // marker. `classifyListeners` then guarantees the preview is one entry, never
+  // a second row beside the port it describes.
+  const markerPorts = new Set(
+    [...probes]
+      .filter(([, probe]) => pageCarriesPreviewMarker({ headers: probe.headers }))
+      .map(([port]) => port),
+  )
+  const { listeners } = classifyListeners(described, {
+    stateFile: await serveSimState(),
+    markerPorts,
+  })
+
   // Dev-looking ports first, then anything else, so the common case is on top.
   const hinted = listeners.filter(l => DEV_PORT_HINTS.has(l.port))
   const rest = listeners.filter(l => !DEV_PORT_HINTS.has(l.port))
@@ -562,6 +581,37 @@ async function listeningPorts() {
     ports: ordered.map(l => l.port),
     listeners: ordered,
   }
+}
+
+/// Reads serve-sim's state file, if it wrote one, from the host's temp dir.
+///
+/// serve-sim writes a small file under `$TMPDIR/serve-sim/` naming the port it
+/// bound and usually the simulator. `tmpdir()` is `$TMPDIR` on this host, and
+/// the directory is derived from it rather than hardcoded so the same rule runs
+/// on a host whose temp dir is somewhere else. The port is the trigger the doc
+/// names ("lists the port"); a name is a bonus the doc ties to this file. Every
+/// failure here is silence, not an error: no directory simply means no preview,
+/// which is the ordinary case on a host that never ran serve-sim.
+async function serveSimState() {
+  const dir = stateDir(tmpdir())
+  let names
+  try {
+    names = await readdir(dir)
+  } catch {
+    return null
+  }
+  const files = []
+  for (const name of names.slice(0, 32)) {
+    try {
+      const full = join(dir, name)
+      const info = await stat(full)
+      if (!info.isFile()) continue
+      files.push({ name, content: await readFile(full, 'utf8'), mtime: info.mtimeMs })
+    } catch {
+      // A file that vanished between readdir and read is skipped, not fatal.
+    }
+  }
+  return parseStateDirectory(files)
 }
 
 /// A bounded HEAD request for a listener's response headers, or null when it

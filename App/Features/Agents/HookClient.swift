@@ -625,6 +625,15 @@ struct PortBoard: Codable {
         /// True when the port answered an HTTP request. Absent means it did not.
         var http: Bool?
         var framework: String?
+        /// True when the host classified this port as a serve-sim simulator
+        /// preview. Absent on a host that predates the field, so it defaults to
+        /// false and the row draws exactly as before.
+        var simulatorPreview: Bool?
+        /// The host's label for a classified preview — "Simulator Preview".
+        var label: String?
+        /// The simulator's name, when the host read it from serve-sim's state
+        /// file. Present only for a classified preview whose state file named it.
+        var deviceName: String?
         var id: Int { port }
     }
 }

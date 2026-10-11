@@ -86,7 +86,23 @@ struct PreviewView: View {
                             HStack {
                                 Text(verbatim: String(listener.port))
                                     .font(.system(.body, design: .monospaced))
-                                if let name = Self.describe(listener) {
+                                if listener.simulatorPreview == true {
+                                    // The host recognised this port as a
+                                    // serve-sim preview, so the row says what it
+                                    // is instead of a framework name it is not.
+                                    // The simulator's name is shown only when
+                                    // serve-sim's state file carried it — the
+                                    // label alone still identifies the port.
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "iphone.gen3")
+                                        Text(verbatim: listener.deviceName.map {
+                                            "\(listener.label ?? "Simulator Preview"): \($0)"
+                                        } ?? (listener.label ?? "Simulator Preview"))
+                                    }
+                                    .font(.caption2)
+                                    .foregroundStyle(themes.current.accentColor)
+                                    .lineLimit(1)
+                                } else if let name = Self.describe(listener) {
                                     Text(name)
                                         .font(.caption2)
                                         .foregroundStyle(themes.current.accentColor)
