@@ -114,6 +114,13 @@ final class MuxSettings {
         case nextPane, previousPane
         /// Move the focus to the next tab/window.
         case nextTab, previousTab
+        /// Move to the next/previous *session* (tmux) — the level above a
+        /// window. Distinct from `nextTab`, which moves between windows inside
+        /// one session: Moshi's gesture table gives window/tab switching and
+        /// session switching from two different swipes, and folding them into
+        /// one command is how the vertical swipe came to move a window when the
+        /// page says it moves a session.
+        case nextSession, previousSession
         /// Toggle the focused pane between split and full-screen.
         case zoomPane
         /// Open the workspace navigator.
@@ -128,6 +135,8 @@ final class MuxSettings {
             case .previousPane: "Previous pane"
             case .nextTab: "Next tab"
             case .previousTab: "Previous tab"
+            case .nextSession: "Next session"
+            case .previousSession: "Previous session"
             case .zoomPane: "Zoom pane"
             case .workspaceNavigator: "Workspaces"
             case .gotoPrompt: "Goto"
@@ -152,6 +161,14 @@ final class MuxSettings {
                 return mux == "tmux" || mux == "herdr"
             case .nextTab, .previousTab, .zoomPane:
                 return mux != nil
+            // Only tmux has a notion of "the session above the window". Herdr's
+            // level above a tab is a *workspace*, and the page gives that its
+            // own gesture (the navigator, via `workspaceNavigator`); Zellij has
+            // no session switch at all — the page says the vertical swipe
+            // "has nothing to drive there and tells you so". Claiming the
+            // gesture for either would send a binding it does not have.
+            case .nextSession, .previousSession:
+                return mux == "tmux"
             case .workspaceNavigator, .gotoPrompt:
                 return mux == "herdr"
             }
@@ -177,6 +194,11 @@ final class MuxSettings {
             case ("tmux", .previousPane): return head + [0x3B]    // prefix ;
             case ("tmux", .nextTab): return head + [0x6E]         // prefix n
             case ("tmux", .previousTab): return head + [0x70]     // prefix p
+            // prefix ( / prefix ) — tmux's own "previous/next session", the
+            // level above the window. These are the keys Moshi's gesture table
+            // means when it says the vertical two-finger swipe switches session.
+            case ("tmux", .nextSession): return head + [0x29]     // prefix )
+            case ("tmux", .previousSession): return head + [0x28] // prefix (
             case ("tmux", .zoomPane): return head + [0x7A]        // prefix z
             case ("zellij", .nextTab):
                 // `go-to-tab` takes an index, and the host's zellij resolves the
@@ -271,12 +293,23 @@ final class MuxSettings {
                 return command.isAvailable(on: mux) ? command : nil
             }
             if let vertical {
-                // Herdr has no next/previous workspace key, so its vertical swipe
-                // opens the navigator instead — "drives the workspace navigator for
-                // you", as Moshi documents. The others move a tab.
-                let command: MuxCommand = mux == "herdr"
-                    ? .workspaceNavigator
-                    : (vertical == .next ? .nextTab : .previousTab)
+                // The vertical swipe moves a level *higher* than the horizontal
+                // one, and Moshi's table says what those levels are: horizontal
+                // switches pane, "two fingers up/down move a level higher —
+                // tmux sessions or Herdr workspaces". So on tmux this is a
+                // *session* move, not a tab move. Herdr has no next/previous
+                // workspace key, so its vertical swipe opens the navigator
+                // instead — "drives the workspace navigator for you". Zellij
+                // has neither, so the gesture declines and the two-finger drag
+                // reaches the terminal, which is the page's own note that the
+                // vertical swipe "has nothing to drive there".
+                let command: MuxCommand?
+                switch mux {
+                case "herdr": command = .workspaceNavigator
+                case "tmux": command = vertical == .next ? .nextSession : .previousSession
+                default: command = nil
+                }
+                guard let command else { return nil }
                 return command.isAvailable(on: mux) ? command : nil
             }
             return nil

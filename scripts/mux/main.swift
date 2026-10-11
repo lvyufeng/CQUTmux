@@ -199,14 +199,21 @@ check(MuxSettings.MuxCommand.matching(horizontal: .next, vertical: nil, mux: "tm
       "a sideways sweep forward moves to the next pane")
 check(MuxSettings.MuxCommand.matching(horizontal: .previous, vertical: nil, mux: "tmux") == .previousPane,
       "and backwards to the previous one")
-check(MuxSettings.MuxCommand.matching(horizontal: nil, vertical: .next, mux: "tmux") == .nextTab,
-      "a vertical sweep forward moves to the next tab on tmux")
-check(MuxSettings.MuxCommand.matching(horizontal: nil, vertical: .next, mux: "zellij") == .nextTab,
-      "and on zellij")
+// The vertical sweep moves a level *higher* than the horizontal one. Moshi's
+// table says which level that is: "two fingers up/down move a level higher —
+// tmux sessions or Herdr workspaces". On tmux that is a *session* move, not a
+// tab move — the two were the same command here before, which is how the
+// gesture came to walk windows while the page said it walked sessions.
+check(MuxSettings.MuxCommand.matching(horizontal: nil, vertical: .next, mux: "tmux") == .nextSession,
+      "a vertical sweep forward moves to the next session on tmux")
+check(MuxSettings.MuxCommand.matching(horizontal: nil, vertical: .previous, mux: "tmux") == .previousSession,
+      "and backwards to the previous session")
 check(MuxSettings.MuxCommand.matching(horizontal: nil, vertical: .next, mux: "herdr") == .workspaceNavigator,
       "herdr has no next-workspace key, so its vertical sweep opens the navigator")
 check(MuxSettings.MuxCommand.matching(horizontal: nil, vertical: .previous, mux: "herdr") == .workspaceNavigator,
       "in both directions")
+check(MuxSettings.MuxCommand.matching(horizontal: nil, vertical: .next, mux: "zellij") == nil,
+      "zellij has no session to switch, so its vertical sweep is left to the terminal")
 check(MuxSettings.MuxCommand.matching(horizontal: .next, vertical: nil, mux: nil) == nil,
       "a host with no multiplexer claims no direction at all")
 check(MuxSettings.MuxCommand.matching(horizontal: .next, vertical: nil, mux: "zellij") == nil,
