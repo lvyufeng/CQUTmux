@@ -94,3 +94,16 @@ StoreKit / licensing and the subscription surface; the Desktop control room on
 `:24544`; the hosted webhook ingest, image-push CDN and rate limits; the
 `moshi-skill` package. All need Moshi's hosted service or a second product, and
 are recorded at `IntegrationSettings.swift` and in the main audit.
+
+Two more of the same class, re-confirmed 2026-10-11: **voice "Cloud"** is a
+user-supplied OpenAI-compatible endpoint rather than Moshi's metered hosted
+transcription (there is no server of ours to offer), and the **theme gallery**
+is a bundled 40-palette catalogue rather than a client for Moshi's 570+ gallery
+at `/themes` (whose slugs would need Moshi's server to resolve). Both are
+mechanisms the app implements against its own resources; the missing half is
+Moshi's hosting, not our code — the same reason the entries above diverge.
+
+Separately, `docs/parity-audit.md`'s "Basis of this audit" records the decision
+that parity is judged against getmoshi.app and the App Store listing — not a
+parsed IPA, which is unavailable without the decryption sites the project
+committed not to use. That is a recorded scope decision, not a gap.

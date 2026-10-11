@@ -9,6 +9,28 @@ Result: **76 confirmed gaps, 30 claims refuted.** The raw findings — claim,
 status, file:line evidence, and the verifier's reasoning — are in
 `docs/parity-audit.json`.
 
+## Basis of this audit (decided 2026-10-11)
+
+The comparison basis is **getmoshi.app's documentation plus its App Store
+listing** — the public sources. It is *not* a parsed IPA, and cannot be: an App
+Store IPA is FairPlay-encrypted, so reading it statically means decrypting it,
+and the only sources for a decrypted copy are the rehosting/decryption sites
+`PLAN.md:8` and `README.md:10` committed at project inception not to use. No
+`.ipa` exists in this tree or on the build machine, so no IPA-derived claim set
+exists and none is fabricated here. This is a recorded scope decision, not an
+open gap: parity is judged against the public sources, and where a documented
+capability is implemented but not end-to-end verifiable without external
+resources (see the Live Activity rows), that is stated as such rather than
+downgraded to a silent pass.
+
+The two `partial` rows are the Live Activity halves. Both are implemented and
+checked at the rule level (Lock Screen Allow/Deny buttons via an AppIntent
+writing an App Group; the host building and addressing push-to-start and
+per-activity pushes). Both stop short of `closed` only because delivery needs an
+`aps-environment` entitlement that requires a paid provisioning profile and a
+physical device, so no tap and no push has been observed here. That is a
+hardware/profile limit, not missing implementation — the code paths exist.
+
 ## Status as of 2026-10-10
 
 Re-verified a second time, one agent per open gap, each told to judge the claim
