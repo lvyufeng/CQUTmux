@@ -1005,27 +1005,19 @@ Re-checked entry by entry against the working tree on 2026-10-13 — eight of th
 bullets below were rewritten or removed in that pass, because this list had
 drifted the same way the heading had, and in both directions: several described
 work that had already shipped, and one had been updated to describe work that
-had not, in a way that made the side-by-side pane sound more capable than it is
-(below). The closures it shed — the session picker's Recent tab, cold-launch
-restore, the locale rc injection, `.ttc`/`.otc` handling, the tool cards' mini
-diffs and task lists — are in the commit history and the progress list above.
+had not, in a way that made the side-by-side pane sound more capable than it is.
+The closures it shed — the session picker's Recent tab, cold-launch restore, the
+locale rc injection, `.ttc`/`.otc` handling, the tool cards' mini diffs and task
+lists — are in the commit history and the progress list above. Three more went
+in the same day: the attachment chooser and the mic in chat mode's composer, and
+the character-level span inside a changed line, which leaves the bullet about
+the side-by-side pane with nothing to say.
 
-- The unified diff and the side-by-side pane both highlight whole lines and
-  neither marks the changed span *within* a line. `SideBySideDiff` has a
-  `modified` row kind, but it is a row kind: it pairs a removed line with an
-  added one and `CodePanelView` tints both entire lines (`.red` left, `.green`
-  right). A reader who took "intra-line" from the earlier wording of this bullet
-  would be reading a capability that is not there. What is missing is the
-  character-level diff inside a changed line, in either view.
 - The Browse tab has syntax highlighting (`FileView` →
   `SyntaxPalette.attributed` → `SyntaxHighlighter`) and can open a file from a
   past revision (`CommitBrowserView`). What it lacks is *blame*: no per-line
   attribution, and the commit list is a plain list rather than anything
   annotated.
-- Chat mode's composer takes typed text and now has the attachment button, but
-  not the mic: dictation is started from the accessory bar's mic key
-  (`dictationButton`), which chat mode replaces wholesale. A dictated phrase
-  reaches the composer only if dictation was started before entering chat.
 - The Live Activity carries the four lifecycle phases — approval needed,
   working, done and session ended — and the Lock Screen and the Island carry
   Allow/Deny buttons, so the answer no longer has to be given in the app:
