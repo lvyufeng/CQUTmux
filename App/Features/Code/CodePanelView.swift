@@ -481,32 +481,74 @@ private struct SideBySideRow: View {
     var spacing: Double
 
     var body: some View {
+        // Only a modification has two lines to compare. An added or removed row
+        // has one side missing, so there is no span to find — and tinting one
+        // anyway would double the row's wash on a line that is wholly new.
+        let spans = row.kind == .modified
+            ? SideBySideDiff.inlineDiff(left: row.left?.text ?? "", right: row.right?.text ?? "")
+            : nil
         HStack(alignment: .top, spacing: 0) {
-            side(row.left, tint: row.kind == .removed || row.kind == .modified ? .red : nil)
+            side(row.left, tint: row.kind == .removed || row.kind == .modified ? .red : nil,
+                 span: spans?.left)
             Rectangle()
                 .fill(.secondary.opacity(0.25))
                 .frame(width: 1)
-            side(row.right, tint: row.kind == .added || row.kind == .modified ? .green : nil)
+            side(row.right, tint: row.kind == .added || row.kind == .modified ? .green : nil,
+                 span: spans?.right)
         }
     }
 
     @ViewBuilder
-    private func side(_ line: SideBySideDiff.Line?, tint: Color?) -> some View {
+    private func side(_ line: SideBySideDiff.Line?, tint: Color?, span: Range<Int>?) -> some View {
         let marker = Self.marker(for: line?.kind)
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 3) {
                 Text(marker)
                     .font(Font(font))
                     .foregroundStyle(tint ?? .secondary)
-                Text(line?.text.isEmpty == false ? line!.text : " ")
+                Text(Self.tinted(line?.text ?? "", tint: tint, span: span))
                     .font(Font(font))
-                    .foregroundStyle(tint ?? .primary)
                     .lineSpacing(spacing)
                     .fixedSize(horizontal: true, vertical: false)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The row's own wash, unchanged: it says "this row changed" where the
+        // span inside says "here". Narrowing the tint must not drop either.
         .background((tint ?? .clear).opacity(0.08))
+    }
+
+    /// The line with its differing span carrying a stronger tint.
+    ///
+    /// An `AttributedString` rather than concatenated `Text`: a background is
+    /// per-segment state that `+` discards, so without it the span would have
+    /// only the row's wash to carry it — the whole-line tint this replaced. The
+    /// colour is set per run for the same reason, so the emphasised run is the
+    /// one with the background and not just the same foreground twice.
+    private static func tinted(_ text: String, tint: Color?, span: Range<Int>?) -> AttributedString {
+        let line = text.isEmpty ? " " : text
+        // No span — a context, added or removed row — or nothing unique on this
+        // side of one. The line stays a single run, exactly as before.
+        guard let tint, let span, !span.isEmpty else {
+            var whole = AttributedString(line)
+            whole.foregroundColor = tint ?? .primary
+            return whole
+        }
+        let characters = Array(line)
+        // Clamped rather than trusted: the span is computed against the model's
+        // copy of the line, and slicing past the end would trap.
+        let start = min(max(span.lowerBound, 0), characters.count)
+        let end = min(max(span.upperBound, start), characters.count)
+        var result = AttributedString()
+        for (piece, differs) in [(String(characters[0..<start]), false),
+                                 (String(characters[start..<end]), true),
+                                 (String(characters[end...]), false)] {
+            var run = AttributedString(piece)
+            run.foregroundColor = tint
+            if differs { run.backgroundColor = tint.opacity(0.30) }
+            result.append(run)
+        }
+        return result
     }
 
     /// The gutter marker per side, so a row says at a glance which side

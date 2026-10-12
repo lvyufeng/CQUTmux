@@ -192,6 +192,82 @@ check(both.count == 2, "two hunks are two hunks")
 check(both.allSatisfy { $0.rows.count == 1 && $0.rows[0].kind == .modified },
       "and each pairs its own line")
 
+// MARK: - Character spans inside a modified line
+
+// A modified row used to tint both whole lines. The span narrows that to the
+// characters that actually differ, so a one-word edit in a long line reads as a
+// one-word edit rather than a rewrite. The model computes it on `Character` and
+// the view tints the run this returns.
+
+// Identical lines differ nowhere. A fallback that returned the whole line here
+// would tint every context row.
+let identical = SideBySideDiff.inlineDiff(left: "let x = 1", right: "let x = 1")
+check(identical.left.isEmpty && identical.right.isEmpty, "identical text has no span on either side")
+
+// A pure insertion: nothing is unique on the left, and the right span is
+// exactly the inserted text. Widening either end by one would tint a character
+// the two lines share.
+let inserted = SideBySideDiff.inlineDiff(left: "abc", right: "abXc")
+check(inserted.left.isEmpty, "an insertion leaves the left span empty")
+check(inserted.right == 2..<3, "and the right span is the inserted character (got \(inserted.right))")
+
+// A blank removed line paired with an added one is the same case in a real
+// diff, and the side with no text must not produce a range past its own end.
+let blank = SideBySideDiff.inlineDiff(left: "", right: "new")
+check(blank.left.isEmpty && blank.right == 0..<3, "a blank line has no span, the other side has all of it")
+
+// A pure deletion is the mirror image.
+let deleted = SideBySideDiff.inlineDiff(left: "abXc", right: "abc")
+check(deleted.left == 2..<3, "a deletion spans the removed character (got \(deleted.left))")
+check(deleted.right.isEmpty, "and leaves the right span empty")
+
+// A change in the middle: the changed word, not the shared head or tail.
+let midChange = SideBySideDiff.inlineDiff(left: "hello world", right: "hello there")
+check(midChange.left == 6..<11, "a middle change spans only the changed run on the left (got \(midChange.left))")
+check(midChange.right == 6..<11, "and the matching run on the right (got \(midChange.right))")
+
+// A change at the very start still trims the shared suffix, so the span is the
+// first character rather than the whole line.
+let atStart = SideBySideDiff.inlineDiff(left: "abc", right: "xbc")
+check(atStart.left == 0..<1 && atStart.right == 0..<1, "a change at the start spans the first character")
+
+// A change at the very end still trims the shared prefix.
+let atEnd = SideBySideDiff.inlineDiff(left: "abc", right: "abx")
+check(atEnd.left == 2..<3 && atEnd.right == 2..<3, "a change at the end spans the last character")
+
+// The overlap case: prefix and suffix would both claim the same `a`s. The
+// suffix trim is clamped to what the prefix left, so the span is the one extra
+// character and never runs past the end of the shorter line.
+let overlap = SideBySideDiff.inlineDiff(left: "aaa", right: "aaaa")
+check(overlap.left.isEmpty, "overlapping prefix and suffix leave the shorter side unhighlighted")
+check(overlap.right == 3..<4, "and the longer side's span is the one extra character (got \(overlap.right))")
+
+// Characters are grapheme clusters, not scalars. This family emoji is three
+// pictographs joined by two zero-width joiners — five scalars, one `Character`.
+// It is spelled in escapes so the joiners cannot be dropped in passing: a
+// literal that lost them is three pictographs, and a span counted in scalars
+// would land inside the sequence and split it across two runs either way.
+let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"
+check(family.count == 1, "the family emoji is one character despite being five scalars")
+let emoji = SideBySideDiff.inlineDiff(left: family + " x", right: family + " y")
+check(emoji.left == 2..<3 && emoji.right == 2..<3,
+      "an emoji is one character, so the span is the character after it (got \(emoji.left))")
+
+// Unrelated lines: the pairing is a positional zip, not a real diff, so this
+// happens. The whole line is the span — the tint this replaced — and the span
+// must not turn an accidental pair into a spurious one-character edit.
+let unrelated = SideBySideDiff.inlineDiff(left: "totally different", right: "nothing alike")
+check(unrelated.left == 0..<17 && unrelated.right == 0..<13,
+      "unrelated lines keep the whole-line span, not an accidental narrow one")
+
+// End to end: the paired row from a real hunk narrows to the word that changed.
+if let hunk = SideBySideDiff.hunks(in: modify).first,
+   let paired = hunk.rows.first(where: { $0.kind == .modified }) {
+    let span = SideBySideDiff.inlineDiff(left: paired.left?.text ?? "", right: paired.right?.text ?? "")
+    check(span.left == 7..<10 && span.right == 7..<10,
+          "the real hunk's span is the quoted word, not the whole line (got \(span.left))")
+}
+
 if failures > 0 {
     print("\nSIDEBYSIDE_FAIL  (\(failures) of \(checks) failed)")
     exit(1)

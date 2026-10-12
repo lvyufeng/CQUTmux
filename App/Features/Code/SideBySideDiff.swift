@@ -124,6 +124,50 @@ enum SideBySideDiff {
         return result
     }
 
+    /// Where two paired lines differ, as a half-open range of `Character`
+    /// offsets into each side.
+    ///
+    /// Character offsets, not `utf8` or `unicodeScalars` offsets: a change
+    /// inside a multi-scalar emoji — a flag, a family, an accent — must not
+    /// split it, and the view slices the line by `Character` to tint the span.
+    /// The two sides are separate ranges because an edit makes them different
+    /// lengths: a pure insertion has nothing unique on the left, so its left
+    /// range is empty, and the view tints nothing there.
+    struct InlineDiff: Equatable {
+        var left: Range<Int>
+        var right: Range<Int>
+    }
+
+    /// The span that differs between a paired left and right line, found by
+    /// trimming the common prefix and the common suffix.
+    ///
+    /// The pairing is a positional zip, not a real diff, so a pair of unrelated
+    /// lines is expected. For those the prefix and suffix are both empty and the
+    /// whole line is the span — which is the whole-line tint this replaced.
+    /// Narrowing an unrelated pair to some accidental one-character "edit" would
+    /// be worse than not narrowing at all, because it would read as a fact.
+    ///
+    /// The suffix trim is clamped to what the prefix left. Without that clamp,
+    /// `"aaa"` against `"aaaa"` counts the same three `a`s as both prefix and
+    /// suffix and reports spans past the end of the shorter line — a range that
+    /// traps when the view slices with it.
+    static func inlineDiff(left: String, right: String) -> InlineDiff {
+        let l = Array(left), r = Array(right)
+        let shorter = min(l.count, r.count)
+
+        var prefix = 0
+        while prefix < shorter, l[prefix] == r[prefix] { prefix += 1 }
+
+        // At most what the prefix did not claim, so the two trims can never
+        // describe the same character twice.
+        let suffixLimit = shorter - prefix
+        var suffix = 0
+        while suffix < suffixLimit, l[l.count - 1 - suffix] == r[r.count - 1 - suffix] { suffix += 1 }
+
+        return InlineDiff(left: prefix..<(l.count - suffix),
+                          right: prefix..<(r.count - suffix))
+    }
+
     /// Whether a diff has anything to lay out. An empty diff, or one made only
     /// of binary-file notices, draws nothing.
     static func hasContent(_ diff: String) -> Bool {
