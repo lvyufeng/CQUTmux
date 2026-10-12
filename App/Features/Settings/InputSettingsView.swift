@@ -44,7 +44,10 @@ struct InputSettingsView: View {
                 Label("Key bar", systemImage: "keyboard.badge.ellipsis")
             } footer: {
                 Text("Drag to reorder, swipe to remove. The D-pad adds a four-way pad with two "
-                     + "bindable corners; the arrows below it always send arrows.")
+                     + "bindable corners; the arrows below it always send arrows. Alt sends an "
+                     + "Esc before the next key (Meta) — double tap it to hold it down. The "
+                     + "navigation row is Home, End, PageUp and PageDown; the symbol row is the "
+                     + "punctuation a phone keyboard hides.")
             }
 
             Section {
@@ -114,11 +117,14 @@ struct InputSettingsView: View {
     private func icon(_ item: InputSettings.Item) -> String {
         switch item {
         case .control, .escape, .tab: "keyboard"
+        case .alt: "option"
         case .enter: "return"
         case .backspace: "delete.left"
         case .keyboard: "keyboard.chevron.compact.down"
         case .showKeyboard: "keyboard"
         case .arrows: "arrow.up.and.down.and.arrow.left.and.right"
+        case .navigation: "arrow.left.and.right"
+        case .symbols: "textformat"
         case .dpad: "square.grid.3x3"
         case .clipboard: "doc.on.doc"
         case .pasteImage: "photo"

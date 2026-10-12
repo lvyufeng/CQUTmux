@@ -1092,6 +1092,7 @@ struct TerminalScreen: View {
     private func barItem(_ item: InputSettings.Item) -> some View {
         switch item {
         case .control: controlKey
+        case .alt: altKey
         case .escape: key("Esc", CtrlKey.escape)
         case .tab: key("Tab", CtrlKey.tab)
         case .enter: key("Return", CtrlKey.enter)
@@ -1103,6 +1104,8 @@ struct TerminalScreen: View {
             icon("arrow.down", CtrlKey.downArrow)
             icon("arrow.left", CtrlKey.leftArrow)
             icon("arrow.right", CtrlKey.rightArrow)
+        case .navigation: navigationKeys
+        case .symbols: symbolKeys
         case .dpad: dpad
         case .clipboard: icon("doc.on.doc", CtrlKey.clipboard)
         case .pasteImage: pasteImageButton
@@ -1111,6 +1114,51 @@ struct TerminalScreen: View {
         case .dictation: dictationButton
         case .customKeys: customShortcutKeys
         case .agentPanel: agentPanelButton
+        }
+    }
+
+    /// The navigation row: Home, End, PageUp, PageDown.
+    ///
+    /// Four keys on one bar item rather than four items, for the same reason
+    /// `.arrows` is one item: they are a single thing a user wants or does not,
+    /// and splitting them would put four entries in the reorder list for what is
+    /// one row. The bytes are `InputSettings.NavKey`'s — the grammar's own named
+    /// keys — so a button here and a custom shortcut spelling `home` send the
+    /// same sequence.
+    private var navigationKeys: some View {
+        Group {
+            ForEach(InputSettings.NavKey.allCases) { key in
+                Button {
+                    coordinator.terminal?.sendNavigationKey(key)
+                } label: {
+                    Text(key.label)
+                        .font(.system(.footnote, design: .monospaced))
+                        .frame(minWidth: 40, minHeight: 32)
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.roundedRectangle(radius: 6))
+                .accessibilityLabel(key.label)
+            }
+        }
+    }
+
+    /// The symbol row: the punctuation a shell needs that the iOS keyboard
+    /// hides. Each is one ASCII byte typed as text, so it reaches the program
+    /// exactly as the on-screen keyboard's own character would.
+    private var symbolKeys: some View {
+        Group {
+            ForEach(InputSettings.SymbolKey.allCases) { key in
+                Button {
+                    coordinator.terminal?.sendSymbolKey(key)
+                } label: {
+                    Text(key.label)
+                        .font(.system(.footnote, design: .monospaced))
+                        .frame(minWidth: 32, minHeight: 32)
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.roundedRectangle(radius: 6))
+                .accessibilityLabel(key.label)
+            }
         }
     }
 
@@ -1229,6 +1277,39 @@ struct TerminalScreen: View {
         .accessibilityHint("Long press for the shortcut panel")
     }
 
+    /// The Alt key, the exact counterpart of `controlKey`.
+    ///
+    /// One tap arms it for the next key — an ESC goes in front of whatever is
+    /// typed, which is what a terminal means by Meta/Alt and what readline and
+    /// emacs read as a word motion. A double tap locks it, so a run of Alt+keys
+    /// is one gesture. It has no long-press job: the shortcut panel already has
+    /// one home on the Ctrl key, and a second opener would be a gesture with no
+    /// reason to be there. That is the one deliberate difference from Ctrl, and
+    /// it is in the gesture set only — the sticky/lock behaviour is identical,
+    /// which is what keeps the two keys from behaving differently under a thumb.
+    private var altKey: some View {
+        let locked = coordinator.altLocked
+        return Button {
+            let now = Date()
+            let isDoubleTap = now.timeIntervalSince(coordinator.lastAltTap) < 0.4
+            coordinator.lastAltTap = now
+            if isDoubleTap {
+                coordinator.setAltLocked(!coordinator.altLocked)
+            } else {
+                coordinator.press(.alt)
+            }
+        } label: {
+            Text("Alt")
+                .font(.system(.subheadline, design: .monospaced))
+                .frame(minWidth: 44, minHeight: 32)
+                .foregroundStyle(locked ? .white : .primary)
+        }
+        .buttonStyle(.bordered)
+        .tint(locked ? .accentColor : nil)
+        .accessibilityLabel(locked ? "Alt, locked" : "Alt")
+        .accessibilityHint("Double tap to hold it for every key")
+    }
+
     private func key(_ label: String, _ key: CtrlKey) -> some View {
         Button { coordinator.press(key) } label: {
             Text(label)
@@ -1250,7 +1331,7 @@ struct TerminalScreen: View {
 }
 
 enum CtrlKey {
-    case control, escape, tab, enter, backspace, upArrow, downArrow, leftArrow, rightArrow, clipboard
+    case control, alt, escape, tab, enter, backspace, upArrow, downArrow, leftArrow, rightArrow, clipboard
 }
 
 /// Owns the UIKit terminal and the SSH session across SwiftUI updates.
@@ -1274,15 +1355,29 @@ final class TerminalCoordinator {
     /// bar is rebuilt on every settings change and would forget it.
     @ObservationIgnored var lastControlTap = Date.distantPast
 
+    /// When the Alt key was last tapped. Kept apart from `lastControlTap` so a
+    /// tap on Ctrl followed by a tap on Alt is not read as a double tap on
+    /// either — the two keys arm different modifiers, and folding their
+    /// timestamps together would lock the wrong one.
+    @ObservationIgnored var lastAltTap = Date.distantPast
+
     /// Whether Ctrl is locked, mirrored from the terminal view so the bar can
     /// render the state without reaching into a UIKit object during a body.
     var controlLocked = false
+
+    /// Whether Alt is locked, the counterpart of `controlLocked`.
+    var altLocked = false
 
     func setDictationPreview(_ text: String) { dictationPreview = text }
 
     /// Locks or releases Ctrl for every following keystroke.
     func setControlLocked(_ locked: Bool) {
         controlLocked = terminal?.setControlLocked(locked) ?? locked
+    }
+
+    /// Locks or releases Alt for every following keystroke.
+    func setAltLocked(_ locked: Bool) {
+        altLocked = terminal?.setAltLocked(locked) ?? locked
     }
 
     func press(_ key: CtrlKey) {
@@ -1293,6 +1388,9 @@ final class TerminalCoordinator {
             // armed for the next keystroke should count as that keystroke,
             // rather than leaving Ctrl on with no way to see why.
             if controlLocked { setControlLocked(false) } else { terminal.toggleControl() }
+        case .alt:
+            // The same rule for Alt, so the two sticky keys release identically.
+            if altLocked { setAltLocked(false) } else { terminal.toggleAlt() }
         case .escape: terminal.sendEscape()
         case .tab: terminal.sendTab()
         case .enter: terminal.sendEnter()

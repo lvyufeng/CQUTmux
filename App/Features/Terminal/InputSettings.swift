@@ -37,9 +37,11 @@ final class InputSettings {
 
     /// What the accessory bar can show, in the user's order.
     enum Item: String, CaseIterable, Codable, Identifiable {
-        case control, escape, tab
+        case control, alt, escape, tab
         case enter, backspace, keyboard, showKeyboard
         case arrows
+        case navigation
+        case symbols
         case dpad
         case clipboard, pasteImage
         case sessions
@@ -53,6 +55,7 @@ final class InputSettings {
         var label: String {
             switch self {
             case .control: "Ctrl"
+            case .alt: "Alt"
             case .escape: "Esc"
             case .tab: "Tab"
             case .enter: "Enter"
@@ -60,6 +63,8 @@ final class InputSettings {
             case .keyboard: "Keyboard"
             case .showKeyboard: "Show keyboard"
             case .arrows: "Arrows"
+            case .navigation: "Navigation keys"
+            case .symbols: "Symbol keys"
             case .dpad: "D-pad"
             case .clipboard: "Paste"
             case .pasteImage: "Image"
@@ -96,7 +101,28 @@ final class InputSettings {
     /// already do. It is offered as a key because the long press is exactly the
     /// kind of binding nobody discovers, and a user who wants it permanently
     /// visible should not have to guess the gesture to get it.
-    static let optInItems: [Item] = [.history, .showKeyboard, .agentPanel]
+    ///
+    /// Alt, Navigation keys and Symbol keys are here for the same reason and
+    /// with a weaker documentary basis than the rest of the bar: Moshi's
+    /// published keyboard page (getmoshi.app/docs/keyboard, read 2026-10-12)
+    /// enumerates the *toolbar* as "Enter and Backspace, Paste, Keyboard
+    /// show/hide, Shortcut panel, Command or transcription history, D-pad
+    /// movement controls" and says the layout is configurable under
+    /// Settings → Input. It documents no Alt key on the bar, no navigation-key
+    /// row and no symbol row — so none of the three can be claimed as
+    /// transcribed from Moshi, and none is put on the default bar, which the
+    /// checks pin to that documented list exactly. What the page *does*
+    /// document is that Opt/Alt is a first-class modifier in Moshi's binding
+    /// grammar (`M-`, `Opt-`, `Alt+`) and that the grammar's named keys include
+    /// Home, End, PageUp and PageDown — which is why these exist as bar items
+    /// here at all: the tokens were already sendable through a custom shortcut,
+    /// and what was missing was a key that emits them without typing a binding
+    /// first. The D-pad's arrows, Home/End and the symbol row are what a phone
+    /// keyboard cannot reach at all, which is the test this project applies
+    /// when the published material runs out.
+    static let optInItems: [Item] = [
+        .alt, .navigation, .symbols, .history, .showKeyboard, .agentPanel,
+    ]
 
     /// Every item the bar can show, whether or not it is on by default.
     ///
@@ -391,5 +417,110 @@ final class InputSettings {
         // Nothing convertible means this was not a Meta press at all — a paste
         // of accented text, say. Passing it through is the honest answer.
         return out.isEmpty ? data : out
+    }
+
+    // MARK: - Navigation keys
+
+    /// The keys on the navigation row, and the bytes each sends.
+    ///
+    /// These are the terminal's *named keys* — the same set `ShortcutGrammar`
+    /// already accepts (`home`, `end`, `pageup`, `pagedown`), so a key on the
+    /// row and a custom shortcut that spells the same name cannot send different
+    /// bytes. Home and End take the normal (non-application) forms, `CSI H` /
+    /// `CSI F`; an application that has switched the cursor keys to application
+    /// mode gets its own forms from SwiftTerm for the hardware keys, but a
+    /// *button* here has no application-mode state to consult, and a plain
+    /// shell — the case that has no other way to send Home — reads the normal
+    /// form. PageUp and PageDown are `CSI 5 ~` / `CSI 6 ~`, which is what
+    /// xterm's own keys send and what `less`, `vim` and every pager read.
+    ///
+    /// Verified against the grammar, not against Moshi: `ShortcutGrammar`'s
+    /// `namedKeys` table is the source of these four byte sequences, and
+    /// `scripts/input-check.sh` asserts they match it byte for byte. Moshi's
+    /// published keyboard page lists Home, End, PageUp and PageDown only as
+    /// grammar tokens, not as buttons — see `optInItems`.
+    enum NavKey: String, CaseIterable, Identifiable {
+        case home, end, pageUp, pageDown
+
+        var id: String { rawValue }
+
+        /// What the button shows. Short: four keys share a bar row.
+        var label: String {
+            switch self {
+            case .home: "Home"
+            case .end: "End"
+            case .pageUp: "PgUp"
+            case .pageDown: "PgDn"
+            }
+        }
+
+        /// The grammar token that means this key, so a custom shortcut and the
+        /// button are the same binding.
+        var grammarToken: String {
+            switch self {
+            case .home: "home"
+            case .end: "end"
+            case .pageUp: "pageup"
+            case .pageDown: "pagedown"
+            }
+        }
+
+        /// The bytes, taken from the grammar so the two cannot drift. Nil only
+        /// if the grammar ever drops the token, which the check script fails on.
+        var bytes: [UInt8]? {
+            try? ShortcutGrammar.parse(grammarToken).bytes
+        }
+    }
+
+    // MARK: - Symbol keys
+
+    /// The symbols on the symbol row.
+    ///
+    /// These are the characters a shell or a TUI asks for that the letter half
+    /// of the iOS keyboard hides behind two taps, or hides entirely: `|`, `~`,
+    /// `-`, `_`, `\`, `/`, and the two quote characters. Every one is a single
+    /// ASCII byte with no modifier and no escape — the row writes the character
+    /// itself, exactly as if the on-screen keyboard had produced it.
+    ///
+    /// `~`, `_` and `|` are not in `ShortcutGrammar` as tokens: the grammar
+    /// makes them with `S-` on `` ` ``, `-` and `\`. That is a *shortcut*
+    /// spelling, not a second wire format, and the byte is the same character
+    /// either way, so there is no translator to write here — the symbol row
+    /// sends the character itself. Moshi's published keyboard page documents no
+    /// symbol row at all; the set below is this project's choice, and the `\`
+    /// entry exists because a backslash is unreachable on many keyboards'
+    /// first layer.
+    enum SymbolKey: String, CaseIterable, Identifiable {
+        case pipe, tilde, dash, underscore, backslash, slash, singleQuote, doubleQuote
+
+        var id: String { rawValue }
+
+        /// What the button shows.
+        var label: String {
+            switch self {
+            case .pipe: "|"
+            case .tilde: "~"
+            case .dash: "-"
+            case .underscore: "_"
+            case .backslash: "\\"
+            case .slash: "/"
+            case .singleQuote: "'"
+            case .doubleQuote: "\""
+            }
+        }
+
+        /// The byte this key sends. One ASCII byte, always.
+        var byte: UInt8 {
+            switch self {
+            case .pipe: 0x7C
+            case .tilde: 0x7E
+            case .dash: 0x2D
+            case .underscore: 0x5F
+            case .backslash: 0x5C
+            case .slash: 0x2F
+            case .singleQuote: 0x27
+            case .doubleQuote: 0x22
+            }
+        }
     }
 }

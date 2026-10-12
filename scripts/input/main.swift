@@ -331,6 +331,84 @@ check(Set(InputSettings.allItems) == allCases,
 check(InputSettings.allItems.count == allCases.count,
       "allItems lists no item twice")
 
+// MARK: - The Alt key and the new rows are opt-in, not default
+
+// Alt, the navigation row and the symbol row are all real items a user can add,
+// and none of them is on the default bar. Moshi's published keyboard page
+// (getmoshi.app/docs/keyboard, read 2026-10-12) enumerates the toolbar as
+// Enter/Backspace, Paste, Keyboard show/hide, Shortcut panel, history and the
+// D-pad — no Alt key, no navigation row, no symbol row. So the default list
+// above must stay exactly that documented set, and these three can only be
+// opted in. A check here is what keeps a later "let's add Alt by default" from
+// quietly making the default list a claim it cannot support.
+check(InputSettings.allItems.contains(.alt), "Alt can be added to the bar")
+check(InputSettings.allItems.contains(.navigation), "the navigation row can be added")
+check(InputSettings.allItems.contains(.symbols), "the symbol row can be added")
+check(!InputSettings.defaultItems.contains(.alt),
+      "Alt is off by default — Moshi documents no Alt key on the bar")
+check(!InputSettings.defaultItems.contains(.navigation),
+      "the navigation row is off by default")
+check(!InputSettings.defaultItems.contains(.symbols),
+      "the symbol row is off by default")
+
+// MARK: - The navigation row
+
+// The bytes are not invented here: they are the grammar's own named keys, so a
+// button and a custom shortcut spelling `home` are the same binding. Read back
+// through the grammar rather than restated, which is what makes this a check
+// that the two cannot drift.
+equal(Data(InputSettings.NavKey.home.bytes ?? []), [0x1B, 0x5B, 0x48],
+      "Home sends CSI H, the grammar's own home token")
+equal(Data(InputSettings.NavKey.end.bytes ?? []), [0x1B, 0x5B, 0x46],
+      "End sends CSI F")
+equal(Data(InputSettings.NavKey.pageUp.bytes ?? []), [0x1B, 0x5B, 0x35, 0x7E],
+      "PageUp sends CSI 5 ~")
+equal(Data(InputSettings.NavKey.pageDown.bytes ?? []), [0x1B, 0x5B, 0x36, 0x7E],
+      "PageDown sends CSI 6 ~")
+
+// The button's bytes and the grammar's token must be byte-identical, or the two
+// ways to send Home would disagree — the exact drift the grammar table exists
+// to prevent.
+for key in InputSettings.NavKey.allCases {
+    let fromGrammar = (try? ShortcutGrammar.parse(key.grammarToken))?.bytes ?? []
+    check(key.bytes == fromGrammar,
+          "\(key.label)'s button sends what the grammar's \(key.grammarToken) token sends")
+}
+
+// A blank label is a blank button on the bar.
+for key in InputSettings.NavKey.allCases {
+    check(!key.label.isEmpty, "navigation key \(key.rawValue) has a label")
+}
+
+// MARK: - The symbol row
+
+// One ASCII byte each, no modifier and no escape: these are typed as text, so a
+// stray ESC prefix would turn `~` into Meta-~ on the wire.
+equal(Data([InputSettings.SymbolKey.pipe.byte]), [0x7C], "the pipe key sends |")
+equal(Data([InputSettings.SymbolKey.tilde.byte]), [0x7E], "the tilde key sends ~")
+equal(Data([InputSettings.SymbolKey.dash.byte]), [0x2D], "the dash key sends -")
+equal(Data([InputSettings.SymbolKey.underscore.byte]), [0x5F], "the underscore key sends _")
+equal(Data([InputSettings.SymbolKey.backslash.byte]), [0x5C], "the backslash key sends \\")
+equal(Data([InputSettings.SymbolKey.slash.byte]), [0x2F], "the slash key sends /")
+equal(Data([InputSettings.SymbolKey.singleQuote.byte]), [0x27], "the quote key sends '")
+equal(Data([InputSettings.SymbolKey.doubleQuote.byte]), [0x22], "the double-quote key sends \"")
+
+// Every symbol is printable ASCII and nothing else. A symbol that composed to a
+// multi-byte character would need the Option-as-Meta translator to stay out of
+// its way, which is a dependency this row deliberately does not have.
+for key in InputSettings.SymbolKey.allCases {
+    check((0x20...0x7E).contains(key.byte),
+          "symbol \(key.rawValue) is a single printable ASCII byte")
+    check(!key.label.isEmpty, "symbol \(key.rawValue) has a label")
+}
+
+// The symbol row must not overlap the grammar's own named keys: a `dash` or
+// `plus` token exists because the bare characters are separators, and the row
+// sending a bare `-` is the literal character, which is what the grammar's
+// `dash` produces too — the same byte, arrived at two ways.
+check(InputSettings.SymbolKey.dash.byte == (try? ShortcutGrammar.parse("dash").bytes.first),
+      "the dash key sends the same byte the grammar's dash token does")
+
 // Put the store back, so running this check twice does not change what a
 // second run measures.
 writer.setCorner(.bottomTrailing, to: InputSettings.defaultCorner(.bottomTrailing))

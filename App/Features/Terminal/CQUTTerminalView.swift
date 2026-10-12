@@ -758,6 +758,74 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
         controlModifier = true
     }
 
+    /// Alt is a sticky modifier in exactly the shape Ctrl is: a tap arms it for
+    /// the next key, a double tap locks it.
+    ///
+    /// It is SwiftTerm's own `metaModifier`, not a second translator. That flag
+    /// is the framework's "Option held down" — it sends an ESC before the text
+    /// the user types and clears itself once it has, which is the same contract
+    /// `controlModifier` has. Reusing it is what keeps the bar's Alt key from
+    /// disagreeing with the hardware keyboard's Option: for an ordinary key both
+    /// end up in the same branch of SwiftTerm's `commitTextInput` and send the
+    /// same bytes (Alt then `e` is `1B 65` either way).
+    ///
+    /// It is deliberately *not* `InputSettings.optionMeta`: that rewrites an
+    /// already-composed character after the fact, and is the hardware keyboard
+    /// setting. The two are separate mechanisms for separate problems and this
+    /// key is the sticky one. They are not quite interchangeable, and the one
+    /// place they differ is worth stating rather than implying otherwise: with
+    /// Option-as-Meta on *and* this lock held, a hardware Option on an accented
+    /// key goes through `optionMeta` first and sends the decomposed ASCII
+    /// (`é` → `1B 65`), while this flag would prefix the composed character
+    /// (`1B C3 A9`). That setting defaults off, so the paths coincide in the
+    /// default configuration — but "cannot send different bytes" would be one
+    /// clause too strong.
+    func toggleAlt() { metaModifier.toggle() }
+
+    /// Whether Alt is being held down for every key rather than for the next
+    /// one. The counterpart of `isControlLocked`, and set the same way — by
+    /// re-arming SwiftTerm's own flag after each keystroke, because SwiftTerm's
+    /// clearing of it is also what tells its accessory view to redraw.
+    private(set) var isAltLocked = false
+
+    /// Locks or releases Alt. Returns the state after the change, so the bar can
+    /// label itself without reading back — the same contract `setControlLocked`
+    /// has.
+    @discardableResult
+    func setAltLocked(_ locked: Bool) -> Bool {
+        isAltLocked = locked
+        metaModifier = locked
+        return locked
+    }
+
+    /// Re-arms the Alt lock after a keystroke, if it is on.
+    ///
+    /// Kept beside `rearmControlLockIfNeeded` and called from the same two
+    /// places, so the two modifiers stick identically. A modifier that behaves
+    /// differently from the one next to it reads as "Alt is broken", which is
+    /// exactly the bug this pairing avoids.
+    func rearmAltLockIfNeeded() {
+        guard isAltLocked else { return }
+        metaModifier = true
+    }
+
+    /// One navigation key: Home, End, PageUp or PageDown.
+    ///
+    /// The bytes come from `InputSettings.NavKey`, which reads them from the
+    /// same `ShortcutGrammar` table a custom shortcut spelling `home` or
+    /// `pageup` goes through — so a button and a binding cannot send different
+    /// sequences.
+    func sendNavigationKey(_ key: InputSettings.NavKey) {
+        guard let bytes = key.bytes else { return }
+        write(Data(bytes))
+    }
+
+    /// One symbol from the symbol row. A single ASCII byte, typed as text, so
+    /// it arrives exactly as the on-screen keyboard's own character would.
+    func sendSymbolKey(_ key: InputSettings.SymbolKey) {
+        write(Data([key.byte]))
+    }
+
     func sendEscape() { write(Data([0x1B])) }
 
     func sendTab() { write(Data([0x09])) }
@@ -986,6 +1054,7 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     private func write(_ data: Data) {
         transport.send(data)
         rearmControlLockIfNeeded()
+        rearmAltLockIfNeeded()
     }
 
     /// A key from a hardware keyboard or the software one, which SwiftTerm
@@ -996,6 +1065,7 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
     override func insertText(_ text: String) {
         super.insertText(text)
         rearmControlLockIfNeeded()
+        rearmAltLockIfNeeded()
     }
 
     #if DEBUG
@@ -1070,6 +1140,15 @@ final class CQUTTerminalView: TerminalView, TerminalViewDelegate, UIGestureRecog
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         transport.send(InputSettings.optionMeta(Data(data), enabled: optionIsMeta))
+        // The sticky-modifier re-arm belongs on the delegate, not only in
+        // `write`: SwiftTerm's `metaModifier` and `controlModifier` are cleared
+        // *inside* its own send path, so a keystroke that arrives through the
+        // delegate (a keyboard press, the sticky Alt's own ESC+char) is exactly
+        // the one that would otherwise drop a lock. The bar's own buttons go
+        // through `write`, which re-arms too; a key that arrives here has not
+        // been through `write` at all.
+        rearmControlLockIfNeeded()
+        rearmAltLockIfNeeded()
     }
 
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
