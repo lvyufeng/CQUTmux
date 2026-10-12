@@ -23,7 +23,10 @@ ok() { PASS=$((PASS + 1)); printf 'PASS  %s\n' "$1"; }
 fail() { printf 'FAIL  %s\n' "$1"; exit 1; }
 
 node --input-type=module -e "
-import { parseTranscript, messageFromRecord } from '$MOD'
+import { parseTranscript, parseTranscriptFor, agentIds, claudeProjectDir, readTranscript } from '$MOD'
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 
 let pass = 0
 const ok  = (c, m) => { if (!c) { console.log('FAIL  ' + m); process.exit(1) } pass++; console.log('PASS  ' + m) }
@@ -155,6 +158,179 @@ ok(stringy[0].usage && stringy[0].usage.input_tokens === undefined
 const noUsage = parseTranscript(JSON.stringify({ type: 'user', uuid: 'u14',
   message: { role: 'user', content: 'hello' } }))
 ok(noUsage[0].usage === null, 'a message with no usage reports none')
+
+// MARK: - The agent registry
+//
+// The reader is a registry, one entry per agent, rather than one parser with a
+// per-agent branch threaded through it. The parsers must not be interchangeable:
+// a Claude record read with Codex's rules (or the reverse) is a wrong answer
+// that renders fine, so the agent is named and a record is only ever read by the
+// parser that owns it.
+
+const ids = agentIds()
+ok(ids[0] === 'claude-code', 'Claude Code is the first agent in the registry (got ' + ids[0] + ')')
+ok(ids.includes('codex'), 'Codex is a registered agent')
+
+// The named Claude parser and the back-compatible default are the same reader:
+// 'parseTranscript' is the old entry point and must not drift from the registry.
+ok(JSON.stringify(parseTranscriptFor('claude-code', lines)) === JSON.stringify(parseTranscript(lines)),
+   'the named Claude parser agrees with the default entry point')
+
+// An agent the registry does not know yields nothing rather than throwing — the
+// same 'no chat yet' degradation an unreadable log gets.
+ok(parseTranscriptFor('some-future-agent', lines).length === 0,
+   'an unregistered agent parses to nothing, and does not throw')
+
+// A Claude record fed to the Codex parser must not be read as a Codex one: both
+// are JSON with a 'type', and a shared parser would read this line.
+ok(parseTranscriptFor('codex', lines).length === 0,
+   'a Claude transcript is not read by the Codex parser')
+
+// MARK: - Codex (written from openai/codex source, not a real rollout)
+//
+// These fixtures are built from the documented shape — a rollout line of
+// '{ timestamp, type, payload }' whose 'type' is 'response_item' — and NOT from
+// a captured file. This machine has no ~/.codex/sessions tree, so these checks
+// prove the parser reads the shape it was written for, not that the shape is
+// what Codex actually writes. See the UNVERIFIED note in transcript.mjs.
+
+const codexLines = [
+  JSON.stringify({ timestamp: '2026-01-01T00:00:00Z', type: 'session_meta',
+    payload: { id: 'thread-1', cwd: '/work/demo', cli_version: '0.1', originator: 'codex_cli' } }),
+  JSON.stringify({ timestamp: '2026-01-01T00:00:01Z', type: 'turn_context',
+    payload: { cwd: '/work/demo', model: 'gpt-5-codex', approval_policy: 'never' } }),
+  JSON.stringify({ timestamp: '2026-01-01T00:00:02Z', type: 'response_item',
+    payload: { type: 'message', role: 'user',
+      content: [{ type: 'input_text', text: 'list the files' }] } }),
+  JSON.stringify({ timestamp: '2026-01-01T00:00:03Z', type: 'response_item',
+    payload: { type: 'reasoning', summary: [{ type: 'summary_text', text: 'they want a listing' }] } }),
+  JSON.stringify({ timestamp: '2026-01-01T00:00:04Z', type: 'response_item',
+    payload: { type: 'function_call', name: 'shell', call_id: 'c1', arguments: '{\"command\":\"ls\"}' } }),
+  JSON.stringify({ timestamp: '2026-01-01T00:00:05Z', type: 'response_item',
+    payload: { type: 'function_call_output', call_id: 'c1', output: 'a.txt' } }),
+  JSON.stringify({ timestamp: '2026-01-01T00:00:06Z', type: 'response_item',
+    payload: { type: 'message', role: 'assistant',
+      content: [{ type: 'output_text', text: 'Just a.txt.' }] } }),
+].join('\n')
+
+const codex = parseTranscriptFor('codex', codexLines)
+ok(codex.length === 5, 'a Codex rollout reads as five messages (got ' + codex.length + ')')
+ok(codex[0].role === 'user' && codex[0].blocks[0].text === 'list the files',
+   'a Codex input_text message is the user speaking')
+ok(codex[1].blocks[0].kind === 'thinking' && codex[1].blocks[0].text === 'they want a listing',
+   'a Codex reasoning summary is reasoning, not the answer')
+ok(codex[2].blocks[0].kind === 'tool' && codex[2].blocks[0].name === 'shell',
+   'a Codex function_call is a tool block with its name')
+ok(codex[2].blocks[0].input.includes('command'),
+   'and its arguments string is carried through as JSON text')
+ok(codex[3].role === 'tool' && codex[3].blocks[0].text === 'a.txt',
+   'a Codex function_call_output is a tool result, not the user')
+ok(codex[3].blocks[0].id === 'c1', 'the Codex result names the call it answers')
+ok(codex[2].blocks[0].id === 'c1', 'and the call carries the same id')
+
+// session_meta and turn_context are not conversation. A parser that treated any
+// 'payload' as a message would surface the session's own metadata as a turn.
+ok(!codex.some(m => JSON.stringify(m).includes('codex_cli')),
+   'the session_meta line does not become a message')
+
+// A developer/system message is the agent's scaffolding, not the conversation.
+const codexSystem = parseTranscriptFor('codex', JSON.stringify({ type: 'response_item',
+  payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'be terse' }] } }))
+ok(codexSystem.length === 0, 'a Codex developer message stays out of the conversation')
+
+// An item type this build has not seen is dropped, not guessed at.
+const codexUnknown = parseTranscriptFor('codex', JSON.stringify({ type: 'response_item',
+  payload: { type: 'some_future_item', text: 'hello' } }))
+ok(codexUnknown.length === 0, 'an unknown Codex item type is dropped')
+
+// An image input contributes nothing, for the same reason a Claude image does.
+const codexImage = parseTranscriptFor('codex', JSON.stringify({ type: 'response_item',
+  payload: { type: 'message', role: 'user', content: [
+    { type: 'input_text', text: 'look' },
+    { type: 'input_image', image_url: 'data:image/png;base64,' + 'A'.repeat(50000) } ] } }))
+ok(codexImage[0].blocks.length === 1 && codexImage[0].blocks[0].text === 'look',
+   'a Codex image input contributes nothing to the text')
+
+// The same guarantees the Claude parser gives: garbage and a half-written tail
+// never throw.
+ok(parseTranscriptFor('codex', 'not json').length === 0, 'garbage is dropped by the Codex parser too')
+ok(parseTranscriptFor('codex', codexLines + '\n{\"type\":\"response').length === 5,
+   'a truncated final Codex line still leaves the rest readable')
+
+// MARK: - Finding the right agent's log, on disk
+//
+// The registry has to choose *which* agent's session a directory is talking
+// about, from real files. These build a throwaway HOME with one Claude project
+// tree and one Codex rollout tree and read them back through 'readTranscript'.
+
+const home = mkdtempSync(join(tmpdir(), 'cqutmux-transcript-'))
+const project = '/work/demo'
+
+try {
+  // Claude Code: ~/.claude/projects/<slug>/<session>.jsonl
+  const claudeDir = claudeProjectDir(project, home)
+  mkdirSync(claudeDir, { recursive: true })
+  const claudePath = join(claudeDir, '8f14e45f-ceea-467a-9d0a-2b1c3d4e5f60.jsonl')
+  writeFileSync(claudePath, JSON.stringify({ type: 'user', uuid: 'u1',
+    message: { role: 'user', content: 'from claude' } }))
+
+  // Codex: ~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<id>.jsonl
+  const codexDir = join(home, '.codex', 'sessions', '2026', '01', '01')
+  mkdirSync(codexDir, { recursive: true })
+  const codexPath = join(codexDir, 'rollout-2026-01-01T00-00-00-abcdef01-2345-6789-abcd-ef0123456789.jsonl')
+  writeFileSync(codexPath, [
+    JSON.stringify({ timestamp: '2026-01-01T00:00:00Z', type: 'session_meta',
+      payload: { id: 't1', cwd: project } }),
+    JSON.stringify({ timestamp: '2026-01-01T00:00:01Z', type: 'response_item',
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'from codex' }] } }),
+  ].join('\n'))
+
+  // The slug directory is built from the project path, so the reader finds the
+  // Claude tree without a scan. Exported so this check does not restate the rule.
+  ok(claudeDir.endsWith('projects/-work-demo'), 'the Claude project slug is derived from the path')
+
+  // Claude's log is newer: the reader must name Claude Code and its session.
+  const now = Date.now()
+  utimesSync(codexPath, new Date(now - 10000), new Date(now - 10000))
+  utimesSync(claudePath, new Date(now), new Date(now))
+
+  const claudePick = await readTranscript(project, 200, home)
+  ok(claudePick.found === true, 'the newest log is found across agents')
+  ok(claudePick.agent === 'claude-code', 'the Claude log reports its agent (got ' + claudePick.agent + ')')
+  ok(claudePick.session === '8f14e45f', 'and a short session id (got ' + claudePick.session + ')')
+  ok(claudePick.messages[0].blocks[0].text === 'from claude', 'with the Claude message')
+  // The pre-existing wire fields are untouched: an older app still decodes this.
+  ok(claudePick.file === '8f14e45f-ceea-467a-9d0a-2b1c3d4e5f60.jsonl'
+     && claudePick.total === 1,
+     'the file and total fields the app already reads are unchanged')
+
+  // Codex's rollout is newer now: it must win, and be named as Codex.
+  utimesSync(claudePath, new Date(now - 20000), new Date(now - 20000))
+  utimesSync(codexPath, new Date(now), new Date(now))
+
+  const codexPick = await readTranscript(project, 200, home)
+  ok(codexPick.found === true && codexPick.agent === 'codex',
+     'the newer Codex rollout wins and is named (got ' + codexPick.agent + ')')
+  ok(codexPick.messages[0].blocks[0].text === 'from codex', 'with the Codex message')
+  ok(codexPick.session === 'abcdef01', 'and the Codex session id from its filename (got ' + codexPick.session + ')')
+
+  // A Codex rollout whose recorded cwd is a different project must not be
+  // offered as this directory's session — the cwd is the only project link.
+  const otherCodex = join(codexDir, 'rollout-2026-01-02T00-00-00-deadbeef-2345-6789-abcd-ef0123456789.jsonl')
+  writeFileSync(otherCodex, JSON.stringify({ timestamp: '2026-01-02T00:00:00Z', type: 'session_meta',
+    payload: { id: 't2', cwd: '/work/somewhere-else' } }))
+  utimesSync(otherCodex, new Date(now + 10000), new Date(now + 10000))
+  const stillCodex = await readTranscript(project, 200, home)
+  ok(stillCodex.session === 'abcdef01',
+     'a Codex rollout for another directory is not this directory\\'s session (got ' + stillCodex.session + ')')
+
+  // No log for the directory at all degrades to 'no session', not an error.
+  const none = await readTranscript('/work/never-used', 200, home)
+  ok(none.found === false && none.messages.length === 0,
+     'a directory with no session reads as no session')
+} finally {
+  rmSync(home, { recursive: true, force: true })
+}
 
 console.log('')
 console.log('TRANSCRIPT_PASS  (' + pass + ' checks)')

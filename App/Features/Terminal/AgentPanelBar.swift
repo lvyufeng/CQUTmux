@@ -46,12 +46,19 @@ enum AgentPanelPages {
     /// Which agents this session involves, in `AgentKind.allCases` order.
     ///
     /// Keyed on the raw `source` string an event carries rather than a display
-    /// name, because that is what the host's hook sends. An agent we have no
-    /// panel for — kimi-code, antigravity — is deliberately absent rather than
-    /// present and empty: a tab of buttons that do nothing is worse than no tab.
-    /// An agent with a *documented but empty* panel (Cursor) is a different
-    /// case and does appear, because the tab is real and the emptiness is the
-    /// honest answer.
+    /// name, because that is what the host's hook sends.
+    ///
+    /// This is a plain intersection of the two source sets and nothing more —
+    /// it does not consult whether a kind actually has buttons. What keeps an
+    /// agent out of the panel is `AgentKind` not having a case for it: the hook
+    /// sources we have no panel for (kimi-code, antigravity) have no case, so
+    /// they cannot match. That is a property of the enum, not of this function,
+    /// and it only holds while every case has a non-empty page. A kind added
+    /// with an empty page would get a tab of dead buttons here — `AgentPanel`
+    /// is where that has to be prevented. Cursor is the deliberate exception
+    /// and does ship empty: Moshi documents a Cursor panel, we have no
+    /// published button list for Cursor's CLI, and an empty real tab is a
+    /// better answer than a fabricated one.
     static func detect(fromSources sources: [String]) -> [AgentKind] {
         AgentKind.allCases.filter { kind in
             sources.contains { kind.sources.contains($0.lowercased()) }

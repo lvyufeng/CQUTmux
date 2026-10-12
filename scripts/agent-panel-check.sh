@@ -20,7 +20,7 @@
 # `textInputAutocapitalization`), which `swiftc` on macOS rejects. But the three
 # helpers this file most needs to check (`AgentPanelPages.detect`,
 # `controlButtons`, `muxButtons`) and the `PanelButton` they return are pure
-# Foundation: the first 132 lines of the file, up to the closing brace of
+# Foundation: the first ~139 lines of the file, up to the closing brace of
 # `AgentPanelPages`, contain no SwiftUI at all (the `import SwiftUI` on line 1
 # is the only mention, and it is the same module `Foundation` re-exports the
 # types from). So the slice is extracted *from the real source* on each run —

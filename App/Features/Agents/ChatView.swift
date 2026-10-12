@@ -47,14 +47,19 @@ struct ChatView: View {
     /// turn is running and long enough not to matter when it is not.
     private let refresh = Duration.seconds(3)
 
-    /// The agent whose log this reads.
+    /// The agent named in the header, from the transcript's own report.
     ///
-    /// A constant because the gateway's transcript reader knows exactly one
-    /// agent's log format (`~/.claude/projects/...`), so naming any other here
-    /// would be a header that says something the reader cannot deliver. It
-    /// becomes a parameter when a second agent's transcript is readable, not
-    /// before.
-    private static let agentName = "Claude Code"
+    /// The gateway reads more than one agent's log now and says which one wrote
+    /// the session. This names it through `AgentEvent.sourceLabel` — the same
+    /// table the Inbox uses — rather than a second list here, so one agent
+    /// cannot read as "Claude Code" on one surface and something else on the
+    /// other. A gateway that predates the field leaves it nil, and the header
+    /// says "Agent" rather than assuming Claude Code: naming the wrong agent is
+    /// a header that lies about what is running, which is worse than a vague one.
+    private static func agentLabel(for transcript: AgentTranscript) -> String {
+        guard let id = transcript.agent, !id.isEmpty else { return "Agent" }
+        return AgentEvent(id: 0, at: "", source: id, kind: .notice).sourceLabel
+    }
 
     var body: some View {
         Group {
@@ -255,9 +260,9 @@ struct ChatView: View {
             let next = try await client.transcript(path: path)
             transcript = next
             header = ChatHeader(
-                agent: Self.agentName,
+                agent: Self.agentLabel(for: next),
                 model: ChatHeader.model(in: next.messages),
-                session: ChatHeader.session(fromFile: next.file)
+                session: next.session ?? ChatHeader.session(fromFile: next.file)
             )
             // The changes are fetched with the transcript so the header can name
             // them. A failure here is not the chat's failure — the transcript

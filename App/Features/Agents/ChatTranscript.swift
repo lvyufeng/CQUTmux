@@ -19,6 +19,20 @@ struct AgentTranscript: Codable {
     /// Set when the gateway could not read the log at all, which is different
     /// from there being no session yet.
     var error: String?
+    /// Which agent wrote the session, as its hook source id — "claude-code",
+    /// "codex" — or nil from a gateway that predates the field. The app names
+    /// it through the same mapping the Inbox uses (`AgentEvent.sourceLabel`),
+    /// so one agent cannot read as two names across the two surfaces.
+    var agent: String?
+    /// The session's short id, as the gateway read it from the log's own naming.
+    ///
+    /// The gateway computes this because each agent names its log differently —
+    /// Claude Code `<uuid>.jsonl`, Codex `rollout-<timestamp>-<thread-id>.jsonl`
+    /// — and that convention belongs to the agent. Reading it off the filename
+    /// here would mean a second copy of each convention in Swift, drifting from
+    /// the one in `transcript.mjs`. Nil from an older gateway; the header then
+    /// falls back to the filename.
+    var session: String?
 
     static let empty = AgentTranscript(found: false, messages: [])
 }

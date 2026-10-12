@@ -106,10 +106,14 @@ struct ChatHeader: Equatable {
     /// A transcript filename's session id, shortened to something a header can
     /// hold.
     ///
-    /// Claude Code names its log `<session-uuid>.jsonl`. The whole uuid is a
-    /// header nobody can read and no layout can fit, so the first eight
-    /// characters stand in — enough to tell two sessions apart at a glance,
-    /// which is the only job the header has for it.
+    /// The fallback for a gateway that did not compute the id itself. Claude
+    /// Code names its log `<session-uuid>.jsonl`, and Codex
+    /// `rollout-<timestamp>-<thread-id>.jsonl`; this strips the `.jsonl` and
+    /// takes the leading run. The whole uuid is a header nobody can read and no
+    /// layout can fit, so the first eight characters stand in — enough to tell
+    /// two sessions apart at a glance, which is the only job the header has for
+    /// it. The per-agent naming rule lives in `transcript.mjs` (the gateway
+    /// sends `session`); this is only what is left when it does not.
     static func session(fromFile file: String?) -> String? {
         guard let file, !file.isEmpty else { return nil }
         let base = (file as NSString).lastPathComponent
