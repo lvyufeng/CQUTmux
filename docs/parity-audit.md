@@ -1015,9 +1015,14 @@ the side-by-side pane with nothing to say.
 
 - The Browse tab has syntax highlighting (`FileView` →
   `SyntaxPalette.attributed` → `SyntaxHighlighter`) and can open a file from a
-  past revision (`CommitBrowserView`). What it lacks is *blame*: no per-line
-  attribution, and the commit list is a plain list rather than anything
-  annotated.
+  past revision (`CommitBrowserView`). Blame's data layer now exists —
+  `GET /blame` (`revision.mjs` → `HookClient.blame(path:rev:file:)` →
+  `RevisionBlame`) returns per-line hash, author, time, summary, boundary and
+  committed flags, checked by `scripts/blame-check.sh` (40) against a real
+  throwaway repository — but nothing renders it: no view calls `blame`, so the
+  attribution reaches the app and stops. The commit list is likewise still a
+  plain list rather than anything annotated. The gap is now the screen, not the
+  wire.
 - The Live Activity carries the four lifecycle phases — approval needed,
   working, done and session ended — and the Lock Screen and the Island carry
   Allow/Deny buttons, so the answer no longer has to be given in the app:
