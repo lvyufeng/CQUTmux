@@ -107,7 +107,7 @@ first shipped with, both folded into the fix.
 
 | Status | Count |
 |---|---|
-| closed | 73 |
+| closed | 78 |
 | partial | 2 |
 | deliberate-divergence | 1 |
 | missing | 0 |
@@ -115,7 +115,10 @@ first shipped with, both folded into the fix.
 (The machine-readable `counters` field in `parity-audit.json` is recomputed from
 the entries themselves, so the table above and that field agree. The theme
 gallery moved from `deliberate-divergence` to `closed` on 2026-10-11 — see the
-addendum — which is the 73/1 split here rather than the earlier 72/2.)
+addendum — which is the 78/1 split here rather than the earlier 72/2. This
+table read 73 until 2026-10-13, five behind the JSON it claims to agree with:
+it had been updated by hand each time an entry closed, and five closures went
+into the entries without a matching edit here.)
 
 **Read the numbers with care.** "Closed" means a counterpart exists and was
 traced end to end by a reader that was trying to refute it. It does not mean
@@ -983,47 +986,60 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   `scripts/context-check.sh` (32 checks) runs plain node; checking tmux before
   zellij reddens the 3 nested cases.
 
-### The 15 that are still open, grouped by what is actually missing
+### The open list, grouped by what is actually missing
 
 A second independent pass on 2026-10-10 rewrote each of these with file:line
-evidence. What is missing, in one line each:
+evidence, and a re-check on 2026-10-12 corrected four entries whose named part
+had since shipped. The heading previously read "The 15 that are still open" and
+the list had drifted both ways — four entries described work that was already
+done, and one line had been orphaned by an edit, leaving a sentence fragment
+with no owner. The count is deliberately no longer in the heading: it was wrong
+for longer than it was right, and a number in a heading is not re-derived by
+anyone re-reading the list.
 
 **Moved out of the half-built list:** theme import's missing half — the gallery it imports *from* — is now built as a bundled catalogue of 40 real palettes rather than a client for Moshi's 570-theme `/themes` server. Browsing, searching and re-fetching by slug all work; the source and the count are the deliberate divergence, and the screen says so.
 
 **Half-built (the surrounding feature works, the named part does not)**
-- The session picker has no Recent tab; recents live in the Code page's Go To
-  Directory sheet.
-- The app resumes a backgrounded session on foreground, but nothing restores the
-  last host/session at cold launch.
-- Chat mode's composer takes typed text only — the mic and image buttons are in
-  the bar it replaces.
-- The interactive session can now be given a locale (`Settings → Integrations`, exported as both `LANG` and `LC_ALL` and carried by SSH and Mosh), but nothing writes `~/.zshenv` or a non-interactive `~/.bashrc`, so shells the agent spawns itself still see the host's default locale. The rc-injection half is unbuilt.
-- The diff viewer does take the custom font (that half is done); `.ttc`/`.otc`
-  handling and the fallback are not.
-  does not exist.
-- Inbox rows now carry all five named categories (approval_required,
-  task_complete, session_started, tool_running, tool_finished) as well as the
-  needs-you/working/done column, which is derived from them.
-- Chat View renders message blocks and now separates Markdown prose from
-  fenced code and inline images; the remaining gaps there are the mini diffs,
-  task groups and plan cards of entry 54.
-- Chat View opens both from the terminal toolbar's agent icon and from the Code
-  pane's Chat segment, and its header now names the agent, the newest model and
-  the session and carries the diff and browser-preview controls.
-- Tool cards now draw the call's shape: an edit as a mini diff with a
-  `+n −m` collapsed row, a todo list as a checklist, a plan as rendered
-  Markdown. An unrecognised tool still falls back to the raw-JSON card.
-- Side-by-side diff and line-level modify highlights are absent.
-- The Browse tab walks the tree and opens files, but as plain monospaced text —
-  no syntax highlighting, no historical commits.
-- The Live Activity shows a pending approval but is static — it cannot be
-  answered from the Lock Screen or the Island.
-- The Live Activity now carries the four lifecycle phases — approval needed,
-  working, done and session ended — in addition to the pending count, so
-  task-complete and tool-running events reach it and a finished session lingers
-  before dismissing. What it still cannot do is take the answer: the Lock Screen
-  and the Island show the approval but the buttons remain in the app (entry 61).
 
-**Genuinely absent**
-- APNs push-to-start. No token registration on either side; the host's APNs
-  sender emits alert pushes only. This is the one `missing` entry.
+Re-checked entry by entry against the working tree on 2026-10-13 — eight of the
+bullets below were rewritten or removed in that pass, because this list had
+drifted the same way the heading had, and in both directions: several described
+work that had already shipped, and one had been updated to describe work that
+had not, in a way that made the side-by-side pane sound more capable than it is
+(below). The closures it shed — the session picker's Recent tab, cold-launch
+restore, the locale rc injection, `.ttc`/`.otc` handling, the tool cards' mini
+diffs and task lists — are in the commit history and the progress list above.
+
+- The unified diff and the side-by-side pane both highlight whole lines and
+  neither marks the changed span *within* a line. `SideBySideDiff` has a
+  `modified` row kind, but it is a row kind: it pairs a removed line with an
+  added one and `CodePanelView` tints both entire lines (`.red` left, `.green`
+  right). A reader who took "intra-line" from the earlier wording of this bullet
+  would be reading a capability that is not there. What is missing is the
+  character-level diff inside a changed line, in either view.
+- The Browse tab has syntax highlighting (`FileView` →
+  `SyntaxPalette.attributed` → `SyntaxHighlighter`) and can open a file from a
+  past revision (`CommitBrowserView`). What it lacks is *blame*: no per-line
+  attribution, and the commit list is a plain list rather than anything
+  annotated.
+- Chat mode's composer takes typed text and now has the attachment button, but
+  not the mic: dictation is started from the accessory bar's mic key
+  (`dictationButton`), which chat mode replaces wholesale. A dictated phrase
+  reaches the composer only if dictation was started before entering chat.
+- The Live Activity carries the four lifecycle phases — approval needed,
+  working, done and session ended — and the Lock Screen and the Island carry
+  Allow/Deny buttons, so the answer no longer has to be given in the app:
+  `Widgets/ApprovalIntent.swift` writes a `MobileDecision`, and
+  `HookClient.drainMobileDecisions` (drained in `InboxView`) sends it on the
+  next poll. The half that is still unverified is that path *on a signed
+  build* — the buttons and the intent need the App Group and Live Activity
+  entitlements, which needs a paid profile. What is checked headlessly is the
+  rule the buttons rest on: `scripts/activity-content-check.sh` (entry 61).
+
+**Genuinely absent:** nothing. The last `missing` entry — APNs push-to-start — is
+now `partial`: the host builds and addresses both push shapes and the app
+registers tokens on both sides, and what stops it short of `closed` is delivery,
+which needs an `aps-environment` entitlement and a physical device. See the two
+`partial` rows at the top of this file. The heading is kept because the useful
+reading is not "no gaps" but "no gap whose *cause* is unbuilt code" — everything
+above is either a named half of a working feature or a limit of the environment.
