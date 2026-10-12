@@ -514,7 +514,13 @@ grep -q "serving" "$OUT/diff.txt" || fail "diff did not start its viewer (see $O
 ok "diff starts a viewer and prints where it is"
 
 DIFF_HTML="$(curl -s -m 5 "http://127.0.0.1:$DIFF_PORT/")"
-echo "$DIFF_HTML" | grep -q "changed file(s)" || fail "the diff page does not summarise the repo"
+# `printf '%s'` into grep, not `echo "$DIFF_HTML" | grep`: this page is ~175KB
+# and `grep -q` exits on its first match, so `echo` takes SIGPIPE mid-write and
+# `pipefail` turns the *successful* grep into a failed pipeline. The symptom is
+# a FAIL on a page that does contain the string — which is what this check did
+# from the day the viewer grew past the pipe buffer, and why it is written this
+# way rather than the shorter way the other greps in this file use.
+grep -q "changed file(s)" <<<"$DIFF_HTML" || fail "the diff page does not summarise the repo"
 ok "the diff page summarises the repository"
 
 # A server a check starts has to be *stoppable*, or the check leaks a process
@@ -596,5 +602,217 @@ if CQUT_CLI_UNUSED=1 run usage --port 24997 > "$OUT/usage.txt" 2>&1; then
 fi
 grep -q 'no gateway' "$OUT/usage.txt" || fail "usage blamed the wrong thing"
 ok "usage explains that it needs a running gateway"
+
+# MARK: - unset, the inverse of set
+
+# `unset` has to remove the line `set` wrote, not write the default value: a
+# written default is indistinguishable from a deliberate choice, so a later
+# change to the built-in default would silently not reach this host. The only
+# encoding of "use the default" is the absence of the key.
+UNSET_CFG="$(mktemp -d)/config.toml"
+CQUTMUX_CONFIG="$UNSET_CFG" run set usage-collection off > /dev/null || fail "set failed before unset"
+CQUTMUX_CONFIG="$UNSET_CFG" run unset usage-collection > "$OUT/unset.txt" 2>&1 \
+  || fail "unset exited non-zero on a key that was set"
+grep -q 'usage_collection' "$UNSET_CFG" \
+  && fail "unset left the key in the file: $(cat "$UNSET_CFG")"
+CQUTMUX_CONFIG="$UNSET_CFG" run set usage-collection > "$OUT/unsetget.txt" 2>&1
+grep -q '(unset)' "$OUT/unsetget.txt" \
+  || fail "after unset the key did not read back as unset: $(cat "$OUT/unsetget.txt")"
+ok "unset removes the key set wrote, so the default applies again"
+
+# Unsetting a key that was never set is a success, not an error: the caller
+# asked for a state and that state already holds. Anything else makes `unset`
+# unusable in a script that does not first check.
+if ! CQUTMUX_CONFIG="$UNSET_CFG" run unset suppress-nested-agent-push > "$OUT/unset2.txt" 2>&1; then
+  fail "unset failed on a key that was never set"
+fi
+grep -q 'not set' "$OUT/unset2.txt" \
+  || fail "unset did not say the key was already unset: $(cat "$OUT/unset2.txt")"
+ok "unset on a never-set key succeeds and says so"
+
+# A key currently holding its *default* value still has a line, and unset must
+# remove it — the key that is set is a fact about the file, not about the value
+# comparing equal to the default.
+CQUTMUX_CONFIG="$UNSET_CFG" run set scan-ports all > /dev/null || fail "set scan-ports failed"
+grep -q 'scan_ports = "all"' "$UNSET_CFG" || fail "set did not write scan_ports"
+CQUTMUX_CONFIG="$UNSET_CFG" run unset scan-ports > /dev/null || fail "unset scan-ports failed"
+grep -q 'scan_ports' "$UNSET_CFG" \
+  && fail "unset kept a key that merely held its default value"
+ok "unset removes a key even when it holds the default value"
+
+# The user's own comments are theirs. Removing a key must not rewrite or drop
+# the rest of the file — the same reason `set` edits a line rather than
+# rebuilding the file from the parsed object.
+COMMENT_CFG="$(mktemp -d)/config.toml"
+printf '# my own note\n[gateway]\n# explains the next line\nusage_collection = false\n' > "$COMMENT_CFG"
+CQUTMUX_CONFIG="$COMMENT_CFG" run unset usage-collection > /dev/null || fail "unset failed"
+grep -q '# my own note' "$COMMENT_CFG" || fail "unset dropped a comment above the section"
+grep -q '# explains the next line' "$COMMENT_CFG" || fail "unset dropped a comment in the section"
+ok "unset leaves the file's own comments alone"
+
+# A key hand-written with dashes is a key that is *in effect*: the config reader
+# looks up `suppress_push_while_unlocked` and falls back to
+# `suppress-push-while-unlocked`, so both spellings configure the gateway.
+# Removing only the underscore spelling printed "was not set; the built-in
+# default already applies" for a key the gateway went on honouring — a failure
+# that reads as success, which is the one shape `unset` cannot afford.
+DASH_CFG="$(mktemp -d)/config.toml"
+printf '[gateway]\nsuppress-push-while-unlocked = true\n' > "$DASH_CFG"
+CQUTMUX_CONFIG="$DASH_CFG" run unset suppress-push-while-unlocked > "$OUT/dashunset.txt" 2>&1 \
+  || fail "unset failed on a dashed key"
+grep -q 'suppress-push-while-unlocked' "$DASH_CFG" \
+  && fail "unset left the dashed spelling in the file: $(cat "$DASH_CFG")"
+ok "unset removes the dashed spelling the config reader also honours"
+
+# An unknown key is refused, and a missing key is a usage error (exit 2, like
+# the other commands' missing-argument paths).
+if CQUTMUX_CONFIG="$UNSET_CFG" run unset not-a-setting > "$OUT/badunset.txt" 2>&1; then
+  fail "unset accepted an unknown key"
+fi
+grep -q 'unknown setting' "$OUT/badunset.txt" || fail "unset gave the wrong error for an unknown key"
+ok "unset refuses an unknown key"
+
+if CQUTMUX_CONFIG="$UNSET_CFG" run unset > "$OUT/noargunset.txt" 2>&1; then
+  fail "unset with no key exited zero"
+fi
+grep -q 'needs a setting' "$OUT/noargunset.txt" || fail "unset did not say it needs a key"
+ok "unset with no key is a usage error"
+
+# `--first-run` is a reset rather than a setting, but both commands have to
+# reach it. The flag starts with `-`, so without an explicit exemption the
+# parser drops it and the command falls through to its *report* — a plausible
+# answer (the settings list) to the wrong question, which is the failure mode
+# this check exists to catch for both spellings.
+FR_HOME="$OUT/frhome"
+mkdir -p "$FR_HOME/.cqutmux"
+for spelling in "set --first-run" "unset --first-run"; do
+  touch "$FR_HOME/.cqutmux/installed"
+  # shellcheck disable=SC2086
+  HOME="$FR_HOME" run $spelling > "$OUT/fr.txt" 2>&1 \
+    || fail "$spelling exited non-zero"
+  [ -f "$FR_HOME/.cqutmux/installed" ] \
+    && fail "$spelling did not clear the first-run marker"
+done
+ok "set --first-run and unset --first-run both clear the marker"
+
+# MARK: - update --version
+#
+# `update` has no downloader, so `--version V` pins the *checkout* it expects to
+# be standing in. The dry-run is used so nothing on the machine is touched: the
+# point under test is the argument handling and the refusal, not a download.
+
+UP_HOME="$OUT/uphome"
+mkdir -p "$UP_HOME"
+HOME="$UP_HOME" run update --version "$APP_VERSION" --dry-run > "$OUT/upok.txt" 2>&1 \
+  || fail "update --version with the matching version exited non-zero"
+grep -q "$APP_VERSION" "$OUT/upok.txt" || fail "update --version did not report the version"
+[ -f "$UP_HOME/.claude/settings.json" ] && fail "update --version --dry-run wrote a hook file"
+ok "update --version accepts the version this checkout is"
+
+# A pin that does not match must refuse *before* wiring anything: re-wiring an
+# old tree's hooks is the failure that leaves the phone talking to a gateway
+# nobody meant to ship.
+if HOME="$UP_HOME" run update --version 9.9.9 > "$OUT/upbad.txt" 2>&1; then
+  fail "update --version accepted a version this checkout is not"
+fi
+grep -q '9.9.9' "$OUT/upbad.txt" || fail "update --version did not name the version it wanted"
+grep -q 'no downloader' "$OUT/upbad.txt" || fail "update --version did not explain why it cannot fetch it"
+[ -f "$UP_HOME/.claude/settings.json" ] && fail "a refused update --version still wrote a hook file"
+ok "update --version refuses a mismatch before touching the hooks"
+
+if run update --version banana > "$OUT/upbanana.txt" 2>&1; then
+  fail "update --version accepted a non-version"
+fi
+grep -q 'version number' "$OUT/upbanana.txt" || fail "update --version gave the wrong error for a non-version"
+ok "update --version rejects a value that is not a version"
+
+# The bare flag is still the global "print the version", or `cqutmux --version`
+# would have become a no-op update.
+run --version > "$OUT/dashv.txt" 2>&1 || fail "cqutmux --version exited non-zero"
+grep -q "cqutmux $APP_VERSION" "$OUT/dashv.txt" || fail "cqutmux --version no longer prints the version"
+ok "cqutmux --version still prints the version, not an update"
+
+# And `-v` means the same thing *on update* as it does everywhere else. It is
+# not update's flag — that is the long `--version V` — so the exception that
+# lets `update --version 0.2.0` reach the dispatcher must not carry `-v` with
+# it. Swept in, it made `cqutmux update -v` skip the version branch and run the
+# install: a deploy script asking what version it had would have re-wired every
+# hook on the box instead of printing one line.
+HOME="$UP_HOME" run update -v --dry-run > "$OUT/upv.txt" 2>&1
+grep -q "cqutmux $APP_VERSION" "$OUT/upv.txt" \
+  || fail "update -v did not print the version: $(head -3 "$OUT/upv.txt")"
+grep -q 'would write' "$OUT/upv.txt" \
+  && fail "update -v ran the install instead of printing the version"
+ok "update -v prints the version rather than running the update"
+
+# MARK: - host setup
+
+# Tailscale is optional and is not integrated, so the command reports what it
+# finds rather than pretending to configure a tailnet. Absent, it is a
+# well-worded finding with a non-zero exit — never a stack trace from a failed
+# `tailscale ip`.
+#
+# PATH is rebuilt rather than prepended to, because "no Tailscale" has to mean
+# *no* Tailscale: on a machine where one is installed, a prepend would leave the
+# real binary reachable and the check would silently test the wrong branch.
+# node's own directory is carried over so the CLI can still run.
+NODE_BIN="$(dirname "$(command -v node)")"
+NO_TS_HOME="$OUT/notshome"
+mkdir -p "$NO_TS_HOME" "$OUT/emptybin"
+if HOME="$NO_TS_HOME" PATH="$OUT/emptybin:$NODE_BIN:/usr/bin:/bin" run host setup > "$OUT/nots.txt" 2>&1; then
+  fail "host setup succeeded with no Tailscale present"
+fi
+grep -q 'not installed' "$OUT/nots.txt" || fail "host setup did not say Tailscale was missing"
+grep -qi 'tailscale.com' "$OUT/nots.txt" || fail "host setup did not point anywhere to install it"
+grep -q 'Error' "$OUT/nots.txt" && fail "host setup printed a raw error instead of a finding"
+ok "host setup reports a missing Tailscale as a finding, not a crash"
+
+# With a `tailscale` that answers, the address it reports is what the user is
+# told to pair with. Stubbed on PATH because this machine has no tailnet; the
+# parsing is what is under test, and it is asserted against the documented
+# output shape rather than a real one.
+TS_BIN="$OUT/tailbin"
+mkdir -p "$TS_BIN"
+cat > "$TS_BIN/tailscale" <<'SH'
+#!/bin/sh
+case "$1 $2" in
+  "ip -4") echo "100.64.1.2"; exit 0 ;;
+  "status --json") echo '{"Self":{"DNSName":"box.tailnet.ts.net."}}'; exit 0 ;;
+esac
+exit 1
+SH
+chmod +x "$TS_BIN/tailscale"
+HOME="$NO_TS_HOME" PATH="$TS_BIN:$NODE_BIN:/usr/bin:/bin" run host setup > "$OUT/ts.txt" 2>&1 \
+  || fail "host setup exited non-zero with a working Tailscale"
+grep -q '100.64.1.2' "$OUT/ts.txt" || fail "host setup did not report the tailnet address"
+grep -q 'box.tailnet.ts.net' "$OUT/ts.txt" || fail "host setup did not report the MagicDNS name"
+grep -q 'pair --host 100.64.1.2' "$OUT/ts.txt" \
+  || fail "host setup did not show how to pair with the address it found"
+ok "host setup reports the tailnet address and how to pair with it"
+
+# A `tailscale` that is present but not up (logged out / stopped) is its own
+# answer, not a failed-command stack trace.
+cat > "$TS_BIN/tailscale" <<'SH'
+#!/bin/sh
+echo "Tailscale is stopped." >&2
+exit 1
+SH
+chmod +x "$TS_BIN/tailscale"
+if HOME="$NO_TS_HOME" PATH="$TS_BIN:$NODE_BIN:/usr/bin:/bin" run host setup > "$OUT/tsdown.txt" 2>&1; then
+  fail "host setup succeeded with Tailscale present but not up"
+fi
+grep -q 'not up' "$OUT/tsdown.txt" || fail "host setup did not say Tailscale was not up"
+ok "host setup reports a present-but-stopped Tailscale as its own outcome"
+
+# `host` with no subcommand, or an unknown one, is a usage error.
+if run host > "$OUT/hostnone.txt" 2>&1; then
+  fail "host with no subcommand exited zero"
+fi
+grep -q 'needs a subcommand' "$OUT/hostnone.txt" || fail "host did not say it needs a subcommand"
+if run host bogus > "$OUT/hostbad.txt" 2>&1; then
+  fail "host accepted an unknown subcommand"
+fi
+grep -q 'not a subcommand' "$OUT/hostbad.txt" || fail "host did not reject an unknown subcommand"
+ok "host refuses a missing or unknown subcommand"
 
 printf '\nCLI_CHECK_PASS  (%d checks)\n' "$PASS"

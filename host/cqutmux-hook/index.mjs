@@ -1505,8 +1505,8 @@ const SETTABLE = [
 
 const COMMANDS = new Set([
   'pair', 'install', 'uninstall', 'serve', 'status', 'doctor', 'logs', 'diff',
-  'set', 'usage', 'version', 'update', 'help', 'context', 'locale', 'service',
-  'unpair', 'tmux-defaults',
+  'set', 'unset', 'usage', 'version', 'update', 'help', 'context', 'locale',
+  'service', 'unpair', 'tmux-defaults', 'host',
 ])
 
 function usage() {
@@ -1532,7 +1532,11 @@ function usage() {
   cqutmux uninstall      remove the hooks this tool installed
   cqutmux set            show the config settings and their file, or change one
   cqutmux set --first-run  reopen the first-run prompt on the next install
+  cqutmux unset <key>    remove a setting, so its built-in default applies again
+  cqutmux unset --first-run  (the same as \`set --first-run\`)
   cqutmux update         re-wire the hooks and report the version
+  cqutmux update --version V   check the checkout is at version V before wiring
+  cqutmux host setup     check this machine is reachable from the phone
   cqutmux usage          agent rate-limit windows, as the app shows them
   cqutmux pair           set up a phone: print a link and its QR code
   cqutmux unpair         revoke that phone's key from authorized_keys
@@ -1554,12 +1558,23 @@ const VALUED_FLAGS = new Set([
   // One-shot overrides for the commands that talk to a gateway: a different
   // machine's port-forward, or the same command with its reasoning shown.
   '--base-url',
+  // `update --version V`: V is a value, not a positional, or it would be read
+  // as a directory to open by the path form of the CLI.
+  '--version',
 ])
+// A bare flag a command accepts, whose value is implied rather than following
+// it. `set --first-run` and `unset --first-run` name a reset, not a setting, so
+// there is no value — but it is still the command's *argument*, and dropping it
+// makes both spellings silently print the settings list instead of resetting
+// the marker, which is the worst kind of failure: a plausible answer to the
+// wrong question.
+const STANDALONE_FLAGS = new Set(['--first-run'])
 const positionals = []
 for (let i = 0; i < argv.length; i++) {
   const arg = argv[i]
   if (arg.startsWith('-')) {
     if (VALUED_FLAGS.has(arg)) i++ // skip its value
+    else if (STANDALONE_FLAGS.has(arg)) positionals.push(arg)
   } else {
     positionals.push(arg)
   }
@@ -1575,7 +1590,17 @@ if (argv.includes('--help') || argv.includes('-h')) {
   process.stdout.write(usage() + '\n')
   process.exit(0)
 }
-if (argv.includes('--version') || argv.includes('-v')) {
+// `update --version V` is update's own flag — it names the version to land on —
+// and must reach the dispatcher rather than being answered here with the
+// *installed* version, which would make `update --version 0.2.0` print `0.1.0`
+// and exit zero. Every other command still gets the global reading.
+//
+// `-v` is excluded from that exception, not carried by it. It is the short
+// spelling of the *global* answer, not update's flag, and folding it into the
+// `update` test made `cqutmux update -v` skip this branch and run the install —
+// so a deploy script asking what version it had would have re-wired its hooks
+// instead, and printing a version is the one thing `-v` has ever done here.
+if (argv.includes('-v') || (argv.includes('--version') && positional !== 'update')) {
   process.stdout.write(`cqutmux ${VERSION}\n`)
   process.exit(0)
 }
@@ -1624,6 +1649,10 @@ async function launchProjectSession(target) {
   child.on('exit', code => process.exit(code ?? 0))
 }
 
+/// `set --first-run` and `unset --first-run` both spell a reset, and the flag
+/// parser carries `--first-run` through as a positional (see STANDALONE_FLAGS)
+/// so each command's own check for it is what handles it. The two are inverses
+/// from the outside even though the marker is a reset underneath.
 async function runCommand(name, argv) {
   switch (name) {
     case 'help':
@@ -1647,6 +1676,8 @@ async function runCommand(name, argv) {
       return diff(argv)
     case 'set':
       return setCommand(positionals.slice(1))
+    case 'unset':
+      return unsetCommand(positionals.slice(1))
     case 'usage':
       return usageCommand(argv.includes('--sync'))
     case 'version':
@@ -1659,6 +1690,8 @@ async function runCommand(name, argv) {
       return localeCommand(positionals.slice(1))
     case 'service':
       return serviceCommand(positionals.slice(1))
+    case 'host':
+      return hostCommand(positionals.slice(1))
     case 'tmux-defaults':
       // argv, not positionals: this command's verbs are flags (`--write`,
       // `--unset`), and `positionals` excludes anything starting with `-` by
@@ -2028,7 +2061,10 @@ function setCommand(rest) {
   if (key === '--first-run' || key === 'first-run') {
     const marker = join(homedir(), '.cqutmux', 'installed')
     try {
-      if (existsSync(marker)) rmSync(marker, { force: true })
+      // `existsSync` before `rmSync` so an already-clear marker is not an error:
+      // `rmSync` without `force` throws ENOENT, and this reports success either
+      // way, so it is only ever cleared when there is something to clear.
+      if (existsSync(marker)) rmSync(marker)
       process.stdout.write('first-run prompt will be shown again on the next install\n')
     } catch (error) {
       process.stderr.write(`cqutmux: could not clear ${marker}: ${error.message}\n`)
@@ -2051,6 +2087,117 @@ function setCommand(rest) {
   const value = parseSetting(raw)
   writeConfigValue(config, name, value)
   process.stdout.write(`[gateway] ${name} = ${JSON.stringify(value)}\n`)
+}
+
+/// `cqutmux unset <key>` — the inverse of `set`.
+///
+/// `set` writes a line into the `[gateway]` section of the config file; `unset`
+/// removes that line again, so the key falls back to the built-in default the
+/// parser applies when it is absent. Removing the line rather than writing the
+/// default value is the whole point: a written default is indistinguishable from
+/// a deliberate choice, so a later change to the built-in default would silently
+/// not reach a host that had once run `unset`. Absence is the only encoding of
+/// "whatever the default is".
+///
+/// `unset --first-run` is accepted as a spelling of `set --first-run` because a
+/// person reaching for `unset` should not have to know that the first-run marker
+/// is a reset rather than a setting — the two commands are inverses from the
+/// outside even where they are not underneath.
+function unsetCommand(rest) {
+  const config = loadConfig()
+  const key = rest[0]
+
+  if (key === undefined) {
+    process.stderr.write(
+      `cqutmux: unset needs a setting. Known: ${SETTABLE.join(', ')}\n`)
+    process.exitCode = 2
+    return
+  }
+
+  if (key === '--first-run' || key === 'first-run') {
+    // Exactly `set --first-run`: clearing the marker is a reset either way, and
+    // there is nothing "set" to unset. Kept here so the two spellings cannot
+    // drift apart in what they do.
+    return setCommand(['--first-run'])
+  }
+
+  const name = key.replace(/-/g, '_')
+  if (!SETTABLE.includes(name)) {
+    process.stderr.write(`cqutmux: unknown setting "${key}". Known: ${SETTABLE.join(', ')}\n`)
+    process.exitCode = 1
+    return
+  }
+
+  const full = `gateway.${name}`
+  const had = config.values[full] !== undefined
+  const removed = removeConfigValue(config, name)
+
+  if (!removed) {
+    // Either the file is gone or the key was never in it. Both mean the default
+    // is already in effect, which is success, not an error: `unset` asks for a
+    // state, and that state already holds.
+    process.stdout.write(
+      had
+        ? `[gateway] ${name} is set in memory but not in ${config.path}; nothing to remove\n`
+        : `[gateway] ${name} was not set; the built-in default already applies\n`)
+    return
+  }
+  process.stdout.write(`[gateway] ${name} unset; the built-in default applies\n`)
+}
+
+/// Removes one `[gateway]` key's line, leaving every other line — comments and
+/// blank lines included — exactly where it was. The counterpart to
+/// `writeConfigValue`, and hand-rolled for the same reason: a rewrite from the
+/// parsed object would drop the comments someone wrote to explain their own
+/// settings.
+///
+/// Returns whether a line was actually removed, so the caller can tell "I
+/// unset it" from "it was never set" without re-reading the file.
+function removeConfigValue(config, key) {
+  let lines
+  try {
+    lines = readFileSync(config.path, 'utf8').split('\n')
+  } catch {
+    return false // no file: nothing was ever set
+  }
+
+  let section = ''
+  let removed = false
+  const kept = []
+  for (const line of lines) {
+    const bare = line.replace(/#.*$/, '').trim()
+    const header = bare.match(/^\[([^\]]+)\]$/)
+    if (header) {
+      section = header[1].trim()
+      kept.push(line)
+      continue
+    }
+    const pair = bare.match(/^([A-Za-z0-9_-]+)\s*=/)
+    // Either spelling, because the reader accepts either: `applyConfig` looks up
+    // `gateway.suppress_push_while_unlocked` and falls back to the dashed
+    // `gateway.suppress-push-while-unlocked`, so a key hand-written with dashes
+    // is a setting that is *in effect*. Matching one spelling reported "was not
+    // set; the built-in default already applies" for a key the gateway was
+    // still honouring — a failure that reads as success, which is the one shape
+    // of failure this command cannot afford.
+    if (!removed && section === 'gateway' && pair && pair[1].replace(/-/g, '_') === key) {
+      removed = true
+      continue
+    }
+    kept.push(line)
+  }
+  if (!removed) return false
+
+  // Trim trailing blank lines back to the single newline the file had, so
+  // unsetting the last key does not leave a run of blanks behind — the mirror
+  // of the normalisation `writeConfigValue` does on the way in.
+  while (kept.length && kept[kept.length - 1].trim() === '') kept.pop()
+  kept.push('')
+
+  // Only written when something changed, so an `unset` on an already-clear key
+  // does not touch the file's mtime — the same rule `unpair` follows.
+  writeFileSync(config.path, kept.join('\n'))
+  return true
 }
 
 /// Turns a command-line word into the value the config reader would produce.
@@ -2719,7 +2866,8 @@ async function doctor(repair = false) {
   if (failures > 0) process.exit(1)
 }
 
-/// `cqutmux update` — re-run the installer and say what version it landed.
+/// `cqutmux update [--version V]` — re-run the installer and say what version it
+/// landed.
 ///
 /// There is no downloader here on purpose: the gateway is a plain Node script
 /// that ships with the app's repository, and a `cqutmux update` that fetched
@@ -2728,9 +2876,152 @@ async function doctor(repair = false) {
 /// pulling a new checkout — re-wire the hooks so a changed bridge path or a
 /// new event is picked up — plus a version report so the other end can be told
 /// apart from an old install.
+///
+/// `--version V` pins the *checkout* the update expects to be on, rather than
+/// downloading V. A deploy script that has just checked out a tag wants to fail
+/// loudly if the checkout it is standing in is not the one it thinks — silently
+/// re-wiring the hooks of an old tree is the failure that leaves the phone
+/// talking to a gateway nobody meant to ship. So V is checked against the
+/// version this file reports, and a mismatch refuses before any hook is touched.
+/// This is the honest limit of the flag on a tool with no downloader, and it is
+/// said in the output rather than implied.
 async function update(argv) {
+  const pinned = flagValue('--version')
+
+  if (pinned !== null) {
+    const wanted = String(pinned).replace(/^v/, '').trim()
+    if (!/^\d+(\.\d+)*$/.test(wanted)) {
+      process.stderr.write(`cqutmux: --version wants a version number, got "${pinned}"\n`)
+      process.exit(1)
+    }
+    if (wanted !== VERSION) {
+      // Refused before `install` runs, so a wrong pin leaves every hook file
+      // byte for byte as it was.
+      process.stderr.write(
+        `cqutmux: this checkout is ${VERSION}, not ${wanted}.\n` +
+        `update has no downloader — check out the ${wanted} tree, then run it there.\n`)
+      process.exit(1)
+    }
+  }
+
   process.stdout.write(`cqutmux ${VERSION} at ${import.meta.dirname}\n`)
+  if (pinned !== null) process.stdout.write(`pinned to ${VERSION}; matches this checkout\n`)
   await install(argv)
+}
+
+/// `cqutmux host setup` — check this machine is reachable from the phone.
+///
+/// Moshi connects the phone to the machine over Tailscale, and Tailscale is
+/// deliberately *not* integrated: it works at the OS layer, and a `100.x.y.z`
+/// address or a MagicDNS name is just an SSH target the app dials like any
+/// other. (PLAN.md records the same reading of Moshi's own documentation.) So
+/// this command does not configure a tailnet — joining one needs a browser login
+/// and an account decision, and a CLI that claimed to have done it would be
+/// lying about the one step it cannot take.
+///
+/// What a host *can* do is the part this does: find the tool, read back the
+/// address and name a phone could dial, and print the `pair` invocation that
+/// uses them. The reachability it reports is this machine's view of its own
+/// tailnet interface; whether the phone can reach it depends on the phone's
+/// tailnet membership and ACLs, which nothing running here can see.
+///
+/// Verified on this machine: the absent-tool path (no Tailscale here), and the
+/// present paths against a stub binary in `scripts/cli-check.sh` — the shape of
+/// `tailscale ip -4` / `status --json` output the parsing assumes is written to
+/// the documented format, but has NOT been run against a real tailnet, which
+/// this machine does not have.
+async function hostCommand(rest) {
+  const action = rest[0]
+  if (action !== 'setup') {
+    process.stderr.write(
+      `cqutmux: host ${action ? `"${action}" is not a subcommand` : 'needs a subcommand'} (setup)\n`)
+    process.exitCode = 2
+    return
+  }
+
+  const bin = await findTailscale()
+
+  if (!bin) {
+    // Absent is a normal state: a host reached on the LAN every day needs no
+    // Tailscale at all. So this is a finding with somewhere to go, not a crash —
+    // but the exit code is still non-zero, because a script asking "can the
+    // phone reach this off-network" wants a no, and a zero would be a yes.
+    process.stdout.write(
+      'Tailscale is not installed here.\n' +
+      '  no `tailscale` on PATH, none at the macOS app path\n\n' +
+      'The phone reaches this host over whatever network they already share, so\n' +
+      'Tailscale is optional. It is the way to reach this host from off-network.\n\n' +
+      '  https://tailscale.com/download\n\n' +
+      'This command cannot join a tailnet for you: that needs a browser login and\n' +
+      'an account decision. Install and log in there, then run `cqutmux host setup`\n' +
+      'again to see the address to pair with.\n')
+    process.exitCode = 1
+    return
+  }
+
+  const ip = await tryRun(bin, ['ip', '-4'])
+  const address = ip.ok ? (ip.stdout.split('\n').map(l => l.trim()).find(Boolean) || null) : null
+
+  if (!address) {
+    // The binary is there but the daemon is not up (logged out, stopped, or the
+    // app not running). Saying so is more useful than a stack trace from a
+    // failed `tailscale ip`, and the reason is usually "not logged in yet".
+    process.stdout.write(
+      `found Tailscale at ${bin}, but it is not up here.\n` +
+      `  ${ip.message || 'no tailnet address'}\n\n` +
+      'Start the Tailscale app (or `tailscale up`) and log in, then run this again.\n')
+    process.exitCode = 1
+    return
+  }
+
+  const name = await tailnetName(bin)
+  process.stdout.write('reachable over Tailscale\n')
+  process.stdout.write(`  address  ${address}\n`)
+  if (name) process.stdout.write(`  name     ${name}\n`)
+  process.stdout.write(`  ssh      ${args.user}@${address}  (gateway on port ${args.port})\n`)
+  process.stdout.write(
+    '\nPair the phone to that address:\n' +
+    `  cqutmux pair --host ${address}\n`)
+  process.stdout.write(
+    '\nThe gateway itself stays on loopback and is reached over the SSH session,\n' +
+    'so no firewall port needs opening. Whether the phone can reach this address\n' +
+    'depends on its own tailnet membership and ACLs, which this host cannot see.\n')
+  process.exitCode = 0
+}
+
+/// Where the `tailscale` CLI lives, or null. The macOS app bundles its own CLI
+/// and does not put it on PATH — which is the common case on a Mac that
+/// installed Tailscale from the App Store or the cask — so a PATH lookup alone
+/// would report "not installed" on a machine that plainly is.
+async function findTailscale() {
+  const probe = resolveCommand('tailscale')
+  try {
+    const { stdout } = await run(probe.shell, probe.argv, { timeout: 5000 })
+    const found = stdout.trim().split('\n')[0].trim()
+    if (found) return found
+  } catch {
+    // Fall through to the bundled-app path below.
+  }
+  if (process.platform === 'darwin') {
+    const bundled = '/Applications/Tailscale.app/Contents/MacOS/Tailscale'
+    if (existsSync(bundled)) return bundled
+  }
+  return null
+}
+
+/// This machine's MagicDNS name, if it has one. Best-effort: a tailnet with
+/// MagicDNS off has none, and that is not a reason to fail the command — the
+/// numeric address is enough to pair with.
+async function tailnetName(bin) {
+  const status = await tryRun(bin, ['status', '--json'])
+  if (!status.ok) return null
+  try {
+    const parsed = JSON.parse(status.stdout)
+    const name = parsed?.Self?.DNSName
+    return typeof name === 'string' && name ? name.replace(/\.$/, '') : null
+  } catch {
+    return null
+  }
 }
 
 async function logs(follow) {
