@@ -308,6 +308,21 @@ struct TerminalScreen: View {
             ) { result in
                 if case .success(let url) = result { attachFile(at: url) }
             }
+            // Presented from here, the screen, rather than from the button that
+            // sets the flag. The paste-image button lives in the accessory bar
+            // and the paperclip lives in the composer, and chat mode swaps one
+            // for the other — so a dialog mounted on either would be out of the
+            // hierarchy half the time, and its button would open nothing. One
+            // presenter above both is the only arrangement that covers both.
+            .confirmationDialog(
+                "Add attachment",
+                isPresented: $showAttachSources,
+                titleVisibility: .visible
+            ) {
+                ForEach(attachmentSources) { source in
+                    Button(source.label) { choose(source) }
+                }
+            }
             .overlay(alignment: .top) { pasteNotice }
             .overlay {
                 if showAgentPanel { agentPanelLayer }
@@ -332,7 +347,9 @@ struct TerminalScreen: View {
                         // Attaching from inside the composer puts the uploaded
                         // path into the same draft, so an agent receives the
                         // sentence and the image together.
-                        attach: { showAttachSources = true }
+                        attach: { showAttachSources = true },
+                        dictation: dictation,
+                        preview: coordinator.dictationPreview
                     )
                 } else if InputSettings.showsBar(
                     hideWithHardwareKeyboard: input.hideBarWithHardwareKeyboard,
@@ -783,15 +800,6 @@ struct TerminalScreen: View {
             }
             .buttonStyle(.bordered)
             .buttonBorderShape(.roundedRectangle(radius: 6))
-            .confirmationDialog(
-                "Add attachment",
-                isPresented: $showAttachSources,
-                titleVisibility: .visible
-            ) {
-                ForEach(attachmentSources) { source in
-                    Button(source.label) { choose(source) }
-                }
-            }
         }
     }
 

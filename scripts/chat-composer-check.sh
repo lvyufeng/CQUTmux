@@ -27,6 +27,16 @@
 #
 # `ChatComposer.swift` imports only Foundation, so it is run here directly
 # through the Swift interpreter — the shipped function is exercised, not a copy.
+#
+# 6. The composer's two controls are wired where they can actually be reached,
+#    checked against the view source because there is no simulator here. This
+#    half exists because one of them was not: the attachment chooser was
+#    presented from the key bar's paste-image button, and chat mode replaces the
+#    key bar — so the composer's paperclip set the flag with nothing in the
+#    hierarchy to present it, and the button opened nothing. A grep is a weak
+#    instrument and this is deliberately a narrow claim: that the presenter sits
+#    above the mode branch, that there is exactly one of it, and that the
+#    composer is handed the screen's engine rather than building its own.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -142,4 +152,54 @@ print("PASS: sendable, delivery mode, submit, trim, multi-byte round-trip, and d
 SWIFT
 
 swift "$WORK/main.swift"
+
+echo "==> the composer's controls are wired where they can be reached"
+
+VIEW="App/Features/Terminal/TerminalViewRepresentable.swift"
+BAR="App/Features/Terminal/ChatComposerBar.swift"
+wiring_fail=0
+check() { # <condition> <label>
+  if [ "$1" = "1" ]; then
+    printf 'PASS  %s\n' "$2"
+  else
+    printf 'FAIL  %s\n' "$2"
+    wiring_fail=1
+  fi
+}
+
+# The chooser is opened from two buttons on two different faces of the bar, and
+# the two faces are alternatives — `input.chatMode` picks one, the key bar picks
+# the other. So the presenter has to sit above that branch; anything mounted at
+# or below `.safeAreaInset` is inside one face only, and is out of the hierarchy
+# exactly when the other face sets the flag.
+dialog_line="$(grep -nF 'isPresented: $showAttachSources' "$VIEW" | head -1 | cut -d: -f1 || true)"
+branch_line="$(grep -n 'safeAreaInset(edge: .bottom' "$VIEW" | head -1 | cut -d: -f1 || true)"
+check "$([ -n "$dialog_line" ] && [ -n "$branch_line" ] && [ "$dialog_line" -lt "$branch_line" ] && echo 1 || echo 0)" \
+  "the attachment chooser is presented above the bar that opens it"
+
+presenters="$(grep -cF 'isPresented: $showAttachSources' "$VIEW" || true)"
+check "$([ "$presenters" -eq 1 ] && echo 1 || echo 0)" \
+  "there is one chooser, not one per face of the bar (found $presenters)"
+
+# One engine, one route out of it. The bar is handed the screen's `Dictation`
+# and its transcript returns through the screen's `draft`, which is what lets a
+# phrase started in command mode before switching still land in the composer.
+# Anchored to a whole argument line. A bare `dictation: dictation` is a
+# substring of `case .dictation: dictationButton` in the key bar's switch, so
+# the loose form passed against the very tree this check was written to catch.
+check "$(grep -qE '^[[:space:]]+dictation: dictation,?$' "$VIEW" && echo 1 || echo 0)" \
+  "the composer is handed the screen's dictation engine"
+check "$(grep -qF 'preview: coordinator.dictationPreview' "$VIEW" && echo 1 || echo 0)" \
+  "the composer is handed the live partial to draw"
+# A streaming engine reports word by word and the phrase only arrives at the
+# end, so a mic in the composer with nowhere to draw the partial is a button
+# that looks like it is hearing nothing for the length of a sentence.
+check "$(grep -q 'Dictation(' "$BAR" && echo 0 || echo 1)" \
+  "the bar does not build an engine of its own"
+
+if [ "$wiring_fail" -ne 0 ]; then
+  echo "CHAT_COMPOSER_FAIL"
+  exit 1
+fi
+
 echo "CHAT_COMPOSER_PASS"

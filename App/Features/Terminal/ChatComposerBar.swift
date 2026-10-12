@@ -30,6 +30,16 @@ struct ChatComposerBar: View {
     /// Opens the attachment sources. The chosen image's path comes back through
     /// `draft`, so an image and a sentence are one message.
     var attach: () -> Void = {}
+    /// The screen's dictation engine, for the mic button.
+    ///
+    /// Passed in rather than owned here because the transcript has to reach the
+    /// draft through the same route whatever started it, and that route —
+    /// `ChatComposer.appending` — is the screen's. A bar that built its own
+    /// engine would deliver into a second path, and a phrase started in command
+    /// mode before switching would be invisible to it.
+    var dictation: Dictation? = nil
+    /// The in-flight partial from a streaming engine, shown above the field.
+    var preview: String = ""
     @Environment(ThemeStore.self) private var themes
 
     @FocusState private var focused: Bool
@@ -37,6 +47,21 @@ struct ChatComposerBar: View {
     var body: some View {
         VStack(spacing: 0) {
             Divider()
+            // The partial sits here rather than on the key bar, which chat mode
+            // replaces wholesale. A streaming engine reports word by word and
+            // the phrase only arrives at the end, so with nowhere to draw it a
+            // long sentence would look like nothing was being heard.
+            if !preview.isEmpty {
+                HStack {
+                    Text(preview)
+                        .font(.caption)
+                        .lineLimit(2)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+            }
             HStack(alignment: .bottom, spacing: 8) {
                 TextField("Message the agent…", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -64,6 +89,26 @@ struct ChatComposerBar: View {
                 }
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Add an image")
+
+                // Dictation, next to attach: both work on an empty field — a
+                // spoken phrase alone is a message — so neither can be gated on
+                // there being a draft. Chat mode replaces the key bar, which is
+                // the only other place this control lives, so without it there
+                // was no way to start dictation from inside the composer at all.
+                if let dictation {
+                    Button {
+                        dictation.toggle(locale: dictation.locale ?? .current)
+                    } label: {
+                        Image(systemName: dictation.isListening ? "waveform" : "mic")
+                            .symbolEffect(.variableColor, isActive: dictation.isListening)
+                            .frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(dictation.isListening ? themes.current.accentColor : nil)
+                    .disabled(!dictation.isReady)
+                    .accessibilityLabel(dictation.isListening ? "Stop dictating" : "Dictate a message")
+                    .accessibilityHint(dictation.setupHint ?? "")
+                }
 
                 // Insert without submitting, and only while there is something
                 // to insert. A second button rather than a long press, because
