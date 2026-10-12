@@ -173,8 +173,33 @@ if let url = URL(string: "cqutmux://herdr?workspace=w1&tab=w1:t2&pane=w1:abc"),
     check(false, "the session accessor surfaces an opaque herdr pane")
 }
 
+// MARK: - the notification route, which a tap on a banner lands on
+
+// A separate target from `inbox` on purpose: the two look alike and must not
+// behave alike. `cqutmux://inbox` is the Live Activity's tap target and honours
+// "Open Inbox on tap", while a tap on a notification that is *asking something*
+// has nowhere else to send the user, so it is not gated. Resolving both to the
+// same target and leaving the difference to the caller works until the caller
+// forgets, which is the failure this asymmetry exists to make impossible.
+check(target("cqutmux://notification") == .notification,
+      "a tap on a notification's link parses to its own target")
+check(target("cqutmux://inbox") == .inbox,
+      "the Live Activity's link is still its own target")
+check(target("cqutmux://NOTIFICATION?x=1") == .notification,
+      "the notification route is matched case-insensitively like the rest")
+// The route names no session, so nothing is left pending for the terminal to
+// attach to — the same reading the shell takes when it decides whether a link
+// suppresses the launch's reconnect.
+if let url = URL(string: "cqutmux://notification"),
+   case .success(let link) = DeepLink.parse(url) {
+    check(link.session == nil,
+          "the notification route names no session, so nothing is pending for the terminal")
+} else {
+    check(false, "the notification route names no session, so nothing is pending for the terminal")
+}
+
 if failures > 0 {
-    print("\n\(failures) of \(checks) checks failed")
+    print("\nDEEPLINK_FAIL  (\(failures) of \(checks) checks failed)")
     exit(1)
 }
-print("\nall \(checks) checks passed")
+print("\nDEEPLINK_PASS  (\(checks) checks)")

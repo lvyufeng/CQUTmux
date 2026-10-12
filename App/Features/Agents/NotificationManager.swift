@@ -94,13 +94,27 @@ enum ApprovalNotifier {
     }
 
     /// Posts one notification per new pending approval.
+    ///
+    /// Gated on the pause switch, exactly as the remote path is
+    /// (`AppDelegate.willPresent`). The two cover the same approvals — this is
+    /// the banner a user sees while the app is running, the push is the one
+    /// they see when it is not — so a pause that silenced only pushes would be
+    /// a switch that appears broken in the case it exists for. The rule itself
+    /// is `NotificationRouting.localNotifications`, so it is the same decision
+    /// the remote path reads and `scripts/launch-check.sh` can assert the two
+    /// agree.
     static func notify(_ events: [AgentEvent], hostName: String) async {
+        let pending = NotificationRouting.localNotifications(
+            for: events, isPaused: PushCoordinator.shared.isPaused
+        )
+        guard !pending.isEmpty else { return }
+
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized ||
               settings.authorizationStatus == .provisional else { return }
 
-        for event in events where event.isPending {
+        for event in pending {
             let content = UNMutableNotificationContent()
             content.title = "\(event.sourceLabel) needs approval"
             content.body = event.displayTitle.isEmpty ? hostName : "\(event.displayTitle) — \(hostName)"

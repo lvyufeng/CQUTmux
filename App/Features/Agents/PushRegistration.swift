@@ -20,13 +20,19 @@ final class PushCoordinator: NSObject, @unchecked Sendable {
 
     /// Categories let a notification carry Allow/Deny buttons instead of
     /// making the user open the app to answer.
+    ///
+    /// The identifiers themselves live in `NotificationAction`, so the
+    /// registration here and the matching in the response handler cannot drift;
+    /// `scripts/launch-check.sh` also compares the category against the host's
+    /// copy, since a rename on either side removes the buttons with nothing to
+    /// report it.
     enum Category {
-        static let approval = "CQUT_APPROVAL"
+        static let approval = NotificationAction.category
     }
 
     enum Action {
-        static let allow = "CQUT_ALLOW"
-        static let deny = "CQUT_DENY"
+        static let allow = NotificationAction.allow
+        static let deny = NotificationAction.deny
     }
 
     /// Set by the app once a host connection exists. The token is held until

@@ -6,6 +6,23 @@ struct CQUTmuxApp: App {
     /// they arrive through a UIKit delegate that this adaptor installs.
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    /// A link handed over before the views existed — a notification tap that
+    /// launched the app. A `let`, not `@State`: it is read once, in `init`,
+    /// from `OpenLink`, and `take()` leaves nothing behind for a second read to
+    /// find. It reaches the Inbox through the same `handle` a live `onOpenURL`
+    /// does, so a cold-launch tap and a tap on a running app cannot take
+    /// different paths.
+    private let launchLink: URL?
+
+    init() {
+        // The tap happens before any view exists — the delegate's
+        // `didReceive(_:withCompletionHandler:)` runs first — so there is no
+        // `onOpenURL` yet to receive it, and a link left only in the delegate
+        // would be dropped. Read here, at the top of the app's life, because
+        // `RootView`'s `task` is not the first thing to run.
+        launchLink = OpenLink.shared.take()
+    }
+
     @State private var hostStore = HostStore()
     @State private var connection = AgentConnection()
     /// What each saved host's gateway is doing, for the dot in the host list.
@@ -30,7 +47,7 @@ struct CQUTmuxApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            RootView(launchLink: launchLink)
                 .environment(hostStore)
                 .environment(connection)
                 .environment(probe)
@@ -76,6 +93,37 @@ struct CQUTmuxApp: App {
                     // `apply` returns, the seeded host and its Keychain entries
                     // are both in place.
                     DebugSeed.resolveAndReport(hostStore)
+                    #endif
+                    // Moshi reconnects the host you were last on at launch.
+                    // Ours did it only under `CQUT_DEV_HOST`, so an ordinary
+                    // cold launch came up connected to nothing and the Inbox
+                    // waited on a host the user had to reselect by hand.
+                    //
+                    // Here, after the sync and the debug seeds, so both have
+                    // put what they are going to into the host list by the time
+                    // the recorded address is looked up. Not later: the
+                    // permission prompt below blocks this task until it is
+                    // answered, and a connect queued behind a dialog is an app
+                    // that is unreachable for as long as the dialog is up.
+                    //
+                    // `launchLink` is passed rather than tested for nil: only
+                    // a link that names a destination *of its own* should
+                    // suppress the reconnect. A notification tap arrives as
+                    // `cqutmux://notification` — a screen, not a destination —
+                    // and skipping the reconnect for it would open the Inbox
+                    // with no connection behind it, which is to say an empty
+                    // Inbox and the approval the tap was about nowhere on
+                    // screen. Suppressing here for the wrong reason is
+                    // indistinguishable from not having built the reconnect.
+                    if connection.client == nil,
+                       case .connect(let target) = LaunchConnect.action(
+                           hosts: hostStore.hosts,
+                           recorded: LastHost.recorded(),
+                           launching: launchLink
+                       ) {
+                        connection.connect(to: target)
+                    }
+                    #if DEBUG
                     if ProcessInfo.processInfo.environment["CQUT_DEV_FONT_PROBE"] == "1" {
                         DebugSeed.reportFonts()
                     }

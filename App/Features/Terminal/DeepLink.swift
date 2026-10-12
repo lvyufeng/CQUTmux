@@ -13,6 +13,7 @@ import Foundation
 ///   cqutmux://theme
 ///   cqutmux://inbox
 ///   cqutmux://usage
+///   cqutmux://notification
 ///
 /// A host is optional and, when absent, resolves to the only saved host — a
 /// link from a notification usually does not need to name the machine, and the
@@ -42,6 +43,50 @@ struct DeepLink: Equatable {
         /// the app on the last-used tab would be a tap that made the wearer go
         /// looking for the screen the number came from.
         case usage
+        /// Open the Inbox, for a tap on an approval notification.
+        ///
+        /// A separate case from `inbox` because the two do not obey the same
+        /// rule: `cqutmux://inbox` is the Live Activity's tap target and
+        /// honours "Open Inbox on tap", while a notification that is asking the
+        /// user something has nowhere else to send them. Resolving both to
+        /// `inbox` and relying on the caller would work today and break the
+        /// moment the gate moved, which is exactly the kind of silent change
+        /// this type exists to make visible.
+        ///
+        /// The route is named for the *source*, not the destination: who is
+        /// asking decides whether a gate applies, and the destination is the
+        /// Inbox either way.
+        case notification
+
+        /// Whether this target says *where to be* rather than merely *what to
+        /// show*.
+        ///
+        /// The distinction decides whether a cold launch reconnects the last
+        /// host. A session or a host is a destination: following it is what the
+        /// user asked for, and reconnecting beneath it would race that
+        /// navigation. The rest name only a screen — the Inbox, Usages, the
+        /// theme importer — and those screens draw from a live connection, so a
+        /// launch that followed one and skipped the reconnect would open the
+        /// right screen with nothing on it. That is not hypothetical: a tap on
+        /// an approval notification arrives as `cqutmux://notification`, and
+        /// treating it as a destination leaves the user on an empty Inbox with
+        /// the approval they tapped nowhere in sight.
+        ///
+        /// It is a property of the target rather than a list of cases at the
+        /// call site so a target added later has to answer the question. A
+        /// `switch` in `LaunchConnect` with a `default` would let the new case
+        /// inherit one of the two answers silently, and both are wrong half the
+        /// time.
+        var namesDestination: Bool {
+            switch self {
+            case .session:  return true
+            case .host:     return true
+            case .theme:    return false
+            case .inbox:    return false
+            case .usage:    return false
+            case .notification: return false
+            }
+        }
     }
 
     var target: Target
@@ -139,6 +184,9 @@ struct DeepLink: Equatable {
 
         case "usage":
             return .success(DeepLink(target: .usage))
+
+        case "notification":
+            return .success(DeepLink(target: .notification))
 
         default:
             return .failure(.unknownRoute(route))

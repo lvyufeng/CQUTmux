@@ -25,6 +25,11 @@ trap 'rm -rf "$OUT"' EXIT
 
 swiftc -O -o "$OUT/check" \
   "$ROOT/App/Features/Terminal/DeepLink.swift" \
-  "$ROOT/scripts/deeplink/main.swift"
+  "$ROOT/scripts/deeplink/main.swift" 2>&1 | grep -v "^ *$" || true
 
+# The compile showing nothing is not proof it worked: a diagnostic that does not
+# match the pattern above would have been filtered away with it, and the run
+# would then fail on the missing binary with no explanation. A build failure is
+# reported as one.
+[[ -x "$OUT/check" ]] || { echo "DEEPLINK_BUILD_FAIL"; exit 1; }
 "$OUT/check"

@@ -26,6 +26,18 @@ final class AgentConnection {
         lastError = nil
         watch.activate()
 
+        // Remembered here rather than at the places that ask for a connection —
+        // the Inbox's host menu, the Code panel, the reconnect a cold launch
+        // does. All of them go through this one function, and recording at the
+        // call sites is how "the last host" would come to mean "the last host
+        // some of the time".
+        //
+        // Recorded before the credential check below, deliberately: a connect
+        // that fails for want of a saved key is still the user pointing the app
+        // at this host, and the next launch should land back on the screen that
+        // says why.
+        LastHost.record(host)
+
         let credential: SSHCredential
         if let seed = host.resolveSeed() {
             credential = .ed25519Seed(seed)

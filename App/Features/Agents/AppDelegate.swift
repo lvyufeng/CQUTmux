@@ -1,3 +1,4 @@
+import Foundation
 import UIKit
 import UserNotifications
 
@@ -38,20 +39,40 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// A notification tapped while the app runs, or answered from its buttons.
     /// `completionHandler` must be called exactly once or the system assumes
     /// the response was dropped and re-delivers next launch.
+    ///
+    /// What the response *means* is decided in `NotificationRouting`, so the
+    /// plain-tap case — which the old switch fell through and did nothing with,
+    /// leaving the app on whatever tab it was last on — is checked without a
+    /// device.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let info = response.notification.request.content.userInfo
-        let decision: (Int, Bool)?
-        switch response.actionIdentifier {
-        case PushCoordinator.Action.allow: decision = (0, true)
-        case PushCoordinator.Action.deny: decision = (0, false)
-        default: decision = nil
+        let route = NotificationRouting.route(
+            actionIdentifier: response.actionIdentifier, userInfo: info
+        )
+        // A tap opens the app itself; the link is delivered through
+        // `onOpenURL` and routes to the Inbox. Set before the hop to the main
+        // actor so a launch that has not yet built the window still carries it.
+        if case .open = route, let url = NotificationRouting.inboxLink {
+            OpenLink.shared.deliver(url)
         }
         Task { @MainActor in
-            PushCoordinator.shared.received(userInfo: info, decision: decision)
+            switch route {
+            case .decide(let id, let allow):
+                PushCoordinator.shared.onRemoteDecision?(id, allow)
+            case .open:
+                // The same refresh a push arriving in the foreground does: the
+                // tap is a statement that the user is looking, and the newest
+                // event should be there when the Inbox draws.
+                if let id = NotificationRouting.eventId(from: info) {
+                    PushCoordinator.shared.onRemoteEvent?(id)
+                }
+            case .none:
+                break
+            }
             completionHandler()
         }
     }
@@ -66,18 +87,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let info = notification.request.content.userInfo
         // A paused device still receives the push — the gateway has no way to
         // know — so the suppression has to happen here, at the last point
-        // before it would be shown.
-        guard !PushCoordinator.shared.isPaused else {
+        // before it would be shown. The local-banner path consults the same
+        // rule (`NotificationRouting.mayPresent`), because a pause that
+        // silenced one and not the other would be a switch that appears broken.
+        guard NotificationRouting.mayPresent(isPaused: PushCoordinator.shared.isPaused) else {
             completionHandler([])
             return
         }
-        if let id = Self.eventId(from: info) {
+        if let id = NotificationRouting.eventId(from: info) {
             Task { @MainActor in PushCoordinator.shared.onRemoteEvent?(id) }
         }
         completionHandler([.banner, .sound, .list])
-    }
-
-    private static func eventId(from info: [AnyHashable: Any]) -> Int? {
-        (info["eventId"] as? Int) ?? (info["eventId"] as? String).flatMap(Int.init)
     }
 }

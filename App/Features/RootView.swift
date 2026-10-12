@@ -4,7 +4,15 @@ import OSLog
 /// Top-level shell. On a phone it is a tab bar; on a regular-width screen
 /// (iPad) the same surfaces become a sidebar, so the terminal keeps the large
 /// half of the display the way Moshi does. Both share one selection model.
+///
+/// Note `App/Features/`: this is the shell, not `App/RootView.swift`, and the
+/// difference matters when grepping for it.
 struct RootView: View {
+    /// A link handed over before this view existed — a notification tap that
+    /// launched the app. `CQUTmuxApp` reads it from `OpenLink` in its `init`,
+    /// which is the only point that runs before the window is built.
+    var launchLink: URL? = nil
+
     @Environment(HostStore.self) private var store
     @Environment(AgentConnection.self) private var connection
     @Environment(ThemeStore.self) private var themes
@@ -61,12 +69,25 @@ struct RootView: View {
         .tint(themes.current.accentColor)
         .preferredColorScheme(themes.current.dark ? .dark : .light)
         .onOpenURL { handle($0) }
+        // A notification tap on an app that is *already running*: `init` ran
+        // long ago and will not run again, so the stash has to be read here or
+        // the tap is dropped. `take()` and not the announcement's payload —
+        // whichever reader runs first gets the URL, the other gets nil, and a
+        // cold launch (where `init` also read it) cannot navigate twice.
+        .onReceive(NotificationCenter.default.publisher(for: OpenLink.delivered)) { _ in
+            if let url = OpenLink.shared.take() { handle(url) }
+        }
         .alert("Could not open the link", isPresented: .constant(linkProblem != nil)) {
             Button("OK") { linkProblem = nil }
         } message: {
             Text(linkProblem ?? "")
         }
         .task {
+            // A tap that launched the app hands its link here before the debug
+            // seeds run, so the two cannot race: the seed below is what
+            // `connection.connect(to:)` is called on, and a link means the
+            // terminal is about to open a session of its own.
+            if let launchLink, pendingLink == nil { handle(launchLink) }
             #if DEBUG
             // iOS puts a "Open in CQUTmux?" confirmation in front of a custom
             // scheme launched from outside the app, and reaching `onOpenURL`
@@ -126,6 +147,7 @@ struct RootView: View {
             // are handled here, before `pendingLink`, because neither has
             // anything for the terminal to do.
             if handleTheme(link) { return }
+            if handleNotification(link) { return }
             if handleInbox(link) { return }
             if handleUsage(link) { return }
             selection = .terminal
@@ -133,6 +155,23 @@ struct RootView: View {
         case .failure(let error):
             linkProblem = error.localizedDescription
         }
+    }
+
+    /// `cqutmux://notification`, which is where a tap on a notification lands.
+    ///
+    /// A tap carries no event id — only the banner and its buttons do — and the
+    /// Inbox is the destination either way: it is where the event and its
+    /// Allow/Deny are.
+    ///
+    /// Which is also to say there is no "Open Inbox on tap" gate here. That
+    /// preference is about activities the user put on the Lock Screen; a
+    /// notification that is *asking something* has nowhere else to send them.
+    /// That is the whole reason the parse keeps `.notification` apart from
+    /// `.inbox`; see `DeepLink.Target.notification`.
+    private func handleNotification(_ link: DeepLink) -> Bool {
+        guard case .notification = link.target else { return false }
+        selection = .inbox
+        return true
     }
 
     /// A theme link does not go through `handle` like the others: those name a
