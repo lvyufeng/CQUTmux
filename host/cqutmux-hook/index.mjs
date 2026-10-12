@@ -39,7 +39,7 @@ import {
   stateDir, parseStateDirectory, pageCarriesPreviewMarker, classifyListeners,
 } from './serve-sim.mjs'
 import { renderDiffHtml } from './diffpage.mjs'
-import { listAtRevision, readAtRevision } from './revision.mjs'
+import { listAtRevision, readAtRevision, blameAtRevision, isSafeRepoPath } from './revision.mjs'
 import { detectContext, sessionIndexFromTmux, contextPayload } from './context.mjs'
 import {
   apply as applyLocale,
@@ -1012,6 +1012,34 @@ const server = createServer(async (req, res) => {
           file,
           size: Buffer.byteLength(result.content),
           content: result.content,
+        })
+      : json(res, 404, { error: result.error })
+  }
+
+  // Who wrote each line of a file, as the file stands in the working tree or at
+  // a past commit. `rev` is optional here, unlike `/tree` and `/blob`: a commit
+  // is what the History tab has open, but the Changes tab's working tree is the
+  // other place a blame is asked for, and "no revision" is exactly the working
+  // tree — the shape that is indistinguishable from an empty string everywhere
+  // else is the answer here, so it is spelled as an omission.
+  if (req.method === 'GET' && url.pathname === '/blame') {
+    const dir = safePath(url.searchParams.get('path') || '')
+    if (!dir) return json(res, 403, { error: 'path outside root' })
+    const rev = url.searchParams.get('rev') || ''
+    const file = url.searchParams.get('file') || ''
+    // Refused here rather than only in the module, matching `/diff`'s `file=`
+    // refusal: a path that is not a path *inside* the repository is the
+    // caller's bug, and the module's "unsafe path" answer is a 404 that reads
+    // as "no such file" for a request that never named one. The module keeps
+    // its own check as the one that guards git.
+    if (!isSafeRepoPath(file)) return json(res, 403, { error: 'file outside root' })
+    const result = await blameAtRevision(dir, rev, file, MAX_FILE_BYTES)
+    return result.ok
+      ? json(res, 200, {
+          path: relative(args.root, dir),
+          rev,
+          file,
+          lines: result.lines,
         })
       : json(res, 404, { error: result.error })
   }

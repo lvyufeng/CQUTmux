@@ -99,6 +99,51 @@ struct RevisionFile: Codable, Identifiable {
     func asContents() -> (path: String, size: Int, content: String) { (file, size, content) }
 }
 
+/// One line of a file and the commit that last touched it, as the host reports
+/// it. The array of these is the shape `RevisionListing.entries` already is: a
+/// small Codable per row, so the host's `--line-porcelain` records decode
+/// without the client knowing anything about that format.
+struct BlameLine: Codable, Identifiable {
+    /// The line number in the blamed file, 1-based, which is also the identity:
+    /// a blame answers about a fixed snapshot, so two rows cannot share one.
+    var line: Int
+    var hash: String
+    var author: String
+    var email: String
+    /// Seconds since the epoch, or nil for a line git could not date. The host
+    /// sends the commit's author time verbatim.
+    var time: Double?
+    var summary: String
+    /// The path git recorded for the commit, which is the blamed file except
+    /// across a rename — where the two differ, and showing this one is how the
+    /// rename is visible.
+    var filename: String
+    /// The commit is at the edge of what was blamed: the root commit, or one
+    /// whose parents were not walked. The app uses this to stop offering "the
+    /// previous commit" rather than offering one that does not exist.
+    var boundary: Bool
+    /// False for a line that is in the working tree but not yet committed; git
+    /// reports those with an all-zero hash. Kept as its own flag rather than
+    /// left for the view to re-derive, so the zero-hash rule lives in one place.
+    var committed: Bool
+    /// The line itself, verbatim: leading whitespace, tabs and all.
+    var content: String
+    /// The commit this line's change came from, when git named one.
+    var previous: String?
+
+    var id: Int { line }
+
+    var date: Date? { time.map { Date(timeIntervalSince1970: $0) } }
+}
+
+/// A file's per-line attribution, at a revision or in the working tree.
+struct RevisionBlame: Codable {
+    var path: String
+    var rev: String
+    var file: String
+    var lines: [BlameLine]
+}
+
 /// A commit being browsed.
 struct BrowseTarget: Identifiable, Equatable {
     var rev: String

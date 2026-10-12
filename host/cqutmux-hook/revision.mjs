@@ -19,7 +19,10 @@
 //
 // Kept apart from the gateway so the parsing — which is where these rules live
 // — can be checked without a repository, and so the gateway does not grow a
-// sixth git command with its own quoting.
+// sixth git command with its own quoting. Blame is the third question asked of
+// the same repository and is here for the same reason: `--line-porcelain` is a
+// wire format with rules of its own (see `parseBlame`), not a git invocation
+// the gateway should be trusted to quote correctly inline.
 
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -147,6 +150,169 @@ export async function readAtRevision(cwd, rev, path, limit = 512 * 1024) {
     })
     if (Buffer.byteLength(stdout) > limit) return { ok: false, error: 'file too large' }
     return { ok: true, path, content: stdout }
+  } catch (error) {
+    return { ok: false, error: String(error.stderr || error.message || error).trim().slice(0, 300) }
+  }
+}
+
+/**
+ * Undoes git's C-style quoting of a `filename` header.
+ *
+ * `git blame` quotes and escapes the path when it contains anything outside
+ * plain ASCII — a space is left alone, but a quote, a tab, a newline or a
+ * non-ASCII byte makes the whole path a quoted string with octal escapes.
+ * Returned as-is when it is not quoted: unquoting a path that was never quoted
+ * would eat a backslash that is really in the name.
+ *
+ * The escapes handled are the ones `quote_c_style` writes: `\a\b\f\n\r\t\v\\`
+ * `\"` and `\ooo` octal. Each `\ooo` is one *byte* of a UTF-8 sequence, not one
+ * character — git quotes `é` as `\303\251`, two bytes — so the decoded bytes are
+ * collected and decoded as UTF-8 at the end. Turning each escape straight into
+ * a character would yield `Ã©`, a mojibake path that looks like a rename.
+ */
+function unquotePath(raw) {
+  if (!raw.startsWith('"') || !raw.endsWith('"') || raw.length < 2) return raw
+  const body = raw.slice(1, -1)
+  const simple = { a: 7, b: 8, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92, '"': 34 }
+  const bytes = []
+  const push = ch => { for (const byte of Buffer.from(ch, 'utf8')) bytes.push(byte) }
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] !== '\\') { push(body[i]); continue }
+    const next = body[++i]
+    if (next in simple) { bytes.push(simple[next]); continue }
+    if (next >= '0' && next <= '7') {
+      let octal = next
+      while (octal.length < 3 && body[i + 1] >= '0' && body[i + 1] <= '7') octal += body[++i]
+      bytes.push(parseInt(octal, 8) & 0xff)
+      continue
+    }
+    // A backslash before anything else is git's own escaping of a character it
+    // did not need to escape; keep the character, not the backslash.
+    push(next)
+  }
+  return Buffer.from(bytes).toString('utf8')
+}
+
+/** `author-mail <a@b>` → `a@b`; git writes the address wrapped in angle brackets. */
+function stripAngleBrackets(value) {
+  return value.startsWith('<') && value.endsWith('>') ? value.slice(1, -1) : value
+}
+
+/**
+ * `git blame --line-porcelain` output as per-line attribution.
+ *
+ * `--line-porcelain` rather than `--porcelain` deliberately. The plain form
+ * prints a commit's full metadata once and elides it for that commit's later
+ * lines — which means a correct reader has to carry commit state forward across
+ * records, and the one place that state can go stale is exactly where two
+ * records of the same commit are adjacent. The line form repeats the metadata
+ * before *every* line, so each record stands alone and there is no carried
+ * state to get wrong; the cost is bytes on a loopback socket.
+ *
+ * A record is the metadata lines, then a line whose first byte is a TAB. That
+ * tab is the only delimiter: the content after it is the line as it is in the
+ * file and can begin with spaces, contain tabs, or be empty (an empty line in
+ * the file is a lone TAB followed by nothing). Splitting a record on whitespace
+ * would silently strip that leading indentation — a blame column that shifts
+ * every indented line one tab to the left, which reads as a formatting choice
+ * rather than as corruption.
+ *
+ * The header line is `<sha> <orig-line> <final-line> [<group-size>]`. The sha
+ * can be all zeros: git uses it for a line that is in the working tree but not
+ * yet committed, so those come back as `committed: false` rather than as a
+ * commit whose hash happens to be zeros.
+ *
+ * `boundary` marks a commit at the edge of the blamed range — the root commit,
+ * or one whose parents were not walked — so the app can say the history stops
+ * here rather than offer a parent that does not exist.
+ */
+export function parseBlame(stdout) {
+  const records = String(stdout || '').split('\n')
+  const lines = []
+  let current = null
+  for (const record of records) {
+    if (record.startsWith('\t')) {
+      if (current) {
+        current.content = record.slice(1)
+        lines.push(current)
+        current = null
+      }
+      continue
+    }
+    if (record === '') continue
+    const header = /^([0-9a-fA-F]{40,64}) (\d+) (\d+)(?: (\d+))?$/.exec(record)
+    if (header) {
+      current = {
+        hash: header[1].toLowerCase(),
+        line: Number(header[3]),
+        author: '',
+        email: '',
+        time: null,
+        summary: '',
+        filename: '',
+        previous: null,
+        boundary: false,
+        committed: !/^0+$/.test(header[1]),
+        content: '',
+      }
+      continue
+    }
+    if (!current) continue
+    const space = record.indexOf(' ')
+    const key = space < 0 ? record : record.slice(0, space)
+    const value = space < 0 ? '' : record.slice(space + 1)
+    if (key === 'author') current.author = value
+    else if (key === 'author-mail') current.email = stripAngleBrackets(value)
+    else if (key === 'author-time') current.time = Number(value)
+    else if (key === 'summary') current.summary = value
+    else if (key === 'filename') current.filename = unquotePath(value)
+    else if (key === 'boundary') current.boundary = true
+    else if (key === 'previous') {
+      // `previous <sha> <filename>`; the filename is quoted the same way, and a
+      // `previous` with no path means git knew no parent.
+      const parts = value.split(' ')
+      if (parts[0]) current.previous = parts[0].toLowerCase()
+    }
+  }
+  return lines
+}
+
+/**
+ * The arguments for attributing each line of one file.
+ *
+ * `--` before the path so a filename that looks like a flag or a revision is a
+ * path. `-l` is not passed: a short hash is the app's business (`RevisionPath`)
+ * and the full object id is what a later lookup needs.
+ */
+export function blameArgs(rev, path) {
+  return rev
+    ? ['blame', '--line-porcelain', rev, '--', path]
+    : ['blame', '--line-porcelain', '--', path]
+}
+
+/**
+ * Blames one file, returning a per-line attribution.
+ *
+ * `rev` is optional: omitted, git blames the working tree (and any line not yet
+ * committed comes back with an all-zero hash, which `parseBlame` marks). Given,
+ * it blames the file as it stood at that commit.
+ *
+ * The size cap is applied to git's own output rather than to the file: porcelain
+ * is several times the file's size, and a file just under the cap would blow the
+ * budget several times over once every line carries a full commit header. Over
+ * the cap the whole response is refused, matching `/file` — a partial set of
+ * lines would show as a file whose tail is attributed to nobody.
+ */
+export async function blameAtRevision(cwd, rev, path, limit = 512 * 1024) {
+  if (rev && !isSafeRevision(rev)) return { ok: false, error: 'unsafe revision' }
+  if (!isSafeRepoPath(path)) return { ok: false, error: 'unsafe path' }
+  try {
+    const { stdout } = await exec('git', blameArgs(rev, path), {
+      cwd,
+      maxBuffer: Math.max(limit * 2, 1024 * 1024),
+    })
+    if (Buffer.byteLength(stdout) > limit) return { ok: false, error: 'file too large' }
+    return { ok: true, path, rev: rev || '', lines: parseBlame(stdout) }
   } catch (error) {
     return { ok: false, error: String(error.stderr || error.message || error).trim().slice(0, 300) }
   }

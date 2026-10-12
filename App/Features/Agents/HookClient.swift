@@ -380,6 +380,28 @@ final class HookClient {
         return try JSONDecoder().decode(RevisionListing.self, from: payload.body)
     }
 
+    /// Who wrote each line of a file at a past commit.
+    ///
+    /// `rev` is optional, unlike `tree` and `blob`: an omitted revision is the
+    /// working tree, which is the other place a blame is asked for. That is why
+    /// this route is not folded into `/blob` — there the absence of a revision
+    /// is a mistake, and here it is the answer.
+    ///
+    /// The status is checked rather than left to the decoder, which is where
+    /// this parts company with the other browsing methods. `blame` has a refusal
+    /// that carries an answer the caller has to tell apart: the gateway answers
+    /// 403 for a path that is not a path inside the repository and 404 for a
+    /// path or revision that does not exist, and a caller that only ever sees a
+    /// decoding error cannot say which of the two it was.
+    func blame(path: String, rev: String = "", file: String) async throws -> RevisionBlame {
+        let query = query(["path": path, "rev": rev, "file": file])
+        let payload = try await request("GET", "/blame?\(query)")
+        guard payload.status == 200 else {
+            throw Failure.server(status: payload.status, message: Self.errorText(payload.body))
+        }
+        return try JSONDecoder().decode(RevisionBlame.self, from: payload.body)
+    }
+
     /// One file's content at a past commit.
     func blob(path: String, rev: String, file: String) async throws -> RevisionFile {
         let query = query(["path": path, "rev": rev, "file": file])
