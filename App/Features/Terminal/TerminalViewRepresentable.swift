@@ -21,6 +21,10 @@ struct TerminalScreen: View {
     @State private var settings = SpeechSettings()
     @State private var speechModels = WhisperModelStore()
     @State private var dictation: Dictation?
+    /// Whether the press on the mic is a hold rather than a tap. Set when the
+    /// long press is recognised and read on release, so the release can tell
+    /// the two apart — the press-state callback fires for both.
+    @State private var holdingDictation = false
     /// Chat mode's draft, held here rather than inside `ChatComposerBar` so the
     /// other two ways a message is composed — a dictated phrase and an uploaded
     /// image's path — land in the same field. A draft the bar owned privately
@@ -703,8 +707,8 @@ struct TerminalScreen: View {
         }
         .background(barSurface)
         .overlay(alignment: .top) {
-            if !coordinator.dictationPreview.isEmpty {
-                Text(coordinator.dictationPreview)
+            if let line = dictationLine {
+                Text(line)
                     .font(.caption)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
@@ -713,6 +717,18 @@ struct TerminalScreen: View {
                     .transition(.opacity)
             }
         }
+    }
+
+    /// What the line above the key bar says: the phrase being dictated, or why
+    /// dictation could not start.
+    ///
+    /// The two are the same slot because they are the same question from the
+    /// user's side — did that press do anything — and an engine that refused
+    /// used to answer it with nothing at all. A button that goes quiet reads as
+    /// broken, and the reason here is always something the user can act on: a
+    /// permission, a model to download, an endpoint to set.
+    private var dictationLine: String? {
+        coordinator.dictationPreview.isEmpty ? dictation?.problem : coordinator.dictationPreview
     }
 
     /// The user's own bindings, after the built-ins so the bar reads
@@ -1084,15 +1100,23 @@ struct TerminalScreen: View {
         // works, so this cannot fire when the tap does: SwiftUI runs the tap
         // only if the hold never reaches its threshold, and the two cannot both
         // complete for one press.
+        //
+        // The start is here, on the gesture's own recognition, rather than on
+        // the press-state callback. Recognition happens when the threshold
+        // elapses with the finger still down — which is what makes
+        // `.sequenced(before:)` work — whereas the press-state callback fires
+        // for every press, tap included. Starting there meant every tap started
+        // dictation too and left the button's own action to end it.
         .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 60) {
-            // Released: stop, having started below.
-            if dictation?.isListening == true { dictation?.stop() }
+            holdingDictation = true
+            dictation?.start(locale: dictation?.locale ?? .current)
         } onPressingChanged: { pressing in
-            if pressing {
-                if dictation?.isListening == false { dictation?.start(locale: dictation?.locale ?? .current) }
-            } else if dictation?.isListening == true {
-                dictation?.stop()
-            }
+            // Only a release that ended a hold stops one. A tap reports the
+            // same press and release, and stopping there would cancel the
+            // dictation the button's action is about to start.
+            guard !pressing, holdingDictation else { return }
+            holdingDictation = false
+            dictation?.stop()
         }
     }
 
