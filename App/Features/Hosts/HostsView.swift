@@ -109,15 +109,11 @@ struct HostsView: View {
             guard let match else { return }
             if !path.contains(match) { path.append(match) }
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    editing = Host()
-                } label: {
-                    Label("Add Host", systemImage: "plus")
-                }
-            }
-        }
+        // No second toolbar item here. This view used to carry a bare "+" as
+        // well as the Add menu above, on the same modifier chain, and SwiftUI
+        // merges those into one navigation bar — so the Terminal tab showed
+        // two add controls side by side, one of which had nothing the other's
+        // "Add Manually" did not.
         .sheet(item: $editing) { host in
             NavigationStack {
                 HostEditView(host: host) { store.upsert($0) }
