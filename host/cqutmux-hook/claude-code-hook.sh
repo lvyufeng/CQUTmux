@@ -15,14 +15,26 @@
 #         { "hooks": [
 #           { "type": "command", "command": "/path/to/claude-code-hook.sh notice" }
 #         ] }
+#       ],
+#       "SessionEnd": [
+#         { "hooks": [
+#           { "type": "command", "command": "/path/to/claude-code-hook.sh session-end" }
+#         ] }
 #       ]
 #     }
 #   }
 #
-# The first argument selects the kind: "approval", "notice", "session-start" or
-# "tool-finish". The first two are the two shapes the wire has always carried;
-# the extra two exist so the Inbox can reach all five of its categories from a
-# real install rather than only when an agent volunteers an event name.
+# The first argument selects the kind: "approval", "notice", "session-start",
+# "tool-finish" or "session-end". The first two are the two shapes the wire has
+# always carried; the rest exist so the Inbox can reach every category it draws
+# from a real install rather than only when an agent volunteers an event name.
+#
+# `session-end` is the only one that is not another word for a turn. Quitting
+# the agent is not the same as the agent finishing, and the difference is the
+# Live Activity: a finished turn leaves one on the Lock Screen to be read,
+# while a session that has ended has nothing left to say, so the activity is
+# dismissed. That is `data.sessionEnded`, read first by the host's phase table
+# and by the app's `AgentEvent.endsSession`.
 
 set -euo pipefail
 
@@ -66,14 +78,22 @@ session="$(printf '%s' "$payload" | json_string session_id)"
 
 # The kind is the *shape* on the wire (`approval`/`notice`), and the category is
 # the finer thing the Inbox draws — one of Moshi's five. Claude's SessionStart
-# hook is a separate invocation, so it is a third kind here rather than a
-# category on an existing one.
+# and SessionEnd hooks are separate invocations, so each is its own kind here
+# rather than a category on an existing one.
+ends_session=0
 case "$KIND" in
   session-start)
     title="Session started"
     body=""
     wire_kind="notice"
     category="session_started"
+    ;;
+  session-end)
+    title="Session ended"
+    body=""
+    wire_kind="notice"
+    category="task_complete"
+    ends_session=1
     ;;
   approval)
     title="${tool:-tool call}"
@@ -109,8 +129,14 @@ print(json.dumps({
     "category": sys.argv[2],
     "title": sys.argv[3][:200],
     "body": sys.argv[4][:1000],
-    "data": {"session": sys.argv[5]},
+    "data": {
+        "session": sys.argv[5],
+        # Sent only when it is true. A `sessionEnded: false` would read as a
+        # claim that the session is still running, and the phase table treats
+        # the field as "this event ends the session".
+        **({"sessionEnded": True} if sys.argv[6] == "1" else {}),
+    },
 }))
-' "$wire_kind" "$category" "$title" "$body" "$session")" >/dev/null 2>&1 || true
+' "$wire_kind" "$category" "$title" "$body" "$session" "$ends_session")" >/dev/null 2>&1 || true
 
 exit 0

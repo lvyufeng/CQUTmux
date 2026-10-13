@@ -461,7 +461,23 @@ async function gitDiff(cwd, extra = []) {
       .filter(Boolean)
       .map(line => ({ status: line.slice(0, 2).trim(), path: line.slice(3) }))
     return { isRepo: true, files, diff }
-  } catch {
+  } catch (error) {
+    // A bare catch here was not just lossy, it was wrong. Two very different
+    // things land in it: a directory that is not a repository at all, and a
+    // repository whose diff is too big for the buffer. Both came back
+    // `isRepo: false`, so a large change was reported as "This directory isn't
+    // under version control" — the one answer that tells the user to stop
+    // looking. The overflow is now its own refusal, with a message that names
+    // the limit, and the app draws it instead of the empty-repository state.
+    if (error && (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+                  || /maxBuffer|stdout maxBuffer/i.test(String(error.message)))) {
+      return {
+        isRepo: true,
+        files: [],
+        diff: '',
+        error: `this change is larger than the ${Math.round(8 * 1024 * 1024 / (1024 * 1024))} MB the host will read`,
+      }
+    }
     return { isRepo: false, files: [], diff: '' }
   }
 }
@@ -484,7 +500,18 @@ async function gitLog(cwd, limit = 40) {
         return { hash, short, author, date, subject, refs: refs || '' }
       })
     return { isRepo: true, commits }
-  } catch {
+  } catch (error) {
+    // Same distinction as the diff above: a missing repository and a history
+    // too long to read are not the same answer, and only one of them means
+    // "there is nothing here".
+    if (error && (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+                  || /maxBuffer|stdout maxBuffer/i.test(String(error.message)))) {
+      return {
+        isRepo: true,
+        commits: [],
+        error: `this history is larger than the ${Math.round(4 * 1024 * 1024 / (1024 * 1024))} MB the host will read`,
+      }
+    }
     return { isRepo: false, commits: [] }
   }
 }
@@ -941,7 +968,14 @@ const server = createServer(async (req, res) => {
     try {
       const info = await stat(file)
       if (!info.isFile()) return json(res, 400, { error: 'not a file' })
-      if (info.size > MAX_FILE_BYTES) return json(res, 413, { error: 'file too large' })
+      // The limit is in the sentence. "file too large" on its own leaves the
+      // reader with no idea whether they are 10% over or a hundred times over,
+      // and the app shows this string verbatim.
+      if (info.size > MAX_FILE_BYTES) {
+        return json(res, 413, {
+          error: `this file is over the ${MAX_FILE_BYTES / 1024} KB the host will read`,
+        })
+      }
       const content = await readFile(file, 'utf8')
       return json(res, 200, { path: relative(args.root, file), size: info.size, content })
     } catch (error) {
@@ -957,6 +991,9 @@ const server = createServer(async (req, res) => {
     // for the list, and re-sending it to show one file would be a megabyte of
     // text the phone already has.
     const file = url.searchParams.get('file')
+    // A change too large to read is a refusal, not a result. It used to be
+    // returned as a 200 carrying `isRepo: false`, which the app draws as
+    // "This directory isn't under version control."
     if (file) {
       // Refused rather than joined when absolute: `join` would quietly re-root
       // `/etc/passwd` under the repo, so the check would *pass* and git would
@@ -967,9 +1004,13 @@ const server = createServer(async (req, res) => {
         return json(res, 403, { error: 'file outside root' })
       }
       // `--` so a filename that looks like a flag or a revision is a path.
-      return json(res, 200, await gitDiff(dir, ['--', file]))
+      const narrowed = await gitDiff(dir, ['--', file])
+      if (narrowed.error) return json(res, 413, { error: narrowed.error })
+      return json(res, 200, narrowed)
     }
-    return json(res, 200, await gitDiff(dir))
+    const whole = await gitDiff(dir)
+    if (whole.error) return json(res, 413, { error: whole.error })
+    return json(res, 200, whole)
   }
 
   // The repository at a past commit: the Changes tab reads the working tree,
@@ -1048,7 +1089,9 @@ const server = createServer(async (req, res) => {
     const dir = safePath(url.searchParams.get('path') || '')
     if (!dir) return json(res, 403, { error: 'path outside root' })
     const limit = Number(url.searchParams.get('limit') || 40)
-    return json(res, 200, await gitLog(dir, limit))
+    const history = await gitLog(dir, limit)
+    if (history.error) return json(res, 413, { error: history.error })
+    return json(res, 200, history)
   }
 
   if (req.method === 'GET' && url.pathname === '/transcript') {
@@ -3429,6 +3472,11 @@ async function installClaude(agent, dryRun) {
     // `session_started` category at all — a whole row state that only exists
     // if the installer asked for it.
     SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: `"${bridge}" session-start` }] }],
+    // And the other end of the same pair. Without it nothing ever sets
+    // `sessionEnded`, so the Live Activity's final phase was unreachable: the
+    // activity lingered on the Lock Screen as a finished turn after the agent
+    // it described had gone.
+    SessionEnd: [{ hooks: [{ type: 'command', command: `"${bridge}" session-end` }] }],
   }
 
   const existing = await readJson(target)

@@ -71,13 +71,16 @@ else:
 if "Stop" not in hooks:
     fail("Claude Code has no Stop hook")
 
-# Three more events exist only to carry a category. Without them the Inbox can
-# never show `tool_finished` or `session_started` for Claude at all — two of
+# The rest exist only to carry what no other event can. Without them the Inbox
+# can never show `tool_finished` or `session_started` for Claude at all — two of
 # Moshi's five row states would be unreachable from a real install, and the
-# board would look complete while missing them. Asserted by the argument the
-# bridge is invoked with, because a hook that calls the bridge with the wrong
-# kind is installed and produces the wrong category forever.
-for event, argument in [("PostToolUse", "tool-finish"), ("SessionStart", "session-start")]:
+# board would look complete while missing them — and nothing would ever set
+# `sessionEnded`, leaving the Live Activity's final phase unreachable too.
+# Asserted by the argument the bridge is invoked with, because a hook that calls
+# the bridge with the wrong kind is installed and produces the wrong thing
+# forever.
+for event, argument in [("PostToolUse", "tool-finish"), ("SessionStart", "session-start"),
+                        ("SessionEnd", "session-end")]:
     if event not in hooks:
         fail(f"Claude Code has no {event} hook, so its category can never be shown")
     elif argument not in json.dumps(hooks[event]):
@@ -307,6 +310,17 @@ printf '%s' '{"session_id":"s10"}' \
   | HOME="$FAKE_HOME" CQUTMUX_PORT=24999 \
     bash host/cqutmux-hook/claude-code-hook.sh session-start
 
+# The other end of that pair, and the only thing that produces `sessionEnded`.
+# Both routes are exercised because they are separate programs reading
+# different things: the shell bridge is told the kind on its command line,
+# while the Node bridge can also read the agent's own event name.
+printf '%s' '{"session_id":"s13"}' \
+  | HOME="$FAKE_HOME" CQUTMUX_PORT=24999 \
+    bash host/cqutmux-hook/claude-code-hook.sh session-end
+printf '%s' '{"hook_event_name":"SessionEnd","session_id":"s14"}' \
+  | HOME="$FAKE_HOME" CQUTMUX_PORT=24999 \
+    node host/cqutmux-hook/agent-hook.mjs claude-code notice
+
 # `error` is the one category no event name or kind maps to — the payload has to
 # declare it. The kind here is `notice`, whose derived category is
 # `task_complete`, so this passing proves the declared value wins over the
@@ -356,8 +370,19 @@ for source in ["claude-code", "codex", "cursor", "kimi", "antigravity"]:
         problems.append(f"{source}'s event has an empty body")
 
 count = sum(len(v) for v in by_source.values())
-if count < 10:
-    problems.append(f"expected 10 events (five node bridges plus five shell/kind ones), got {count}")
+if count < 12:
+    problems.append(f"expected 12 events (five node bridges plus the shell/kind ones), got {count}")
+
+# `sessionEnded` is the only thing that can reach the Live Activity's final
+# phase, and it is a single boolean carrying a lot: the host's phase table
+# reads it before the kind, and the app's `AgentEvent.endsSession` is what
+# dismisses the activity instead of leaving a finished turn on the Lock
+# Screen. Both producers, and nothing else claiming it.
+enders = {(e.get("data") or {}).get("session") for e in events
+          if (e.get("data") or {}).get("sessionEnded") is True}
+if enders != {"s13", "s14"}:
+    problems.append(f"sessionEnded reached the gateway for {sorted(enders)},"
+                    " expected exactly the two session-end cases")
 
 # Every category, on the session that was sent to produce it. Checked by session
 # rather than by source: several of these come from the same agent, and the
@@ -419,8 +444,6 @@ else:
     else:
         covered.add("tool_running")
 
-# All five reachable, as a set. The per-session checks above can each pass while
-# the set is short — one wrong mapping and one missing kind would cancel out.
 # All six reachable, as a set. The per-session checks above can each pass while
 # the set is short — one wrong mapping and one missing kind would cancel out.
 missing = {"approval_required", "task_complete", "session_started",

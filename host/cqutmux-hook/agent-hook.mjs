@@ -13,7 +13,7 @@
 // chances for one of them to be subtly different. The differences here are
 // exactly the field names, so they live in a table.
 //
-// Usage: agent-hook.mjs <source> <approval|notice|session-start|tool-finish>
+// Usage: agent-hook.mjs <source> <approval|notice|session-start|session-end|tool-finish>
 //
 // Never blocks the agent: any failure exits 0. A hook that errors is far worse
 // than a missing notification, because the agent waits on it.
@@ -119,9 +119,17 @@ const CATEGORY_OF_EVENT = {
 const CATEGORY_OF_KIND = {
   approval: 'approval_required',
   'session-start': 'session_started',
+  'session-end': 'task_complete',
   'tool-finish': 'tool_finished',
   notice: 'task_complete',
 }
+// Quitting an agent is not the same event as the agent finishing a turn, and
+// the category cannot carry the difference — both are `task_complete`, which is
+// the right row for the Inbox either way. What differs is the Live Activity: a
+// finished turn leaves one on the Lock Screen to be read, and a session that
+// has ended has nothing left to say, so it is dismissed. That is
+// `data.sessionEnded`, which the phase table reads before the kind.
+const endsSession = eventName === 'SessionEnd' || kind === 'session-end'
 // A hook may say which category its event is in its own payload. That is the
 // only route to `error`, which no event name or kind maps to — the gateway
 // accepts it, but nothing would ever send it if the bridge dropped it here.
@@ -163,6 +171,9 @@ const event = {
     // The agent's own event name, kept so a future hook can be told apart from
     // an old one without the gateway guessing from the fields present.
     ...(eventName ? { event: String(eventName) } : {}),
+    // Sent only when true: the field is read as "this event ends the session",
+    // so a false would be a claim rather than an absence.
+    ...(endsSession ? { sessionEnded: true } : {}),
   },
 }
 
