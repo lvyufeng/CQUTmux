@@ -261,7 +261,12 @@ has since been closed, with the check that pins it.
   stored shortcut string and a text field in Settings.
 - **Gesture "Reset all"** — `GestureStore.resetAll`.
 - **Push-to-talk dictation** — press-and-hold on the mic button, backed by a new
-  `Dictation.start()` that does not toggle.
+  `Dictation.start()` that does not toggle. The release half was dead for longer
+  than this bullet admits: `Dictation.isListening` was read back from the
+  engine's own state, which arrives in a `Task`, so the flag was false when
+  written and both stop sites were guarded on it. The flag is now the request,
+  and a release that lands before the engine has begun recording is held over
+  and honoured when it does (see the audit record for the entry).
 - **`usage-collection` and `always-on-discovery` did nothing** — both parsed
   from the config file and then never read. Wired to real behaviour.
 - **Rosé Pine Dawn** — added to the built-in themes with the published palette,
@@ -1019,14 +1024,19 @@ the side-by-side pane with nothing to say.
 
 - The Browse tab has syntax highlighting (`FileView` →
   `SyntaxPalette.attributed` → `SyntaxHighlighter`) and can open a file from a
-  past revision (`CommitBrowserView`). Blame's data layer now exists —
-  `GET /blame` (`revision.mjs` → `HookClient.blame(path:rev:file:)` →
-  `RevisionBlame`) returns per-line hash, author, time, summary, boundary and
-  committed flags, checked by `scripts/blame-check.sh` (40) against a real
-  throwaway repository — but nothing renders it: no view calls `blame`, so the
-  attribution reaches the app and stops. The commit list is likewise still a
-  plain list rather than anything annotated. The gap is now the screen, not the
-  wire.
+  past revision (`CommitBrowserView`). Blame is wired end to end: `GET /blame`
+  (`revision.mjs` → `HookClient.blame(path:rev:file:)` → `RevisionBlame`)
+  returns per-line hash, author, time, summary, boundary and committed flags,
+  checked by `scripts/blame-check.sh` (40) against a real throwaway repository,
+  and `FileView` renders it — the sheet hands the viewer a `BlameSource` for the
+  working-tree file (`CodePanelView.swift:239`, and for that file rather than a
+  revision, or the lines would be attributed to a version the user is not
+  looking at), and a Blame button pushes `BlameView` instead of presenting it,
+  because a blame is the same file read a second way and pushing leaves the file
+  behind it reachable. What is still plain is the *commit* list: a row carries
+  subject, short hash, author, date and refs and opens `CommitBrowserView` at
+  that revision, but nothing annotates it with what the commit changed. That is
+  the part of the gap left — not the wire, and no longer the file viewer.
 - The Live Activity carries the four lifecycle phases — approval needed,
   working, done and session ended — and the Lock Screen and the Island carry
   Allow/Deny buttons, so the answer no longer has to be given in the app:
