@@ -29,6 +29,11 @@ host/cqutmux-hook/cqutmux-hook
 build-watch/
 # Simulator-build derived data (a `-derivedDataPath build-sim` run)
 build-sim/
+# Release-build derived data (a `-derivedDataPath build-release` run). A
+# Release build is a separate artifact store from the Debug one, so it gets its
+# own path — and being a gigabyte of intermediates, it is the last thing that
+# should ever show up as an untracked directory in `git status`.
+build-release/
 # Copied in by scripts/passphrase-check.sh so SwiftPM can compile the app's
 # KeyMaterial.swift against the transport package. The original is the source
 # of truth and the script overwrites this on every run.

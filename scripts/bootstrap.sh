@@ -6,6 +6,28 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS="$ROOT/.tools"
 XCODEGEN="$TOOLS/xcodegen/bin/xcodegen"
 
+# The lock is shared with build.sh, which holds it across the whole build: a
+# build that reads the project while another run has just regenerated it fails
+# in ways that read as source errors. build.sh sets the flag after taking the
+# lock itself, so the two are one critical section rather than a nested pair.
+if [[ "${CQUTMUX_LOCK_HELD:-}" != "1" ]]; then
+  mkdir -p "$TOOLS"
+  LOCK="$TOOLS/.xcodegen.lock"
+  waited=0
+  until mkdir "$LOCK" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+    if (( waited >= 300 )); then
+      echo "==> gave up waiting for $LOCK after ${waited}s" >&2
+      echo "    if no build is running, remove it: rm -rf '$LOCK'" >&2
+      exit 1
+    fi
+  done
+  # Registered only once the lock is ours, so the timeout path above cannot
+  # release a lock it never took.
+  trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+fi
+
 if [[ ! -x "$XCODEGEN" ]]; then
   if command -v xcodegen >/dev/null 2>&1; then
     XCODEGEN="$(command -v xcodegen)"
