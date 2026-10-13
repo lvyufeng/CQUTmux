@@ -32,11 +32,17 @@ skip_for() {
 }
 
 TIMEOUT="${CHECK_TIMEOUT:-600}"
+# How much of a failing check's own output to keep. A check that fails prints
+# the reason; without it the summary names the check and nothing else, which
+# is the moment someone is looking. Capped so one chatty check cannot bury
+# every other result.
+FAIL_LINES=25
 pass=0
 fail=0
 skipped=0
 failed_names=()
 declare -a results=()
+declare -a failed_output=()
 
 # Sorted so the output is stable and diffable between runs.
 while IFS= read -r script; do
@@ -64,6 +70,8 @@ while IFS= read -r script; do
     fail=$((fail + 1))
     failed_names+=("$name")
     results+=("FAIL  $name  (exit $rc)")
+    failed_output+=("$(printf '%s\n' "$name (exit $rc)" \
+      "$(printf '%s\n' "$out" | tail -n "$FAIL_LINES")")")
   fi
 done < <(ls scripts/*-check.sh | sort)
 
@@ -72,6 +80,11 @@ echo
 
 if (( fail > 0 )); then
   echo "==> $fail failed: ${failed_names[*]}"
+  echo
+  for blob in "${failed_output[@]}"; do
+    printf '%s\n' "$blob" | sed 's/^/    /'
+    echo
+  done
   echo "    re-run one with: bash scripts/<name>"
   echo "CHECKS_FAIL ($pass passed, $fail failed, $skipped skipped)"
   exit 1

@@ -135,5 +135,5 @@ done
 echo "PASS  the widget extension was launched to render it"
 
 echo ""
-echo "LIVEACTIVITY_DELIVERY_PASS (6 checks)"
+echo "LIVEACTIVITY_DELIVERY_PASS (7 checks)"
 echo "NOTE  app-side verified; APNs push *delivery* still needs a device + profile"
