@@ -341,18 +341,21 @@ final class HookClient {
     func listFiles(path: String) async throws -> DirectoryListing {
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
         let payload = try await request("GET", "/files?path=\(encoded)")
+        try checked(payload)
         return try JSONDecoder().decode(DirectoryListing.self, from: payload.body)
     }
 
     func readFile(path: String) async throws -> FileContents {
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
         let payload = try await request("GET", "/file?path=\(encoded)")
+        try checked(payload)
         return try JSONDecoder().decode(FileContents.self, from: payload.body)
     }
 
     func gitDiff(path: String) async throws -> DiffResult {
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
         let payload = try await request("GET", "/diff?path=\(encoded)")
+        try checked(payload)
         return try JSONDecoder().decode(DiffResult.self, from: payload.body)
     }
 
@@ -365,7 +368,21 @@ final class HookClient {
         let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
         let encodedFile = file.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? file
         let payload = try await request("GET", "/diff?path=\(encodedPath)&file=\(encodedFile)")
+        try checked(payload)
         return try JSONDecoder().decode(DiffResult.self, from: payload.body)
+    }
+
+    /// Refuses a response the gateway did not answer with, in its own words.
+    ///
+    /// The browse methods used to hand any response straight to the decoder,
+    /// which means a refusal arrived as a `keyNotFound` naming a coding key —
+    /// the app's vocabulary rather than the user's. `Failure` already carries
+    /// the gateway's sentence for exactly this reason; the only problem was
+    /// that nobody was reading it.
+    private func checked(_ payload: HTTPPayload) throws {
+        guard payload.status == 200 else {
+            throw Failure.server(status: payload.status, message: Self.errorText(payload.body))
+        }
     }
 
     /// The repository at a past commit: one directory of that commit's tree.
@@ -377,6 +394,7 @@ final class HookClient {
     func tree(path: String, rev: String, dir: String = "") async throws -> RevisionListing {
         let query = query(["path": path, "rev": rev, "dir": dir])
         let payload = try await request("GET", "/tree?\(query)")
+        try checked(payload)
         return try JSONDecoder().decode(RevisionListing.self, from: payload.body)
     }
 
@@ -387,18 +405,15 @@ final class HookClient {
     /// this route is not folded into `/blob` — there the absence of a revision
     /// is a mistake, and here it is the answer.
     ///
-    /// The status is checked rather than left to the decoder, which is where
-    /// this parts company with the other browsing methods. `blame` has a refusal
-    /// that carries an answer the caller has to tell apart: the gateway answers
-    /// 403 for a path that is not a path inside the repository and 404 for a
-    /// path or revision that does not exist, and a caller that only ever sees a
-    /// decoding error cannot say which of the two it was.
+    /// The status is checked here for the same reason it is checked everywhere
+    /// else in this family, and the refusals are the reason it matters most
+    /// here: the gateway answers 403 for a path that is not a path inside the
+    /// repository and 404 for a path or revision that does not exist, and a
+    /// caller that only ever sees a decoding error cannot say which it was.
     func blame(path: String, rev: String = "", file: String) async throws -> RevisionBlame {
         let query = query(["path": path, "rev": rev, "file": file])
         let payload = try await request("GET", "/blame?\(query)")
-        guard payload.status == 200 else {
-            throw Failure.server(status: payload.status, message: Self.errorText(payload.body))
-        }
+        try checked(payload)
         return try JSONDecoder().decode(RevisionBlame.self, from: payload.body)
     }
 
@@ -406,6 +421,7 @@ final class HookClient {
     func blob(path: String, rev: String, file: String) async throws -> RevisionFile {
         let query = query(["path": path, "rev": rev, "file": file])
         let payload = try await request("GET", "/blob?\(query)")
+        try checked(payload)
         return try JSONDecoder().decode(RevisionFile.self, from: payload.body)
     }
 
@@ -428,6 +444,7 @@ final class HookClient {
     func gitLog(path: String, limit: Int = 40) async throws -> LogResult {
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
         let payload = try await request("GET", "/log?path=\(encoded)&limit=\(limit)")
+        try checked(payload)
         return try JSONDecoder().decode(LogResult.self, from: payload.body)
     }
 

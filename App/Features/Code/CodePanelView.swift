@@ -15,6 +15,15 @@ struct CodePanelView: View {
     @State private var diff: DiffResult?
     @State private var log: LogResult?
     @State private var error: String?
+    /// Kept apart from `error` because they are answers to different questions.
+    /// A diff that cannot be read says nothing about whether the file list
+    /// loaded, and one field for both would blank a screen that is fine — or,
+    /// as it was, leave the failed one with a spinner and no explanation.
+    @State private var diffProblem: String?
+    @State private var logProblem: String?
+    /// A file that would not open. Shown as an alert rather than in place of
+    /// the list: the tap was on one row, and the other rows are still good.
+    @State private var openProblem: String?
     @State private var openFile: FileContents?
     /// The changed file whose diff is open, if any.
     @State private var openDiff: DiffResult.File?
@@ -213,6 +222,13 @@ struct CodePanelView: View {
             if ProcessInfo.processInfo.environment["CQUT_DEV_SHEET"] == "uploads" { showUploads = true }
             #endif
         }
+        .alert("Couldn't open that file",
+               isPresented: Binding(get: { openProblem != nil },
+                                    set: { if !$0 { openProblem = nil } })) {
+            Button("OK", role: .cancel) { openProblem = nil }
+        } message: {
+            Text(openProblem ?? "")
+        }
         .sheet(item: $openFile) { (file: FileContents) in
             NavigationStack {
                 FileView(
@@ -247,7 +263,13 @@ struct CodePanelView: View {
             List {
                 if path != "." {
                     Button {
-                        path = (path as NSString).deletingLastPathComponent
+                        // Normalised: deleting the last component of a
+                        // one-segment path gives the empty string, not ".",
+                        // and the guard above only knows about ".". Left as
+                        // "", the row reappeared at the root — where there is
+                        // nothing above to go to — and did nothing when tapped.
+                        let up = (path as NSString).deletingLastPathComponent
+                        path = up.isEmpty ? "." : up
                         Task { await loadFiles(client) }
                     } label: {
                         Label("..", systemImage: "arrow.up")
@@ -264,7 +286,18 @@ struct CodePanelView: View {
                             if let host = connection.host { recents.record(next, for: host) }
                             Task { await loadFiles(client) }
                         } else {
-                            Task { openFile = try? await client.readFile(path: next) }
+                            Task {
+                                do {
+                                    openFile = try await client.readFile(path: next)
+                                } catch {
+                                    // The commonest refusal is the gateway's
+                                    // 413: over half a megabyte it declines the
+                                    // file outright. Swallowed, that was a tap
+                                    // that did nothing at all, with the sheet
+                                    // simply never appearing.
+                                    openProblem = "\(error)"
+                                }
+                            }
                         }
                     } label: {
                         Label(entry.name, systemImage: entry.dir ? "folder" : "doc.text")
@@ -279,7 +312,13 @@ struct CodePanelView: View {
 
     @ViewBuilder
     private var changesList: some View {
-        if let diff {
+        if let problem = diffProblem {
+            ContentUnavailableView {
+                Label("Couldn't read the changes", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(problem)
+            }
+        } else if let diff {
             if !diff.isRepo {
                 ContentUnavailableView {
                     Label("Not a git repository", systemImage: "arrow.triangle.branch")
@@ -346,7 +385,13 @@ struct CodePanelView: View {
 
     @ViewBuilder
     private var historyList: some View {
-        if let log {
+        if let problem = logProblem {
+            ContentUnavailableView {
+                Label("Couldn't read the history", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(problem)
+            }
+        } else if let log {
             if !log.isRepo {
                 ContentUnavailableView {
                     Label("Not a git repository", systemImage: "arrow.triangle.branch")
@@ -430,11 +475,21 @@ struct CodePanelView: View {
     }
 
     private func loadDiff(_ client: HookClient) async {
-        diff = try? await client.gitDiff(path: path)
+        do {
+            diff = try await client.gitDiff(path: path)
+            diffProblem = nil
+        } catch {
+            self.diffProblem = "\(error)"
+        }
     }
 
     private func loadLog(_ client: HookClient) async {
-        log = try? await client.gitLog(path: path)
+        do {
+            log = try await client.gitLog(path: path)
+            logProblem = nil
+        } catch {
+            self.logProblem = "\(error)"
+        }
     }
 }
 
