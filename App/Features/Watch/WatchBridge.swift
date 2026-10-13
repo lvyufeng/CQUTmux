@@ -90,6 +90,23 @@ extension WatchBridge: WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        apply(message)
+    }
+
+    /// The queued path, which the watch uses whenever the phone is out of
+    /// range. Same payload, different mailbox — and it has to be handled here
+    /// too: without this the watch showed the decision as taken and the phone
+    /// never heard it, so an approval given from the wrist while the phone was
+    /// away simply vanished.
+    ///
+    /// Delivery is on wake, which can be long after the approval came in. What
+    /// an id the host no longer knows means is the host's question, and it
+    /// answers it the same way for this path as for the live one.
+    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        apply(userInfo)
+    }
+
+    private func apply(_ message: [String: Any]) {
         guard let data = message[WatchPayload.decisionKey] as? Data,
               let decision = WatchPayload.decode(WatchPayload.Decision.self, from: data)
         else { return }
