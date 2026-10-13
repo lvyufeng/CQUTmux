@@ -55,8 +55,7 @@ final class CloudDictation {
     /// Stops recording and sends what was captured.
     func finish(endpoint: URL, token: String?, language: String?) {
         guard state == .recording else { return }
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
+        tearDown()
 
         let audio = queue.sync { () -> [Float] in
             let copy = samples
@@ -90,10 +89,33 @@ final class CloudDictation {
 
     func stop() {
         guard state.isBusy else { return }
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
+        tearDown()
         queue.sync { samples = [] }
         state = .idle
+    }
+
+    /// Stops capture and hands the microphone back.
+    ///
+    /// Deactivating is not bookkeeping. `begin()` activates the session as
+    /// `.record` with `.duckOthers`, and `.duckOthers` holds for as long as
+    /// the session is active — so an engine that never deactivates leaves
+    /// whatever the user was listening to ducked for the rest of the session,
+    /// long after the transcript arrived, and on the rejected-endpoint path
+    /// too. Nothing here plays audio, so the app itself never notices.
+    ///
+    /// The other two engines deactivate in their own teardown; this one was
+    /// the only place in the app that called `setActive(true)` and never
+    /// called `setActive(false)`. `scripts/audio-session-check.sh` now asserts
+    /// that pairing so the next engine cannot repeat it.
+    ///
+    /// Called before the samples are harvested, not after the upload: the
+    /// session has no part in sending and holding it for the length of a slow
+    /// request is the same bug with a smaller window.
+    private func tearDown() {
+        engine.stop()
+        engine.inputNode.removeTap(onBus: 0)
+        try? AVAudioSession.sharedInstance()
+            .setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     // MARK: - Capture
