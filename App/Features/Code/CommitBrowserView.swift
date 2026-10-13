@@ -77,13 +77,23 @@ struct CommitBrowserView: View {
         .task { await load() }
         .sheet(item: $openFile) { file in
             NavigationStack {
-                FileView(file: FileContents(path: file.file, size: file.size, content: file.content),
-                             font: fonts.codeFont(), spacing: fonts.lineSpacing)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { openFile = nil }
-                        }
+                FileView(
+                    file: FileContents(path: file.file, size: file.size, content: file.content),
+                    // The content came out of the commit's tree, so the blame
+                    // is taken at that commit: blaming the working tree here
+                    // would attribute lines of a file this viewer is not
+                    // showing, by a commit that may never have touched them.
+                    blame: BlameSource(
+                        client: client,
+                        request: .commit(rev: target.rev, root: root, file: file.file)
+                    ),
+                    font: fonts.codeFont(), spacing: fonts.lineSpacing
+                )
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { openFile = nil }
                     }
+                }
             }
         }
     }

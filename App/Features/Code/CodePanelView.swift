@@ -215,7 +215,14 @@ struct CodePanelView: View {
         }
         .sheet(item: $openFile) { (file: FileContents) in
             NavigationStack {
-                FileView(file: file, font: fonts.codeFont(), spacing: fonts.lineSpacing)
+                FileView(
+                    file: file,
+                    // The viewer shows the working-tree file, so the blame has
+                    // to be of the same thing: a revision would attribute lines
+                    // the user is not looking at.
+                    blame: BlameSource(client: client, request: .workingTree(file: file.path)),
+                    font: fonts.codeFont(), spacing: fonts.lineSpacing
+                )
             }
         }
         .sheet(item: $browse) { target in
@@ -564,46 +571,15 @@ private struct SideBySideRow: View {
     }
 }
 
-private struct DiffText: View {
-    let text: String
-    /// The terminal's own font, so the code being reviewed is set in the same
-    /// face as the code being written. A review that switches typeface is a
-    /// review where column alignment stops lining up with the terminal beside
-    /// it — and the user picked that font for a reason.
-    var font: UIFont = .monospacedSystemFont(ofSize: 11, weight: .regular)
-    var spacing: Double = 1
-
-    init(_ text: String, font: UIFont = .monospacedSystemFont(ofSize: 11, weight: .regular), spacing: Double = 1) {
-        self.text = text
-        self.font = font
-        self.spacing = spacing
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
-                Text(String(line).isEmpty ? " " : String(line))
-                    .font(Font(font))
-                    .lineSpacing(spacing)
-                    .foregroundStyle(color(for: String(line)))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private func color(for line: String) -> Color {
-        if line.hasPrefix("+") && !line.hasPrefix("+++") { return .green }
-        if line.hasPrefix("-") && !line.hasPrefix("---") { return .red }
-        if line.hasPrefix("@@") { return .cyan }
-        if line.hasPrefix("diff ") { return .secondary }
-        return .primary
-    }
-}
-
 /// Shared with the commit browser, which opens a file from a past
 /// revision in the same viewer as one from the working tree.
 struct FileView: View {
     let file: FileContents
+    /// Where this file's blame can be asked for. Absent when there is no
+    /// connection to ask over — the content is already in hand and still
+    /// readable, so the row loses its blame button rather than gaining one
+    /// that fails on the tap.
+    var blame: BlameSource?
     var font: UIFont = .monospacedSystemFont(ofSize: 11, weight: .regular)
     var spacing: Double = 1
 
@@ -616,6 +592,20 @@ struct FileView: View {
         }
         .navigationTitle((file.path as NSString).lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // A push rather than a sheet: a blame is the same file read a
+            // different way, and the back button is how you return to the
+            // lines it explains.
+            if let blame {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        BlameView(source: blame, font: font, spacing: spacing)
+                    } label: {
+                        Label("Blame", systemImage: "person.text.rectangle")
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -773,18 +763,6 @@ private struct FileDiffView: View {
         }
     }
 
-}
-
-/// The usual red/green tinting, in one place so the list and the file view
-/// cannot drift apart about what a `@@` looks like.
-private enum DiffPalette {
-    static func color(for line: String) -> Color {
-        if line.hasPrefix("+") && !line.hasPrefix("+++") { return .green }
-        if line.hasPrefix("-") && !line.hasPrefix("---") { return .red }
-        if line.hasPrefix("@@") { return .cyan }
-        if line.hasPrefix("diff ") { return .secondary }
-        return .primary
-    }
 }
 
 extension FileContents: Identifiable {
