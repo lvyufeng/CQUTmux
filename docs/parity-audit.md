@@ -72,7 +72,7 @@ Live Activity halves, and they no longer share one wall. The app side is now
 launches the app on a simulator with `CQUT_DEV_TEST_ACTIVITY=1` — the Settings
 test button's own code path, reached without a tap — and asserts that
 `Activity.request` returns `started` and that the widget extension is launched to
-render it (6 checks, two consecutive clean runs). That closes the "no tap has
+render it (7 checks, two consecutive clean runs). That closes the "no tap has
 been observed" half of the row and covers the Lock Screen Allow/Deny buttons'
 render path and the app obtaining and uploading both activity tokens.
 
@@ -214,10 +214,12 @@ has since been closed, with the check that pins it.
   body could be folded away with no way to open it. `promptText` renders the
   command (the same reading `AgentBlock.toolSummary` already gives the Chat
   view) and the toggle is gated on the clamp's own line count. Pinned by
-  `scripts/inbox-check.sh` (79 checks), including a fixture in the exact shape
-  the hook puts on the wire. The two sibling surfaces that announce a pending
-  approval — the Live Activity and the push notification text — still show the
-  title alone and are tracked separately.
+  `scripts/inbox-check.sh` (123 checks as of 2026-10-13 — it read 79 when this
+  was written; 81b9857 added the five category rows and e9d1bbc the `error`
+  category), including a fixture in the exact shape the hook puts on the wire.
+  The two sibling surfaces that announce a pending approval — the Live Activity
+  and the push notification text — still show the title alone and are tracked
+  separately.
 
 - **The Add-attachment sheet** — clipboard-only before; now offers Camera, Photo Library, Files and
   Clipboard, all feeding the existing annotate/upload path. The photo library uses `PHPickerViewController`
@@ -249,8 +251,10 @@ has since been closed, with the check that pins it.
   `reloadInputViews()` on the view that is *already* first responder (calling
   `becomeFirstResponder` alone would be a no-op there). Both are off by default
   and listed in `optInItems`, since Moshi's default bar has one documented
-  shape. `scripts/input-check.sh` (93 checks) pins the item, its label and the
-  reachability invariant; the button's own behaviour is not asserted on screen —
+  shape. `scripts/input-check.sh` (140 checks as of 2026-10-13 — it read 93 when
+  this was written, because a4ccc74 added the navigation and symbol rows
+  afterwards) pins the item, its label and the reachability invariant; the
+  button's own behaviour is not asserted on screen —
   the bar's position moves with the keyboard's frame, so a coordinate tap aimed
   at it misses, and the check says so rather than guessing a pixel.
 - **Custom-shortcut D-pad corners** — a fifth `CornerAction.custom` plus a
