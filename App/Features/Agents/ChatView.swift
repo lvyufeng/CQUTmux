@@ -293,35 +293,32 @@ struct ChatView: View {
 /// is shown whole, tinted, with the same `+`/`-` markers the tool cards use.
 private struct ChatDiffSheet: View {
     let changed: DiffResult
+    /// The diff split into classified rows once, when the sheet is built.
+    /// Not in `body`: the split is a pass over every line of the diff, and
+    /// `body` re-evaluates for reasons that have nothing to do with it.
+    private let lines: [DiffLineKind.Line]
     @Environment(\.dismiss) private var dismiss
+
+    init(changed: DiffResult) {
+        self.changed = changed
+        self.lines = DiffLineKind.lines(in: changed.diff)
+    }
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Changed files") {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    sectionHeader("Changed files")
                     ForEach(changed.files) { file in
-                        HStack(spacing: 8) {
-                            Text(file.status)
-                                .font(.system(.caption2, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(file.name).font(.callout)
-                                if !file.directory.isEmpty {
-                                    Text(file.directory)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
+                        fileRow(file)
+                    }
+                    if !lines.isEmpty {
+                        sectionHeader("Diff")
+                        diffRows
                     }
                 }
-                if !changed.diff.isEmpty {
-                    Section("Diff") {
-                        Text(changed.diff)
-                            .font(.system(.caption2, design: .monospaced))
-                            .textSelection(.enabled)
-                    }
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 10)
             }
             .navigationTitle("Changes")
             .navigationBarTitleDisplayMode(.inline)
@@ -330,6 +327,81 @@ private struct ChatDiffSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+    }
+
+    private func fileRow(_ file: DiffResult.File) -> some View {
+        HStack(spacing: 8) {
+            Text(file.status)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(file.name).font(.callout)
+                if !file.directory.isEmpty {
+                    Text(file.directory)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 5)
+    }
+
+    /// One row per line of the diff, tinted by `DiffLineKind`.
+    ///
+    /// Tinting line by line means the diff stops being one `Text`; it becomes
+    /// one per line, and those rows must not all be built for a diff nobody is
+    /// looking at. The whole diff arrives in one string (`git diff --no-color`,
+    /// up to the gateway's 8 MB buffer), so on a large working tree an eager
+    /// stack is tens of thousands of views. The `LazyVStack` builds only the
+    /// rows on screen, and it is the sheet's own scroll content because a lazy
+    /// stack nested in a `List` row has no scroll view of its own to be lazy
+    /// against.
+    private var diffRows: some View {
+        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+            // An empty line gets a space: `Text("")` lays out at no height, and
+            // two lines the diff keeps apart would draw as adjacent.
+            Text(line.text.isEmpty ? " " : line.text)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(tint(line.kind))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+        }
+        // On the rows as a group, not one line at a time: selection is the
+        // reason the diff is text at all — copying a hunk out of it — and a
+        // selection that could not leave the line it started in would not
+        // copy a hunk.
+        .textSelection(.enabled)
+    }
+
+    /// A section's title. The sheet used to borrow these from `List`; the diff
+    /// needs a lazy stack, so the sheet scrolls itself and draws its own.
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 6)
+    }
+
+    /// The usual diff tinting, in the one place the app draws a unified diff.
+    ///
+    /// Kept out of `DiffLineKind`: that file is compiled without SwiftUI by
+    /// `scripts/diffline-check.sh`, and a colour is a view's decision anyway.
+    /// Context stays `.primary` rather than being dimmed — the tint is what
+    /// separates the changed lines from their surroundings, and dimming the
+    /// surroundings too would leave nothing to separate them from.
+    private func tint(_ kind: DiffLineKind) -> Color {
+        switch kind {
+        case .added: .green
+        case .removed: .red
+        case .hunkHeader: .cyan
+        case .context: .primary
+        // Git's own bookkeeping, dimmed so it frames the change rather than
+        // competing with it.
+        case .metadata, .noNewline: .secondary
         }
     }
 }
