@@ -309,18 +309,23 @@ const claudeReader = {
 
 // MARK: - Codex
 //
-// UNVERIFIED: this reader is written from openai/codex's public source — the
-// `ResponseItem` and `RolloutItem` types in `codex-rs/protocol/src/models.rs`
-// and `codex-rs/history/src/rollout_payload.rs`, and the session layout in
-// `codex-rs/rollout/src/list.rs` — and has **not** been run against a real
-// rollout file. This machine has no `~/.codex/sessions` tree to test against,
-// so every field name below is a documented claim, not an observed one.
+// Written from openai/codex's public source — the `ResponseItem` and
+// `RolloutItem` types in `codex-rs/protocol/src/models.rs`, the rollout payload
+// in `codex-rs/history/src/rollout_payload.rs` and the session layout in
+// `codex-rs/rollout/src/list.rs` — and **verified against a capture** on
+// 2026-10-14: `scripts/transcript/codex-rollout.jsonl` is eight records of a
+// real Codex CLI 0.162.1 session, with `session_meta`'s `base_instructions`
+// removed and nothing else rewritten, read back through this parser by
+// `scripts/transcript-check.sh`. The capture is what says the source still
+// describes what the CLI writes.
 //
-// What would verify it: a real `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
-// captured from a Codex CLI run that used at least one tool, kept as a fixture
-// and fed through `parseTranscriptFor('codex', …)`. Until then this is
-// best-effort: a shape it does not recognise is dropped, and a tree that is not
-// there contributes nothing.
+// What it does *not* settle is the tail of the format: a shape neither the
+// source nor the capture shows is dropped rather than guessed at, and a project
+// whose session is older than `newest`'s scan reads as "no session" — the same
+// answer as an agent that never ran. One field is worth naming, because reading
+// the wrong one would look fine: real `reasoning` records carry a readable
+// `summary`, a `content` that is null, and an `encrypted_content` blob. Only
+// `summary` is read; the other two are not text a chat view can show.
 //
 // A rollout line is `{ timestamp, type, payload }`. The conversation lives in
 // lines whose `type` is `response_item`, and the item inside carries its own

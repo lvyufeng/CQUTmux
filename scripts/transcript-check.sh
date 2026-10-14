@@ -17,6 +17,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MOD="$ROOT/host/cqutmux-hook/transcript.mjs"
+FIXTURE="$ROOT/scripts/transcript/codex-rollout.jsonl"
 PASS=0
 
 ok() { PASS=$((PASS + 1)); printf 'PASS  %s\n' "$1"; }
@@ -24,7 +25,7 @@ fail() { printf 'FAIL  %s\n' "$1"; exit 1; }
 
 node --input-type=module -e "
 import { parseTranscript, parseTranscriptFor, agentIds, claudeProjectDir, readTranscript } from '$MOD'
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from 'fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -190,9 +191,10 @@ ok(parseTranscriptFor('codex', lines).length === 0,
 //
 // These fixtures are built from the documented shape — a rollout line of
 // '{ timestamp, type, payload }' whose 'type' is 'response_item' — and NOT from
-// a captured file. This machine has no ~/.codex/sessions tree, so these checks
-// prove the parser reads the shape it was written for, not that the shape is
-// what Codex actually writes. See the UNVERIFIED note in transcript.mjs.
+// a captured file. They prove the parser reads the shape it was written for,
+// and the cases a short capture does not happen to contain — an unknown item
+// type, an image input, a truncated tail. That the shape is what Codex really
+// writes is what the capture below settles.
 
 const codexLines = [
   JSON.stringify({ timestamp: '2026-01-01T00:00:00Z', type: 'session_meta',
@@ -257,6 +259,45 @@ ok(parseTranscriptFor('codex', 'not json').length === 0, 'garbage is dropped by 
 ok(parseTranscriptFor('codex', codexLines + '\n{\"type\":\"response').length === 5,
    'a truncated final Codex line still leaves the rest readable')
 
+// MARK: - The capture
+//
+// Everything above is the documented shape. This is the other half: a rollout
+// captured from a real '~/.codex/sessions' tree (Codex CLI 0.162.1, 2026-10-13),
+// trimmed to eight records and otherwise byte-exact. The one edit is the removal
+// of session_meta's 'base_instructions' — the agent's whole system prompt, which
+// is neither small nor portable — and nothing was rewritten. The reader carried
+// an UNVERIFIED note until this existed.
+//
+// What the capture settles is that the field names the parser keys on are the
+// ones Codex actually writes: reasoning summaries under 'summary', a tool's
+// arguments as a JSON *string*, the output paired by 'call_id', and three record
+// types that are not conversation at all.
+
+const captured = readFileSync('$FIXTURE', 'utf8')
+const real = parseTranscriptFor('codex', captured)
+
+ok(real.length === 6, 'the capture reads as six messages from eight records (got ' + real.length + ')')
+ok(real.map(m => m.role).join(',') === 'user,user,assistant,assistant,tool,assistant',
+   'and in the roles it holds (got ' + real.map(m => m.role).join(',') + ')')
+ok(real[0].blocks[0].kind === 'text' && real[0].blocks[0].text.startsWith('<environment_context>'),
+   'the environment context is the user speaking, verbatim')
+ok(real[1].blocks[0].text === '\u8bfb\u4e00\u4e0b\u4e4b\u524dclaude code\u7684\u5f00\u53d1\u8bb0\u5f55\uff0c\u7136\u540e\u7531\u4f60\u63a5\u624bAppFolder',
+   'and the real prompt survives byte for byte')
+ok(real[3].blocks[0].kind === 'tool' && real[3].blocks[0].name === 'exec_command',
+   'a captured exec_command is a tool block')
+ok(typeof real[3].blocks[0].input === 'string' && real[3].blocks[0].input.startsWith('{'),
+   'with its arguments still a JSON string, not an object')
+ok(JSON.parse(real[3].blocks[0].input).cmd === 'ls -la /Users/lvyufeng/Projects/AppFolder',
+   'and the command inside it is the one that ran')
+ok(real[4].blocks[0].kind === 'result' && real[4].blocks[0].id === real[3].blocks[0].id,
+   'the output is paired with the call by call_id')
+ok(real[5].blocks[0].kind === 'thinking' && real[5].blocks[0].text.startsWith('Let me look at the .claude'),
+   'and a captured reasoning summary is thinking, not the answer')
+ok(!real.some(m => JSON.stringify(m).includes('turn_token_usage')),
+   'a token_usage_record does not become a message')
+ok(!real.some(m => JSON.stringify(m).includes('base_instructions')),
+   'nor does the session_meta')
+
 // MARK: - Finding the right agent's log, on disk
 //
 // The registry has to choose *which* agent's session a directory is talking
@@ -313,6 +354,21 @@ try {
      'the newer Codex rollout wins and is named (got ' + codexPick.agent + ')')
   ok(codexPick.messages[0].blocks[0].text === 'from codex', 'with the Codex message')
   ok(codexPick.session === 'abcdef01', 'and the Codex session id from its filename (got ' + codexPick.session + ')')
+
+  // The capture, put where Codex would have written it, with the cwd its
+  // session_meta recorded. That path is only ever compared as a string — the
+  // reader never resolves it — so this holds on a machine that has no such
+  // directory, which is what makes a real capture usable as a fixture.
+  const capturedDir = join(home, '.codex', 'sessions', '2026', '10', '13')
+  mkdirSync(capturedDir, { recursive: true })
+  writeFileSync(join(capturedDir,
+    'rollout-2026-10-13T20-20-19-01a13534-df73-7390-a72f-1742ebc12973.jsonl'), captured)
+  const capturedPick = await readTranscript('/Users/lvyufeng/Projects/AppFolder', 200, home)
+  ok(capturedPick.found === true && capturedPick.agent === 'codex',
+     'the capture is found by the cwd its session_meta recorded (got ' + capturedPick.agent + ')')
+  ok(capturedPick.session === '01a13534',
+     'and named by its real filename\'s thread id (got ' + capturedPick.session + ')')
+  ok(capturedPick.total === 6, 'with all six of its messages (got ' + capturedPick.total + ')')
 
   // A Codex rollout whose recorded cwd is a different project must not be
   // offered as this directory's session — the cwd is the only project link.

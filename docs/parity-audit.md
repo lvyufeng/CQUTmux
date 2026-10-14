@@ -640,6 +640,26 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   `scripts/transcript-check.sh` gained the cases that ensure the gateway passes
   numeric usage through and drops a count that arrives as a string.
 
+- **The Codex transcript reader is verified against a capture, not only against
+  the source.** The reader was written from openai/codex's public types and
+  carried an explicit UNVERIFIED note, because the machine it was written on had
+  no `~/.codex/sessions` tree to try it on: every field name was a documented
+  claim, and the Chat view and the context ring were Claude-only in practice.
+  That tree now exists, so the note is retired the way the reader's own comment
+  asked for it — a real rollout captured as
+  `scripts/transcript/codex-rollout.jsonl` (eight records of a Codex CLI 0.162.1
+  session, with `session_meta`'s `base_instructions` removed and nothing else
+  rewritten) and fed back through `parseTranscriptFor('codex', …)`. The capture
+  settled the three things the source could only assert: reasoning summaries
+  arrive under `summary` while `content` is null and `encrypted_content` holds
+  the blob, a tool's arguments are a JSON **string** rather than an object, and
+  the rollout carries three record types — `session_meta`, `token_usage_record`,
+  `event_msg` — that are not conversation and must not become messages. It is
+  placed under a throwaway HOME in the check and found again by the cwd its own
+  `session_meta` recorded. `scripts/transcript-check.sh` went from 63 checks to
+  77; deleting `item.arguments ?? item.input` down to `item.input`, and reading
+  reasoning from `content` instead of `summary`, each turn the suite red.
+
 - **Native Windows hosts — the resolution decisions.** A gateway on Windows
   needs two things done differently, and both fail only on the platform nobody
   is looking at. `execFile('herdr', …)` never finds the installed `herdr.exe`
