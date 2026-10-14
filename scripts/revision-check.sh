@@ -16,6 +16,7 @@ trap 'rm -rf "$OUT"' EXIT
 
 swiftc -O -o "$OUT/check" \
   "$ROOT/App/Features/Code/RevisionTree.swift" \
+  "$ROOT/App/Features/Code/CommitStat.swift" \
   "$ROOT/scripts/revision/main.swift" 2>&1 | grep -v "^ *$" || true
 
 [[ -x "$OUT/check" ]] || { echo "REVISION_BUILD_FAIL"; exit 1; }

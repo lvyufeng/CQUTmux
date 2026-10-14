@@ -39,7 +39,7 @@ import {
   stateDir, parseStateDirectory, pageCarriesPreviewMarker, classifyListeners,
 } from './serve-sim.mjs'
 import { renderDiffHtml } from './diffpage.mjs'
-import { listAtRevision, readAtRevision, blameAtRevision, isSafeRepoPath } from './revision.mjs'
+import { listAtRevision, readAtRevision, blameAtRevision, gitLog, isSafeRepoPath } from './revision.mjs'
 import { detectContext, sessionIndexFromTmux, contextPayload } from './context.mjs'
 import {
   apply as applyLocale,
@@ -479,40 +479,6 @@ async function gitDiff(cwd, extra = []) {
       }
     }
     return { isRepo: false, files: [], diff: '' }
-  }
-}
-
-// Recent commits for a repo, plus whether a commit's diff is available. The
-// separator is a NUL-ish sentinel chosen not to appear in normal subjects.
-async function gitLog(cwd, limit = 40) {
-  const fmt = ['%H', '%h', '%an', '%aI', '%s', '%D'].join('%x1f')
-  try {
-    const { stdout } = await run(
-      'git',
-      ['log', `-n${Math.max(1, Math.min(200, limit))}`, `--pretty=format:${fmt}`],
-      { cwd, maxBuffer: 4 * 1024 * 1024 }
-    )
-    const commits = stdout
-      .split('\n')
-      .filter(Boolean)
-      .map(line => {
-        const [hash, short, author, date, subject, refs] = line.split('\x1f')
-        return { hash, short, author, date, subject, refs: refs || '' }
-      })
-    return { isRepo: true, commits }
-  } catch (error) {
-    // Same distinction as the diff above: a missing repository and a history
-    // too long to read are not the same answer, and only one of them means
-    // "there is nothing here".
-    if (error && (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
-                  || /maxBuffer|stdout maxBuffer/i.test(String(error.message)))) {
-      return {
-        isRepo: true,
-        commits: [],
-        error: `this history is larger than the ${Math.round(4 * 1024 * 1024 / (1024 * 1024))} MB the host will read`,
-      }
-    }
-    return { isRepo: false, commits: [] }
   }
 }
 

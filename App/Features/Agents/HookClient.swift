@@ -951,9 +951,21 @@ struct LogResult: Codable {
         var date: String
         var subject: String
         var refs: String
+        /// What the commit changed, as the host reports it. Absent from a host
+        /// that predates the field, and from a merge commit, which git prints
+        /// no `--shortstat` line for.
+        var files: Int?
+        var insertions: Int?
+        var deletions: Int?
         var id: String { hash }
 
         var dateValue: Date? { ISODate.parse(date) }
+
+        /// The row's one-line summary of the change, or nil when git reported
+        /// no diffstat. See `CommitStat` for why absent is not zero.
+        var stat: CommitStat? {
+            CommitStat(files: files, insertions: insertions, deletions: deletions)
+        }
     }
     var isRepo: Bool
     var commits: [Commit]

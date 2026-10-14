@@ -418,6 +418,28 @@ struct CodePanelView: View {
                                 Text(commit.author).font(.caption2).foregroundStyle(.secondary)
                                 Text(relative(commit.dateValue)).font(.caption2).foregroundStyle(.secondary)
                             }
+                            // What the commit changed. A row that named only
+                            // the subject left the reader opening commits one
+                            // by one to find the one that touched the file they
+                            // care about. Absent for a merge, which git prints
+                            // no diffstat for — see `CommitStat`.
+                            if let stat = commit.stat {
+                                HStack(spacing: 5) {
+                                    Text(stat.filesLabel)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    if let added = stat.insertionsLabel {
+                                        Text(added)
+                                            .font(.system(.caption2, design: .monospaced))
+                                            .foregroundStyle(.green)
+                                    }
+                                    if let removed = stat.deletionsLabel {
+                                        Text(removed)
+                                            .font(.system(.caption2, design: .monospaced))
+                                            .foregroundStyle(.red)
+                                    }
+                                }
+                            }
                             if !commit.refs.isEmpty {
                                 Text(commit.refs.replacingOccurrences(of: "HEAD -> ", with: ""))
                                     .font(.caption2)

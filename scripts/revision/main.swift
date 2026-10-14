@@ -119,6 +119,37 @@ let root = """
 check(try! JSONDecoder().decode(RevisionListing.self, from: Data(root.utf8)).entries.isEmpty,
       "an empty root listing decodes")
 
+// MARK: - What a commit changed
+
+// The History row annotates a commit with its diffstat. The rule that fails
+// silently is the *absent* one: git prints no `--shortstat` line for a merge, so
+// those commits arrive with no counts, and reading absence as zero puts
+// "0 files" on every merge — a claim git never made, on the rows least likely to
+// have been checked by hand.
+check(CommitStat(files: nil, insertions: nil, deletions: nil) == nil,
+      "a commit git did not diff has no summary at all")
+check(CommitStat(files: nil, insertions: 0, deletions: 0) == nil,
+      "and neither does one missing only its file count")
+
+let one = CommitStat(files: 1, insertions: 1, deletions: nil)
+check(one?.filesLabel == "1 file", "one file is singular")
+check(one?.insertionsLabel == "+1", "and its one added line is shown")
+check(one?.deletionsLabel == nil, "with nothing said about deletions it has none of")
+
+let many = CommitStat(files: 3, insertions: 12, deletions: 3)
+check(many?.filesLabel == "3 files", "three files is plural")
+check(many?.insertionsLabel == "+12" && many?.deletionsLabel == "-3",
+      "and both counts are shown with their signs")
+
+// A commit that only deletes has no insertions clause, and one that only adds
+// has no deletions clause. `+0` is not a smaller version of "+12": it is a
+// statement about the diff, and the row is narrower without it.
+let removedOnly = CommitStat(files: 2, insertions: 0, deletions: 7)
+check(removedOnly?.insertionsLabel == nil, "a pure deletion shows no +0")
+check(removedOnly?.deletionsLabel == "-7", "and shows the lines it removed")
+check(CommitStat(files: 1, insertions: nil, deletions: nil)?.insertionsLabel == nil,
+      "counts git omitted entirely read as zero, not as a crash")
+
 if failures > 0 {
     print("\nREVISION_FAIL  (\(failures) of \(checks) failed)")
     exit(1)

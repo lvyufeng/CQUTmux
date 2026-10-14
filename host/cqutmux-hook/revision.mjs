@@ -317,3 +317,111 @@ export async function blameAtRevision(cwd, rev, path, limit = 512 * 1024) {
     return { ok: false, error: String(error.stderr || error.message || error).trim().slice(0, 300) }
   }
 }
+
+// The History tab's commit list. It reads `%D` (the refs) as well as the
+// obvious fields, and asks for `--shortstat` alongside them, because a row that
+// names a commit's subject and nothing about the change asks the reader to open
+// every one to find the interesting one.
+const LOG_FORMAT = ['%H', '%h', '%an', '%aI', '%s', '%D'].join('%x1f')
+
+/** The arguments for listing a repository's recent commits. */
+export function logArgs(limit = 40) {
+  const n = Math.max(1, Math.min(200, Number(limit) || 40))
+  return ['log', `-n${n}`, `--pretty=format:${LOG_FORMAT}`, '--shortstat']
+}
+
+/**
+ * `--shortstat`'s own line as counts — ` 2 files changed, 3 insertions(+), 1
+ * deletion(-)` — or null for a line that carries no counts.
+ *
+ * Each clause is optional. A commit that only adds files has no deletions
+ * clause and one that only deletes has no insertions clause, so a parser that
+ * reads a fixed pair of numbers off the line reports a missing count as zero.
+ * Zero is right here by luck; it stops being right the moment git prints the
+ * clauses in the other order, which is why each is looked up by name.
+ */
+export function parseShortStat(line) {
+  const text = String(line || '')
+  // Every stat line contains this clause, and a line without it is not one —
+  // returning counts for it would annotate a commit with numbers nobody
+  // measured.
+  const files = /(\d+) files? changed/.exec(text)
+  if (!files) return null
+  const count = pattern => {
+    const match = new RegExp(pattern).exec(text)
+    return match ? Number(match[1]) : 0
+  }
+  return {
+    files: Number(files[1]),
+    insertions: count('(\\d+) insertions?\\(\\+\\)'),
+    deletions: count('(\\d+) deletions?\\(-\\)'),
+  }
+}
+
+/**
+ * `git log --pretty=format:… --shortstat` as commits.
+ *
+ * A commit's line is the one carrying the `\x1f` separators; the stat line
+ * below it does not, which is what tells them apart — and it matters that the
+ * test is the separator rather than a leading space, because git's stat line
+ * begins with one and a subject is free to as well.
+ *
+ * A merge commit gets **no** stat line at all. That is the case this exists to
+ * keep apart from "changed nothing": assigning it zeros would put `0 files` on
+ * every merge in the list, which is a claim git never made. Absent counts stay
+ * absent, and the app draws no summary for them.
+ */
+export function parseLog(stdout) {
+  const commits = []
+  for (const line of String(stdout || '').split('\n')) {
+    if (!line) continue
+    if (!line.includes('\x1f')) {
+      const stat = parseShortStat(line)
+      if (stat && commits.length) Object.assign(commits[commits.length - 1], stat)
+      continue
+    }
+    const [hash, short, author, date, subject, refs] = line.split('\x1f')
+    commits.push({ hash, short, author, date, subject, refs: refs || '' })
+  }
+  return commits
+}
+
+/**
+ * Recent commits for a repo, each annotated with what it changed.
+ *
+ * A missing repository and a history too large to read are not the same answer,
+ * and only one of them means "there is nothing here" — the same distinction the
+ * diff above draws, for the same reason.
+ */
+export async function gitLog(cwd, limit = 40) {
+  try {
+    const { stdout } = await exec('git', logArgs(limit), { cwd, maxBuffer: 4 * 1024 * 1024 })
+    return { isRepo: true, commits: parseLog(stdout) }
+  } catch (error) {
+    if (error && (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+                  || /maxBuffer|stdout maxBuffer/i.test(String(error.message)))) {
+      return {
+        isRepo: true,
+        commits: [],
+        error: `this history is larger than the ${Math.round(4 * 1024 * 1024 / (1024 * 1024))} MB the host will read`,
+      }
+    }
+    // A repository on a branch with no commits yet fails `git log` exactly as a
+    // directory that is not a repository does, and the two are not the same
+    // answer: one draws "No commits", the other draws "not under version
+    // control" — the answer that tells the user to stop looking. Asking git
+    // which of the two it is beats matching the message, which is translated.
+    if (await isRepository(cwd)) return { isRepo: true, commits: [] }
+    return { isRepo: false, commits: [] }
+  }
+}
+
+/** Whether git resolves this directory to a repository at all. */
+async function isRepository(cwd) {
+  try {
+    await exec('git', ['rev-parse', '--git-dir'], { cwd })
+    return true
+  } catch {
+    return false
+  }
+}

@@ -181,6 +181,14 @@ backend; this project deliberately does not.
 
 ## Honest work still to do (not structural)
 
+The list below is the state **as found on 2026-10-09**, kept because the
+progress list that follows is written against it. Most of it has closed since —
+the diff viewer's four items, the herdr prefix, the command-history key, the
+dictation language picker and auto-send, Rosé Pine Dawn, the bundled fonts and
+the theme gallery, the hook subcommands, the Windows probe — so read the
+closures below and `parity-audit.json`'s counters before treating a line here as
+current.
+
 These are ordinary features that simply have not been built:
 
 - Agent coverage: only Claude Code is wired; Moshi documents ~18 agents.
@@ -1020,7 +1028,9 @@ locale rc injection, `.ttc`/`.otc` handling, the tool cards' mini diffs and task
 lists — are in the commit history and the progress list above. Three more went
 in the same day: the attachment chooser and the mic in chat mode's composer, and
 the character-level span inside a changed line, which leaves the bullet about
-the side-by-side pane with nothing to say.
+the side-by-side pane with nothing to say. One more closed on 2026-10-14 — the
+commit list's own annotation, the last named part of the browse entry — and the
+bullet below now records the closure instead of a gap.
 
 - The Browse tab has syntax highlighting (`FileView` →
   `SyntaxPalette.attributed` → `SyntaxHighlighter`) and can open a file from a
@@ -1033,10 +1043,17 @@ the side-by-side pane with nothing to say.
   revision, or the lines would be attributed to a version the user is not
   looking at), and a Blame button pushes `BlameView` instead of presenting it,
   because a blame is the same file read a second way and pushing leaves the file
-  behind it reachable. What is still plain is the *commit* list: a row carries
-  subject, short hash, author, date and refs and opens `CommitBrowserView` at
-  that revision, but nothing annotates it with what the commit changed. That is
-  the part of the gap left — not the wire, and no longer the file viewer.
+  behind it reachable. The *commit* list was the last part still plain — a row
+  carried subject, short hash, author, date and refs and opened
+  `CommitBrowserView` at that revision, but nothing said what the commit
+  changed — and it now carries the commit's diffstat: `revision.mjs`'s `gitLog`
+  asks for `--shortstat`, `parseLog` attaches each stat line to the commit above
+  it, and `CommitStat` renders it in the row. A merge, for which git prints no
+  stat line at all, gets **no** summary rather than `0 files`, because those are
+  different answers and only one of them is real. Pinned by
+  `scripts/log-check.sh` (24 checks), which drives a real repository through
+  real git rather than a typed copy of git's output, and by ten new checks in
+  `scripts/revision-check.sh` (41) for the Swift side.
 - The Live Activity carries the four lifecycle phases — approval needed,
   working, done and session ended — and the Lock Screen and the Island carry
   Allow/Deny buttons, so the answer no longer has to be given in the app:
