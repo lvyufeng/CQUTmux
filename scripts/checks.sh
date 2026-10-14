@@ -25,6 +25,13 @@ SKIP=(
   scripts/tab-row-check.sh
 )
 
+# The one check that cannot run inside the loop: half of it holds the counts
+# quoted in docs/parity-audit.json against the counts this run printed, so it
+# has to start after every other check has finished. It is excluded from the
+# loop by name here — deliberately, and visibly — and run once below, where its
+# result joins the summary like any other pass.
+AUDIT_CHECK=scripts/audit-check.sh
+
 skip_for() {
   local want="$1" s
   for s in "${SKIP[@]}"; do [[ "$s" == "$want" ]] && return 0; done
@@ -43,6 +50,12 @@ skipped=0
 failed_names=()
 declare -a results=()
 declare -a failed_output=()
+
+# What each check printed as its own count, for the audit check to compare the
+# numbers docs/parity-audit.json quotes against. Two checks print no count
+# (toolbar-check.sh, watch-complication-check.sh); they simply have no line here.
+COUNTS="$(mktemp)"
+trap 'rm -f "$COUNTS"' EXIT
 
 # Sorted so the output is stable and diffable between runs.
 while IFS= read -r script; do
@@ -63,9 +76,15 @@ while IFS= read -r script; do
   if (( rc == 0 )); then
     pass=$((pass + 1))
     # Each check prints its own "<AREA>_PASS (N checks)" line; keep it so the
-    # summary carries the check counts, not just a tick.
-    last="$(printf '%s\n' "$out" | grep -E '_PASS' | tail -1)"
+    # summary carries the check counts, not just a tick. The last line that
+    # *carries* a count rather than simply the last line: locale-check.sh prints
+    # its count from the node half and then a plain verdict from the shell half,
+    # and a check whose count exists should not read as one that has none.
+    last="$(printf '%s\n' "$out" | grep -E '_PASS.*\([0-9]+ checks?\)' | tail -1)"
+    [[ -n "$last" ]] || last="$(printf '%s\n' "$out" | grep -E '_PASS' | tail -1)"
     results+=("ok    $name  ${last:-}")
+    count="$(printf '%s\n' "$last" | grep -oE '\([0-9]+ checks?\)' | tail -1 | grep -oE '[0-9]+' || true)"
+    [[ -n "$count" ]] && printf '%s %s\n' "$name" "$count" >> "$COUNTS"
   else
     fail=$((fail + 1))
     failed_names+=("$name")
@@ -73,7 +92,21 @@ while IFS= read -r script; do
     failed_output+=("$(printf '%s\n' "$name (exit $rc)" \
       "$(printf '%s\n' "$out" | tail -n "$FAIL_LINES")")")
   fi
-done < <(ls scripts/*-check.sh | sort)
+done < <(ls scripts/*-check.sh | grep -v "^$AUDIT_CHECK$" | sort)
+
+# Last, with what the run above measured.
+audit_out=""
+if audit_out="$(bash "$AUDIT_CHECK" --observed "$COUNTS" 2>&1)"; then
+  pass=$((pass + 1))
+  results+=("ok    ${AUDIT_CHECK#scripts/}  $(printf '%s\n' "$audit_out" | grep -E '_PASS' | tail -1)")
+else
+  rc=$?
+  fail=$((fail + 1))
+  failed_names+=("${AUDIT_CHECK#scripts/}")
+  results+=("FAIL  ${AUDIT_CHECK#scripts/}  (exit $rc)")
+  failed_output+=("$(printf '%s\n' "${AUDIT_CHECK#scripts/} (exit $rc)" \
+    "$(printf '%s\n' "$audit_out" | tail -n "$FAIL_LINES")")")
+fi
 
 printf '%s\n' "${results[@]}"
 echo

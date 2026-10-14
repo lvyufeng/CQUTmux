@@ -1023,6 +1023,37 @@ immediately. Moshi's own hook-settings docs imply the same for its daemon.
   `scripts/context-check.sh` (32 checks) runs plain node; checking tmux before
   zellij reddens the 3 nested cases.
 
+## The numbers in this file are checked (2026-10-14)
+
+Everything above asks to be believed by someone who cannot re-run the work, and
+the file has been wrong in ways nothing caught: the status table read 73 while
+the JSON beside it read 78; a `verification` field described the opposite of its
+own `evidence`; a count quoted from a past run — `revision-check.sh`, written as 31
+checks — outlived the check's growth to 41, *including inside the sentence claiming that
+field had been updated*. Those are all numbers, which is to say they are all
+checkable, so they are now checked.
+
+`scripts/audit-check.sh` recomputes the counters from the entries, holds the
+table above to them, requires every entry to carry a claim, evidence and a
+verification in the known status vocabulary, insists that every
+`scripts/*-check.sh` this file names still exists, refuses a script cited at two
+different counts, and — given the counts the suite just printed, which is how
+`scripts/checks.sh` runs it, last — holds every quoted count to the count its
+check actually prints. It parses the *committed* blob as well as the working
+tree, because a tree can be repaired after the commit that broke it, which is how
+a broken JSON reached `master` once.
+
+Running it the first time found three of those four. Five entries (76–80, the
+ones moved from `refuted` to `closed` on 2026-10-11) had no `verification` field
+at all — only `evidence` was written when they moved, and `verification` is the
+field this file tells a reader to trust. Entry 57's evidence still quoted the
+pre-fix count. And `locale-check.sh`'s number was being dropped by the runner:
+the check prints `LOCALE_PASS (45 checks)` from its node half and a bare
+`LOCALE_PASS` from its shell half, and `checks.sh` kept the last line rather than
+the last line carrying a count. 24 of the 25 counts this file quotes are compared
+on a full run; the 25th is `simulator-touch-check.sh`, which the suite skips
+because it needs a simulator.
+
 ### The open list, grouped by what is actually missing
 
 A second independent pass on 2026-10-10 rewrote each of these with file:line
