@@ -41,6 +41,14 @@ targets:
       path: Widgets/Info.plist
       properties:
         CFBundleDisplayName: CQUTmux
+        # XcodeGen's default for an extension plist is a hardcoded "1.0", which
+        # is not the app's version and cannot be changed from the plist it
+        # generates. The app target reads these from the build settings above;
+        # an extension that does not makes the bundle fail validation with
+        # "CFBundleShortVersionString of an app extension must match that of
+        # its containing parent app".
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
@@ -64,6 +72,8 @@ targets:
       path: WatchWidgets/Info.plist
       properties:
         CFBundleDisplayName: CQUTmux
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
@@ -92,6 +102,8 @@ targets:
       path: Watch/Info.plist
       properties:
         CFBundleDisplayName: CQUTmux
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         WKApplication: true
         # Not an INFOPLIST_KEY_* setting — that route only covers a whitelist of
         # keys, and this one isn't on it. Without it the watch never pairs.
